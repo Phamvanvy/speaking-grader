@@ -18,5 +18,12 @@
     "type": "express_opinion",
     "prompt": "Do you think working from home is more beneficial than working in an office? Give reasons and examples to support your opinion.",
     "expected_duration_sec": 60
+  },
+  {
+    "id": "q1_1_read_aloud",
+    "type": "read_aloud",
+    "prompt": "Read the text aloud.",
+    "reference_script": "Are you a global company needing to deal with many foreign currencies? Do you find your bank's exchange rates too low and their service fees too high? Then take your business to RapidExchange. We're satisfied on your foreign exchange requirements with our one-to-one service combined with our always available online web page that includes instant rate quotes. We even pick up and deliver your checks and drafts. Give us a call today.",
+    "expected_duration_sec": 45
   }
 ]

@@ -75,6 +75,52 @@ py -m src.main --audio data/audio/sample.wav --question q1_read_aloud --no-ai
 
 Kết quả lưu ở `outputs/<audio>__<question>.json`, log ở `logs/app.log`.
 
+## Dùng qua API (HTTP)
+
+Cùng pipeline nhưng nhận đầu vào trực tiếp (không cần ngân hàng câu hỏi). Lõi
+dùng chung nằm ở [src/core.py](src/core.py) · `grade_response()`; lớp HTTP ở
+[src/api.py](src/api.py).
+
+```bash
+pip install -r requirements.txt   # đã gồm fastapi/uvicorn/python-multipart
+uvicorn src.api:app --reload --port 8000
+# Swagger UI tự sinh: http://localhost:8000/docs
+```
+
+`POST /grade` (multipart/form-data):
+
+| Field | Bắt buộc | Ý nghĩa |
+|-------|----------|---------|
+| `audio` | ✅ | File ghi âm (.wav/.mp3/.m4a/.ogg/.flac/.webm/.aac) |
+| `text` | — | Script tham chiếu → chấm **Read Aloud** (so transcript, ra WER/coverage) |
+| `image` | — | Ảnh đề bài → chấm **Describe Picture** (gửi LLM dạng vision) |
+| `expected_duration_sec` | — | Thời lượng kỳ vọng (giây) — vào `reading_pace` + gating |
+| `question_type` | — | Ép dạng câu (`read_aloud`/`describe_picture`/...) thay vì suy từ text/image |
+| `feedback_lang` | — | Ngôn ngữ nhận xét (vd `vi`, `en`) |
+| `prompt` | — | Đề bài hiển thị cho thí sinh |
+| `no_ai` | — | `true` = chỉ ASR + features, bỏ LLM |
+
+Quy ước: truyền **`text`** (đọc to) **hoặc** **`image`** (tả tranh), không phải
+cả hai (trừ khi tự chỉ định `question_type`).
+
+```bash
+# Read Aloud: so audio với text
+curl -X POST http://localhost:8000/grade \
+  -F audio=@data/audio/sample.wav \
+  -F text="The weather is nice today." \
+  -F expected_duration_sec=12
+
+# Describe Picture: so audio với ảnh
+curl -X POST http://localhost:8000/grade \
+  -F audio=@answer.m4a \
+  -F image=@picture.jpg
+```
+
+> Chấm **ảnh** cần backend có thị giác: Claude (`TOEIC_BACKEND=anthropic`, đặt
+> `ANTHROPIC_API_KEY`) hoặc model local vision (vd Qwen-VL qua llama.cpp).
+> Trả về JSON `{question_type, transcript, features, scores}` (scores = `null`
+> khi `no_ai` hoặc audio rỗng).
+
 ## Cấu hình (.env)
 
 | Biến | Mặc định | Ý nghĩa |

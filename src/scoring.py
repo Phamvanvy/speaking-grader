@@ -97,6 +97,7 @@ def _build_user_prompt(
     transcription: Transcription,
     features: Features,
     gating: GatingResult,
+    has_image: bool = False,
 ) -> str:
     payload = {
         "task_prompt": prompt_text,
@@ -110,9 +111,19 @@ def _build_user_prompt(
             "fail_reference_match": gating.fail_reference_match,
         },
     }
+    image_note = (
+        "An IMAGE of the picture the test-taker was asked to describe is attached "
+        "to this message. Judge whether the spoken transcript accurately and "
+        "completely describes what is actually in the picture (objects, people, "
+        "actions, setting). A description that does not match the picture must "
+        "lower content_relevance / relevance.\n\n"
+        if has_image
+        else ""
+    )
     return (
         "Score the following TOEIC Speaking response. All numeric metrics are "
         "pre-computed and objective.\n\n"
+        + image_note
         + json.dumps(payload, ensure_ascii=False, indent=2)
     )
 
@@ -125,20 +136,40 @@ def score(
     transcription: Transcription,
     features: Features,
     gating: GatingResult,
+    image_b64: str | None = None,
+    image_media_type: str | None = None,
 ) -> SpeakingResult:
-    """Gọi LLM (Claude hoặc model local) và trả về SpeakingResult."""
+    """Gọi LLM (Claude hoặc model local) và trả về SpeakingResult.
+
+    image_b64/image_media_type: ảnh đề bài (vd Describe Picture) gửi kèm dạng
+    vision. Cả hai backend đều hỗ trợ; bỏ trống nếu không có ảnh.
+    """
     system_prompt = _build_system_prompt(qt, config.feedback_lang)
     user_prompt = _build_user_prompt(
-        qt, prompt_text, reference_script, transcription, features, gating
+        qt,
+        prompt_text,
+        reference_script,
+        transcription,
+        features,
+        gating,
+        has_image=bool(image_b64),
     )
 
     if config.is_local:
-        return _score_local(config, system_prompt, user_prompt)
-    return _score_anthropic(config, system_prompt, user_prompt)
+        return _score_local(
+            config, system_prompt, user_prompt, image_b64, image_media_type
+        )
+    return _score_anthropic(
+        config, system_prompt, user_prompt, image_b64, image_media_type
+    )
 
 
 def _score_anthropic(
-    config: Config, system_prompt: str, user_prompt: str
+    config: Config,
+    system_prompt: str,
+    user_prompt: str,
+    image_b64: str | None = None,
+    image_media_type: str | None = None,
 ) -> SpeakingResult:
     if not config.has_api_key:
         raise RuntimeError(
@@ -151,13 +182,30 @@ def _score_anthropic(
 
     client = anthropic.Anthropic(api_key=config.anthropic_api_key)
 
+    # Không có ảnh → giữ nguyên content dạng chuỗi (hành vi cũ). Có ảnh → khối
+    # image (base64) đứng trước, rồi khối text để Claude nhìn tranh trước khi đọc.
+    if image_b64:
+        content: object = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image_media_type or "image/jpeg",
+                    "data": image_b64,
+                },
+            },
+            {"type": "text", "text": user_prompt},
+        ]
+    else:
+        content = user_prompt
+
     t0 = time.monotonic()
     response = client.messages.parse(
         model=config.model,
         max_tokens=4096,
         thinking={"type": "adaptive"},
         system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
+        messages=[{"role": "user", "content": content}],
         output_format=SpeakingResult,
     )
     latency = time.monotonic() - t0
@@ -183,7 +231,11 @@ def _score_anthropic(
 
 
 def _score_local(
-    config: Config, system_prompt: str, user_prompt: str
+    config: Config,
+    system_prompt: str,
+    user_prompt: str,
+    image_b64: str | None = None,
+    image_media_type: str | None = None,
 ) -> SpeakingResult:
     """Chấm bằng model local qua API OpenAI-compatible (vd llama.cpp server).
 
@@ -200,6 +252,17 @@ def _score_local(
 
     client = OpenAI(base_url=config.local_base_url, api_key=config.local_api_key)
 
+    # Định dạng vision OpenAI-compatible: data URI base64. Cần model local có
+    # thị giác (vd Qwen2.5-VL); model thuần text sẽ bỏ qua/lỗi khối ảnh.
+    if image_b64:
+        data_uri = f"data:{image_media_type or 'image/jpeg'};base64,{image_b64}"
+        user_content: object = [
+            {"type": "image_url", "image_url": {"url": data_uri}},
+            {"type": "text", "text": user_prompt},
+        ]
+    else:
+        user_content = user_prompt
+
     t0 = time.monotonic()
     response = client.chat.completions.create(
         model=config.local_model,
@@ -207,7 +270,7 @@ def _score_local(
         temperature=0,
         messages=[
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": user_content},
         ],
         response_format={
             "type": "json_schema",
