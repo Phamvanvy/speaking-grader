@@ -1,0 +1,22 @@
+[
+  {
+    "id": "q1_read_aloud",
+    "type": "read_aloud",
+    "prompt": "Read the text aloud.",
+    "reference_script": "Thank you for calling Sunrise Electronics. Our store hours are nine in the morning to eight in the evening, Monday through Saturday. For information about repairs, warranties, or returns, please visit our website or stay on the line to speak with a representative.",
+    "expected_duration_sec": 45
+  },
+  {
+    "id": "q2_read_aloud",
+    "type": "read_aloud",
+    "prompt": "Read the text aloud.",
+    "reference_script": "Good evening, and welcome to tonight's community meeting. Before we begin, I would like to remind everyone to silence their phones. We have several important topics to discuss, including the new park project and the upcoming summer festival.",
+    "expected_duration_sec": 45
+  },
+  {
+    "id": "q11_opinion_remote_work",
+    "type": "express_opinion",
+    "prompt": "Do you think working from home is more beneficial than working in an office? Give reasons and examples to support your opinion.",
+    "expected_duration_sec": 60
+  }
+]
