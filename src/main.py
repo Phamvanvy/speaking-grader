@@ -54,12 +54,14 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("%s", e)
         return 2
 
+    active_model = config.local_model if config.is_local else config.model
     logger.info(
-        "Bắt đầu | audio=%s | question=%s | type=%s | model=%s | no_ai=%s",
+        "Bắt đầu | audio=%s | question=%s | type=%s | backend=%s | model=%s | no_ai=%s",
         audio_path,
         question.id,
         question.type,
-        config.model,
+        config.backend,
+        active_model,
         args.no_ai,
     )
 
@@ -72,12 +74,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # [2] Features
     feats = features_mod.extract_features(
-        transcription, reference_script=question.reference_script
+        transcription,
+        reference_script=question.reference_script,
+        expected_duration_sec=question.expected_duration_sec,
     )
 
     # [3] Gating
     gate = gating.evaluate(
-        transcription, feats, expected_duration_sec=question.expected_duration_sec
+        transcription,
+        feats,
+        expected_duration_sec=question.expected_duration_sec,
+        question_type=qt,
     )
     for reason in gate.reasons:
         logger.info("Gating: %s", reason)

@@ -19,11 +19,42 @@ from .config import FEATURES_VERSION
 # Ngưỡng coi là một quãng ngắt (giây) giữa hai từ liên tiếp.
 PAUSE_THRESHOLD_SEC = 0.3
 
+# Số word_issues tối đa nạp vào kết quả (tránh payload khổng lồ khi đọc nhầm
+# hẳn đoạn — trường hợp đó coverage đã thấp và gating đã cờ fail). Với bài đọc
+# bình thường vài lỗi thì danh sách rất ngắn nên ngưỡng này gần như không chạm.
+MAX_WORD_ISSUES = 50
+
 # Danh sách từ đệm/ấp úng thường gặp.
 FILLER_WORDS = {
     "um", "uh", "er", "ah", "erm", "hmm", "mhm",
     "like", "yeah", "you know", "i mean", "sort of", "kind of",
 }
+
+
+@dataclass
+class ReadingPace:
+    """Nhịp đọc so với thời lượng tham chiếu của câu hỏi.
+
+    KHÔNG dùng cho gating/task_completion (đọc nhanh mà đủ vẫn hoàn thành).
+    Chỉ là bằng chứng PHỤ cho intonation/rhythm + dữ liệu phân tích/feedback.
+    """
+    actual_duration_sec: float       # = speaking_duration_sec
+    expected_duration_sec: float
+    pace_ratio: float                # actual / expected; <1 = đọc nhanh hơn
+
+
+@dataclass
+class WordIssue:
+    """Một điểm lệch giữa script và transcript ASR ở cấp độ TỪ.
+
+    KHÔNG phải kết luận phát âm — đây chỉ là chỗ ASR nghe khác script. Một
+    substitution như expected='morning' / recognized='warning' chỉ NÓI LÊN rằng
+    Whisper nghe ra từ khác, có thể do phát âm chưa rõ HOẶC do nhiễu/giọng/ASR.
+    Vì vậy nó được nạp cho LLM dưới dạng "chỗ nên review", không phải lỗi chắc chắn.
+    """
+    issue_type: str            # "substitution" | "insertion" | "deletion"
+    expected: str | None       # từ trong script (None nếu insertion)
+    recognized: str | None     # từ ASR nghe được (None nếu deletion)
 
 
 @dataclass
@@ -35,6 +66,13 @@ class AccuracyMetrics:
     deletions: int
     hits: int
     reference_word_count: int
+    # Tỉ lệ từ trong script được đọc trúng (hits / reference_word_count).
+    # Với Read Aloud, coverage quan trọng hơn WER để xác định hoàn thành:
+    # coverage thấp = đọc nhầm đoạn / thiếu phần lớn, dù phát âm có rõ.
+    coverage: float = 0.0
+    # Chi tiết từng chỗ lệch (từ alignment) — bằng chứng "nên review", không
+    # phải phán quyết phát âm. Tối đa MAX_WORD_ISSUES phần tử.
+    word_issues: list[WordIssue] = field(default_factory=list)
 
 
 @dataclass
@@ -53,6 +91,8 @@ class Features:
     min_word_probability: float
     # Chỉ có với Read Aloud
     accuracy_metrics: AccuracyMetrics | None = None
+    # Nhịp đọc vs thời lượng kỳ vọng — phụ trợ cho intonation, KHÔNG cho completion.
+    reading_pace: ReadingPace | None = None
     features_version: str = field(default=FEATURES_VERSION)
 
     def to_dict(self) -> dict:
@@ -78,6 +118,33 @@ def _count_fillers(text: str) -> int:
     return count
 
 
+def _issues_from_jiwer_alignment(
+    ref_tokens: list[str], hyp_tokens: list[str], alignment
+) -> list[WordIssue]:
+    """Chuyển các chunk alignment của jiwer thành danh sách WordIssue.
+
+    `alignment` là list[AlignmentChunk] cho 1 cặp câu; mỗi chunk có .type
+    ("equal"/"substitute"/"delete"/"insert") + chỉ số ref/hyp. Chỉ số khớp với
+    ref_tokens/hyp_tokens vì ta truyền chuỗi đã token hóa theo khoảng trắng.
+    """
+    issues: list[WordIssue] = []
+    for chunk in alignment:
+        if chunk.type == "equal":
+            continue
+        if chunk.type == "substitute":
+            expected = ref_tokens[chunk.ref_start_idx:chunk.ref_end_idx]
+            recognized = hyp_tokens[chunk.hyp_start_idx:chunk.hyp_end_idx]
+            for er, hr in zip(expected, recognized):
+                issues.append(WordIssue("substitution", er, hr))
+        elif chunk.type == "delete":
+            for er in ref_tokens[chunk.ref_start_idx:chunk.ref_end_idx]:
+                issues.append(WordIssue("deletion", er, None))
+        elif chunk.type == "insert":
+            for hr in hyp_tokens[chunk.hyp_start_idx:chunk.hyp_end_idx]:
+                issues.append(WordIssue("insertion", None, hr))
+    return issues
+
+
 def _compute_accuracy(reference_script: str, hypothesis: str) -> AccuracyMetrics | None:
     ref_tokens = _normalize_tokens(reference_script)
     hyp_tokens = _normalize_tokens(hypothesis)
@@ -90,17 +157,23 @@ def _compute_accuracy(reference_script: str, hypothesis: str) -> AccuracyMetrics
         out = jiwer.process_words(
             [" ".join(ref_tokens)], [" ".join(hyp_tokens)]
         )
+        hits = int(out.hits)
+        issues = _issues_from_jiwer_alignment(
+            ref_tokens, hyp_tokens, out.alignments[0]
+        )
         return AccuracyMetrics(
             wer=round(float(out.wer), 4),
             substitutions=int(out.substitutions),
             insertions=int(out.insertions),
             deletions=int(out.deletions),
-            hits=int(out.hits),
+            hits=hits,
             reference_word_count=len(ref_tokens),
+            coverage=round(hits / len(ref_tokens), 4),
+            word_issues=issues[:MAX_WORD_ISSUES],
         )
     except ImportError:
-        # jiwer không bắt buộc — fallback: chỉ tính WER thô bằng Levenshtein từ.
-        s, i, d, h = _levenshtein_words(ref_tokens, hyp_tokens)
+        # jiwer không bắt buộc — fallback: WER + issues thô bằng Levenshtein từ.
+        s, i, d, h, issues = _levenshtein_words(ref_tokens, hyp_tokens)
         wer = (s + i + d) / max(1, len(ref_tokens))
         return AccuracyMetrics(
             wer=round(wer, 4),
@@ -109,11 +182,15 @@ def _compute_accuracy(reference_script: str, hypothesis: str) -> AccuracyMetrics
             deletions=d,
             hits=h,
             reference_word_count=len(ref_tokens),
+            coverage=round(h / len(ref_tokens), 4),
+            word_issues=issues[:MAX_WORD_ISSUES],
         )
 
 
-def _levenshtein_words(ref: list[str], hyp: list[str]) -> tuple[int, int, int, int]:
-    """Levenshtein cấp độ từ với backtrace → (sub, ins, del, hits)."""
+def _levenshtein_words(
+    ref: list[str], hyp: list[str]
+) -> tuple[int, int, int, int, list[WordIssue]]:
+    """Levenshtein cấp độ từ với backtrace → (sub, ins, del, hits, issues)."""
     n, m = len(ref), len(hyp)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
     for i in range(n + 1):
@@ -128,28 +205,46 @@ def _levenshtein_words(ref: list[str], hyp: list[str]) -> tuple[int, int, int, i
                 dp[i][j - 1] + 1,        # insertion
                 dp[i - 1][j - 1] + cost  # substitution / match
             )
-    # backtrace
+    # backtrace (đi ngược nên issues thu được theo thứ tự đảo → reverse cuối)
     i, j = n, m
     sub = ins = dele = hits = 0
+    issues: list[WordIssue] = []
     while i > 0 or j > 0:
         if i > 0 and j > 0 and ref[i - 1] == hyp[j - 1] and dp[i][j] == dp[i - 1][j - 1]:
             hits += 1
             i, j = i - 1, j - 1
         elif i > 0 and j > 0 and dp[i][j] == dp[i - 1][j - 1] + 1:
             sub += 1
+            issues.append(WordIssue("substitution", ref[i - 1], hyp[j - 1]))
             i, j = i - 1, j - 1
         elif j > 0 and dp[i][j] == dp[i][j - 1] + 1:
             ins += 1
+            issues.append(WordIssue("insertion", None, hyp[j - 1]))
             j -= 1
         else:
             dele += 1
+            issues.append(WordIssue("deletion", ref[i - 1], None))
             i -= 1
-    return sub, ins, dele, hits
+    issues.reverse()
+    return sub, ins, dele, hits, issues
+
+
+def _reading_pace(
+    speaking_duration_sec: float, expected_duration_sec: float | None
+) -> ReadingPace | None:
+    if not expected_duration_sec:
+        return None
+    return ReadingPace(
+        actual_duration_sec=round(speaking_duration_sec, 3),
+        expected_duration_sec=round(float(expected_duration_sec), 3),
+        pace_ratio=round(speaking_duration_sec / max(1e-6, expected_duration_sec), 3),
+    )
 
 
 def extract_features(
     transcription: Transcription,
     reference_script: str | None = None,
+    expected_duration_sec: float | None = None,
 ) -> Features:
     words = transcription.words
 
@@ -169,6 +264,7 @@ def extract_features(
             accuracy_metrics=_compute_accuracy(reference_script, "")
             if reference_script
             else None,
+            reading_pace=_reading_pace(0.0, expected_duration_sec),
         )
 
     speaking_start = words[0].start
@@ -200,4 +296,5 @@ def extract_features(
         accuracy_metrics=_compute_accuracy(reference_script, transcription.text)
         if reference_script
         else None,
+        reading_pace=_reading_pace(speaking_duration, expected_duration_sec),
     )

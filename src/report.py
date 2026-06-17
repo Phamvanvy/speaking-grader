@@ -40,6 +40,29 @@ def save_json(output: dict[str, Any], stem: str) -> Path:
     return path
 
 
+def _word_issue_lines(features: dict[str, Any]) -> list[str]:
+    """Tóm tắt word_issues thành các dòng người đọc được (rỗng nếu không có).
+
+    Diễn đạt theo hướng "ASR nghe khác script — nên review", KHÔNG khẳng định
+    sai phát âm. Xem features.WordIssue để biết vì sao.
+    """
+    acc = features.get("accuracy_metrics")
+    if not acc:
+        return []
+    issues = acc.get("word_issues") or []
+    lines: list[str] = []
+    for it in issues:
+        t = it.get("issue_type")
+        exp, rec = it.get("expected"), it.get("recognized")
+        if t == "substitution":
+            lines.append(f"'{exp}' → ASR nghe thành '{rec}' (nên review)")
+        elif t == "deletion":
+            lines.append(f"'{exp}' → không nghe thấy trong bản đọc (thiếu/bỏ?)")
+        elif t == "insertion":
+            lines.append(f"thừa từ '{rec}' không có trong script")
+    return lines
+
+
 def print_report(output: dict[str, Any]) -> None:
     try:
         _print_rich(output)
@@ -59,6 +82,13 @@ def _print_plain(output: dict[str, Any]) -> None:
     for k, v in output["features"].items():
         print(f"  {k}: {v}")
 
+    issue_lines = _word_issue_lines(output["features"])
+    if issue_lines:
+        print("-" * 60)
+        print("TỪ CẦN REVIEW (ASR nghe khác script — KHÔNG chắc chắn sai phát âm):")
+        for line in issue_lines:
+            print(f"  • {line}")
+
     scores = output.get("scores")
     if not scores:
         print("-" * 60)
@@ -75,6 +105,10 @@ def _print_plain(output: dict[str, Any]) -> None:
         for s in c.get("suggestions", []):
             print(f"        → {s}")
     print(f"\nĐIỂM TOEIC ƯỚC TÍNH: {scores['estimated_toeic_score']}/200")
+    rationale = scores.get("score_rationale")
+    if rationale:
+        print("\nLÝ DO RA ĐIỂM:")
+        print(rationale)
     print("\nNHẬN XÉT CHUNG:")
     print(scores["summary_feedback"])
     print("=" * 60 + "\n")
@@ -103,6 +137,15 @@ def _print_rich(output: dict[str, Any]) -> None:
         feat_table.add_row(k, str(v))
     console.print(feat_table)
 
+    issue_lines = _word_issue_lines(output["features"])
+    if issue_lines:
+        console.print(
+            Panel(
+                "\n".join(f"• {line}" for line in issue_lines),
+                title="Từ cần review (ASR nghe khác script — chưa chắc sai phát âm)",
+            )
+        )
+
     scores = output.get("scores")
     if not scores:
         console.print("[yellow](Chưa chấm điểm — bỏ --no-ai để Claude chấm.)[/yellow]")
@@ -124,6 +167,10 @@ def _print_rich(output: dict[str, Any]) -> None:
             body += f"\n[dim]{suggestions}[/dim]"
         crit_table.add_row(c["criterion"], f"{c['score']}/3", body)
     console.print(crit_table)
+
+    rationale = scores.get("score_rationale")
+    if rationale:
+        console.print(Panel(rationale, title="Lý do ra điểm"))
 
     console.print(
         Panel(

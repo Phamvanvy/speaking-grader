@@ -1,5 +1,12 @@
 faster-whisper>=1.0.0
+# CUDA 12 runtime cho faster-whisper/ctranslate2 trên GPU NVIDIA (Windows: cần
+# để nạp cublas64_12.dll / cudnn64_9.dll). Bỏ qua nếu chỉ chạy CPU.
+nvidia-cublas-cu12; platform_system != "Darwin"
+nvidia-cudnn-cu12>=9,<10; platform_system != "Darwin"
 anthropic>=0.40.0
+# Client OpenAI-compatible cho backend local (vd llama.cpp server, Qwen3).
+# Chỉ cần khi TOEIC_BACKEND=local.
+openai>=1.0.0
 pydantic>=2.0.0
 python-dotenv>=1.0.0
 jiwer>=3.0.0

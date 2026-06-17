@@ -38,4 +38,14 @@ class SpeakingResult(BaseModel):
     estimated_toeic_score: int = Field(
         ge=0, le=200, description="Điểm TOEIC Speaking ước tính (0-200)"
     )
+    # Giải thích logic vì sao ra đúng số điểm tổng: nối điểm từng tiêu chí +
+    # số liệu khách quan + cờ gating -> khoảng điểm 0-200. Phải viết bằng
+    # ngôn ngữ nhận xét được cấu hình.
+    score_rationale: str = Field(
+        description=(
+            "Lập luận từng bước dẫn tới estimated_toeic_score: tiêu chí nào kéo "
+            "điểm lên/xuống và vì sao rơi vào khoảng điểm này chứ không phải cao "
+            "hay thấp hơn."
+        )
+    )
     summary_feedback: str
