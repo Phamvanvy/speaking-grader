@@ -8,9 +8,38 @@ features.py tính tốc độ nói, quãng ngắt...
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("toeic.asr")
+
+
+def _register_cuda_dll_dirs() -> None:
+    """Cho Windows tìm thấy cuBLAS/cuDNN/nvRTC từ các wheel ``nvidia-*-cu12``.
+
+    ctranslate2 nạp ``cublas64_12.dll`` / ``cudnn64_9.dll`` qua LoadLibrary lúc
+    encode. Trên Windows, Python không tự tìm trong site-packages\\nvidia\\*\\bin
+    (chỉ ``torch`` mới thêm), nên thiếu các DLL này dù đã ``pip install``.
+    Bộ nạp DLL lười của ctranslate2 không tôn trọng ``os.add_dll_directory``,
+    nên ta phải prepend trực tiếp các thư mục bin đó vào ``PATH``.
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import nvidia  # các wheel nvidia-*-cu12 cùng nằm trong namespace này
+    except ImportError:
+        return
+    bin_dirs: list[str] = []
+    for pkg_dir in nvidia.__path__:
+        for sub in ("cublas", "cudnn", "cuda_nvrtc"):
+            bin_dir = os.path.join(pkg_dir, sub, "bin")
+            if os.path.isdir(bin_dir):
+                bin_dirs.append(bin_dir)
+                if hasattr(os, "add_dll_directory"):
+                    os.add_dll_directory(bin_dir)
+    if bin_dirs:
+        os.environ["PATH"] = os.pathsep.join(bin_dirs) + os.pathsep + os.environ.get("PATH", "")
 
 
 @dataclass
@@ -40,6 +69,8 @@ _model_cache: dict[tuple[str, str], object] = {}
 def _get_model(model_size: str, device: str):
     key = (model_size, device)
     if key not in _model_cache:
+        if device == "cuda":
+            _register_cuda_dll_dirs()
         # Import trong hàm để --no-ai và unit test không bắt buộc cài faster-whisper
         from faster_whisper import WhisperModel
 

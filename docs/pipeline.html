@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TOEIC Speaking Grader — Luồng xử lý</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --ink: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent-2: #a78bfa;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --border: #334155;
+    --mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #1e293b 0%, var(--bg) 60%);
+    color: var(--ink);
+    line-height: 1.55;
+    padding: 32px 16px 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 36px; }
+  header h1 { font-size: 1.9rem; margin: 0 0 6px; }
+  header p { color: var(--muted); margin: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; margin-top: 18px; font-size: .85rem; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  .dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  .stage {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 22px;
+    margin: 0 auto;
+    max-width: 760px;
+    position: relative;
+    box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  }
+  .stage .num {
+    position: absolute; top: -16px; left: 22px;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--accent); color: #06283d;
+    font-weight: 700; display: grid; place-items: center;
+    box-shadow: 0 4px 10px rgba(56,189,248,.4);
+  }
+  .stage h2 { margin: 6px 0 4px; font-size: 1.15rem; }
+  .stage .file { font-family: var(--mono); font-size: .8rem; color: var(--accent-2); }
+  .stage p { margin: 10px 0 0; color: var(--ink); font-size: .92rem; }
+  .stage .muted { color: var(--muted); font-size: .85rem; }
+
+  .io { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+  .chip {
+    font-family: var(--mono); font-size: .76rem;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 5px 9px; color: var(--ink);
+  }
+  .chip b { color: var(--accent); font-weight: 600; }
+  .chip.out b { color: var(--ok); }
+
+  .arrow { display: grid; place-items: center; height: 46px; color: var(--muted); }
+  .arrow svg { width: 26px; height: 46px; }
+
+  .branch {
+    border-color: var(--warn);
+  }
+  .branch .num { background: var(--warn); color: #3a2c00; box-shadow: 0 4px 10px rgba(251,191,36,.4); }
+  .paths { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 16px; }
+  @media (max-width: 640px){ .paths{ grid-template-columns: 1fr; } }
+  .path {
+    border-radius: 10px; padding: 12px 14px; font-size: .85rem;
+    border: 1px solid var(--border); background: var(--panel-2);
+  }
+  .path.stop { border-color: var(--danger); }
+  .path.go { border-color: var(--ok); }
+  .path h4 { margin: 0 0 6px; font-size: .9rem; }
+  .path.stop h4 { color: var(--danger); }
+  .path.go h4 { color: var(--ok); }
+  .path code { font-family: var(--mono); color: var(--accent-2); }
+
+  table.detail { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: .82rem; }
+  table.detail th, table.detail td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.detail th { color: var(--muted); font-weight: 600; width: 32%; }
+  table.detail td code, table.detail th code { font-family: var(--mono); color: var(--accent); }
+
+  .note {
+    max-width: 760px; margin: 28px auto 0; font-size: .85rem;
+    background: #1e293b; border-left: 3px solid var(--accent-2);
+    border-radius: 8px; padding: 12px 16px; color: var(--muted);
+  }
+  .note b { color: var(--ink); }
+  footer { text-align: center; color: var(--muted); font-size: .78rem; margin-top: 48px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🎙️ TOEIC Speaking Grader — Luồng xử lý chi tiết</h1>
+    <p>Từ 1 file audio → transcript → đặc trưng khách quan → gating → chấm bằng Claude → báo cáo</p>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--accent)"></i> Bước xử lý</span>
+      <span><i class="dot" style="background:var(--warn)"></i> Điểm rẽ nhánh (gating)</span>
+      <span><i class="dot" style="background:var(--ok)"></i> Đầu ra</span>
+      <span><i class="dot" style="background:var(--danger)"></i> Dừng sớm</span>
+    </div>
+  </header>
+
+  <!-- Entry -->
+  <div class="stage">
+    <div class="num">▶</div>
+    <h2>CLI — điểm vào</h2>
+    <div class="file">src/main.py · main()</div>
+    <p>Phân tích tham số, nạp config (.env), nạp câu hỏi từ ngân hàng, kiểm tra file audio tồn tại. Khởi tạo logging.</p>
+    <div class="io">
+      <span class="chip"><b>in</b> --audio &lt;path&gt;</span>
+      <span class="chip"><b>in</b> --question &lt;id&gt;</span>
+      <span class="chip"><b>in</b> --no-ai (tùy chọn)</span>
+      <span class="chip out"><b>out</b> Config, Question, QuestionType</span>
+    </div>
+    <table class="detail">
+      <tr><th><code>load_config()</code></th><td>Đọc <code>ANTHROPIC_API_KEY</code>, <code>TOEIC_MODEL</code>, <code>WHISPER_MODEL</code>, <code>WHISPER_DEVICE</code> từ môi trường / .env</td></tr>
+      <tr><th><code>get_question(id)</code></th><td>Nạp từ <code>data/questions/toeic.json</code> → prompt, reference_script, expected_duration_sec</td></tr>
+      <tr><th><code>get_question_type(type)</code></th><td>Tra rubric trong <code>src/rubrics/toeic.py</code> → tập tiêu chí + guidance</td></tr>
+    </table>
+  </div>
+
+  <div class="arrow"><svg viewBox="0 0 26 46"><path d="M13 0v38M5 30l8 8 8-8" stroke="#94a3b8" stroke-width="2" fill="none"/></svg></div>
+
+  <!-- 1 ASR -->
+  <div class="stage">
+    <div class="num">1</div>
+    <h2>ASR — Speech-to-Text (local)</h2>
+    <div class="file">src/asr.py · transcribe()</div>
+    <p>Dùng <b>faster-whisper</b> chạy cục bộ để chuyển audio thành transcript kèm <b>mốc thời gian từng từ</b> và độ tự tin. Model được cache trong process; bật <code>vad_filter</code> để lọc khoảng lặng.</p>
+    <div class="io">
+      <span class="chip"><b>in</b> audio_path, model_size, device</span>
+      <span class="chip out"><b>out</b> Transcription{ text, words[], language, duration }</span>
+    </div>
+    <p class="muted">Mỗi <code>Word</code> có <code>text, start, end, probability</code> — đây là dữ liệu gốc để bước 2 tính tốc độ nói &amp; quãng ngắt.</p>
+  </div>
+
+  <div class="arrow"><svg viewBox="0 0 26 46"><path d="M13 0v38M5 30l8 8 8-8" stroke="#94a3b8" stroke-width="2" fill="none"/></svg></div>
+
+  <!-- 2 Features -->
+  <div class="stage">
+    <div class="num">2</div>
+    <h2>Features — Đặc trưng khách quan (KHÔNG dùng AI)</h2>
+    <div class="file">src/features.py · extract_features()</div>
+    <p>Tính số liệu định lượng từ word timestamps. Với Read Aloud, so transcript với script tham chiếu để ra <b>WER</b> và chi tiết lỗi.</p>
+    <div class="io">
+      <span class="chip"><b>in</b> Transcription, reference_script?</span>
+      <span class="chip out"><b>out</b> Features (+ AccuracyMetrics nếu có script)</span>
+    </div>
+    <table class="detail">
+      <tr><th>Nhịp điệu</th><td><code>speech_rate_wpm</code>, <code>pause_count</code>, <code>total/longest_pause_sec</code> (ngưỡng &gt; 0.3s)</td></tr>
+      <tr><th>Thời lượng</th><td><code>speaking_duration_sec</code>, <code>audio_duration_sec</code>, <code>silence_sec</code></td></tr>
+      <tr><th>Từ đệm</th><td><code>filler_count</code> (um, uh, like, you know…)</td></tr>
+      <tr><th>Tín hiệu phụ ⚠️</th><td><code>avg/min_word_probability</code> — <b>KHÔNG</b> phải điểm phát âm</td></tr>
+      <tr><th>Độ chính xác (Read Aloud)</th><td><code>wer</code>, <code>substitutions</code>, <code>insertions</code>, <code>deletions</code>, <code>hits</code> (jiwer, fallback Levenshtein)</td></tr>
+    </table>
+  </div>
+
+  <div class="arrow"><svg viewBox="0 0 26 46"><path d="M13 0v38M5 30l8 8 8-8" stroke="#94a3b8" stroke-width="2" fill="none"/></svg></div>
+
+  <!-- 3 Gating -->
+  <div class="stage branch">
+    <div class="num">3</div>
+    <h2>Gating — Kiểm tra rule-based (rẻ, ổn định, KHÔNG dùng AI)</h2>
+    <div class="file">src/gating.py · evaluate()</div>
+    <p>Bắt sớm các trường hợp hiển nhiên để khỏi tốn lượt gọi Claude và để ổn định điểm <code>task_completion</code>.</p>
+    <table class="detail">
+      <tr><th>Audio rỗng</th><td><code>word_count == 0</code> → <code>is_empty=True</code> → bỏ qua Claude</td></tr>
+      <tr><th>Quá ngắn</th><td><code>speaking_duration &lt; 5s</code> hoặc <code>word_count &lt; 3</code> → floor = <code>very_low</code></td></tr>
+      <tr><th>Ngắn hơn kỳ vọng</th><td>tỉ lệ &lt; 40% <code>expected_duration_sec</code> → floor = <code>low</code></td></tr>
+    </table>
+    <div class="paths">
+      <div class="path stop">
+        <h4>✖ is_empty / --no-ai</h4>
+        <span class="muted">Không gọi Claude. <code>scores = None</code>. Đi thẳng tới bước Report (chỉ transcript + features).</span>
+      </div>
+      <div class="path go">
+        <h4>✓ Có lời nói &amp; không --no-ai</h4>
+        <span class="muted">Chuyển <code>task_completion_floor</code> + reasons sang bước 4 để Claude không chấm vượt trần.</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow"><svg viewBox="0 0 26 46"><path d="M13 0v38M5 30l8 8 8-8" stroke="#94a3b8" stroke-width="2" fill="none"/></svg></div>
+
+  <!-- 4 Scoring -->
+  <div class="stage">
+    <div class="num">4</div>
+    <h2>Scoring — Chấm bằng Claude (structured output)</h2>
+    <div class="file">src/scoring.py · score()</div>
+    <p>Dựng system prompt từ rubric + user prompt chứa JSON (đề bài, script, transcript, số liệu khách quan, cờ gating). Gọi <code>client.messages.parse(...)</code> với <code>output_format=SpeakingResult</code> → Claude trả JSON đúng schema, không cần tự parse.</p>
+    <div class="io">
+      <span class="chip"><b>in</b> Config, QuestionType, prompt, script, Transcription, Features, GatingResult</span>
+      <span class="chip out"><b>out</b> SpeakingResult</span>
+    </div>
+    <table class="detail">
+      <tr><th>Bằng chứng PRIMARY</th><td>objective_metrics (WPM, pauses, fillers, WER…)</td></tr>
+      <tr><th>Bằng chứng SECONDARY</th><td>phân tích nội dung transcript</td></tr>
+      <tr><th>Bằng chứng yếu ⚠️</th><td>ASR confidence — không dùng làm điểm phát âm</td></tr>
+      <tr><th>Model</th><td><code>TOEIC_MODEL</code> (mặc định claude-sonnet-4-6; đổi opus-4-8 để benchmark)</td></tr>
+      <tr><th>Schema</th><td><code>SpeakingResult</code>: task_completion, content_relevance, criteria[], estimated_toeic_score (0-200), summary_feedback</td></tr>
+    </table>
+    <p class="muted">Lỗi gọi API → log &amp; return 1. <code>parsed_output is None</code> (refusal/max_tokens) → raise.</p>
+  </div>
+
+  <div class="arrow"><svg viewBox="0 0 26 46"><path d="M13 0v38M5 30l8 8 8-8" stroke="#94a3b8" stroke-width="2" fill="none"/></svg></div>
+
+  <!-- 5 Report -->
+  <div class="stage">
+    <div class="num">5</div>
+    <h2>Report — Xuất kết quả</h2>
+    <div class="file">src/report.py · build_output() → save_json() → print_report()</div>
+    <p>Gom tất cả thành 1 dict, lưu JSON đầy đủ (để debug sau) và in ra console (đẹp bằng <b>rich</b> nếu cài, không thì plain text).</p>
+    <div class="io">
+      <span class="chip out"><b>file</b> outputs/&lt;audio&gt;__&lt;question&gt;.json</span>
+      <span class="chip out"><b>console</b> bảng features + điểm từng tiêu chí + điểm TOEIC</span>
+      <span class="chip out"><b>log</b> logs/app.log</span>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>Vì sao tách gating khỏi Claude?</b> Các trường hợp audio rỗng/quá ngắn được bắt bằng luật rẻ &amp; tất định,
+    vừa tiết kiệm chi phí API vừa giữ <code>task_completion</code> ổn định. Claude chỉ chấm phần cần phán đoán ngôn ngữ,
+    với số liệu khách quan làm bằng chứng chính — confidence của Whisper chỉ là tín hiệu phụ.
+  </div>
+
+  <footer>Giai đoạn 1: Read Aloud (Q1-2) — có script tham chiếu → chấm khách quan nhất. · Sinh từ mã nguồn <code>src/</code></footer>
+</div>
+</body>
+</html>

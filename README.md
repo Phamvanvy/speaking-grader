@@ -1,22 +1,59 @@
 # TOEIC Speaking Grader (bản local)
 
-Chấm điểm bài nói TOEIC Speaking từ 1 file audio. Pipeline:
-
-```
-Audio → Whisper (local) → transcript + timestamps
-      → features khách quan (tốc độ nói, ngắt nghỉ, WER...)
-      → rule-based gating (bắt sớm audio quá ngắn/rỗng)
-      → Claude API chấm theo rubric → điểm + feedback
-      → in console + lưu JSON đầy đủ
-```
+Chấm điểm bài nói TOEIC Speaking từ 1 file audio.
 
 Giai đoạn 1 tập trung **Read Aloud (Q1-2)** vì có script tham chiếu → chấm khách quan nhất.
+
+## Luồng xử lý (pipeline)
+
+> 📊 **Xem sơ đồ trực quan, chi tiết từng bước:** mở [docs/pipeline.html](docs/pipeline.html) trong trình duyệt.
+
+Toàn bộ luồng nằm ở [src/main.py](src/main.py) · `main()`, chạy tuần tự qua 5 bước:
+
+```
+            ┌─────────────────────────────────────────────────────────┐
+   CLI ───▶ │ main.py: nạp config (.env) + câu hỏi + rubric, check file│
+            └─────────────────────────────────────────────────────────┘
+                                      │
+   [1] ASR        asr.transcribe()        faster-whisper (local)
+                  audio ─────────────────▶ Transcription{ text, words[], duration }
+                                      │     (mỗi word có start/end/probability)
+                                      ▼
+   [2] Features   features.extract_features()    KHÔNG dùng AI
+                  ───────────────────────▶ tốc độ nói, ngắt nghỉ, filler,
+                                      │     + WER/sub/ins/del (nếu có script)
+                                      ▼
+   [3] Gating     gating.evaluate()              rule-based, rẻ & tất định
+                  ───────────────────────▶ bắt sớm audio rỗng / quá ngắn
+                                      │     ├─ is_empty  → bỏ qua Claude
+                                      │     └─ floor     → trần task_completion
+                                      ▼
+   [4] Scoring    scoring.score()                Claude API (bỏ qua nếu --no-ai
+                  ───────────────────────▶       hoặc audio rỗng)
+                                      │     system prompt (rubric) + JSON
+                                      │     (đề+script+transcript+số liệu+gating)
+                                      │     → messages.parse() → SpeakingResult
+                                      ▼
+   [5] Report     report.build_output() → save_json() → print_report()
+                  ───────────────────────▶ outputs/<audio>__<question>.json
+                                            + in console (rich) + logs/app.log
+```
+
+| Bước | Module | Vai trò | Đầu ra chính |
+|------|--------|---------|--------------|
+| 1 | [src/asr.py](src/asr.py) | Speech-to-Text cục bộ (faster-whisper), có word timestamps | `Transcription` |
+| 2 | [src/features.py](src/features.py) | Trích số liệu khách quan (WPM, pause, filler, WER) | `Features` |
+| 3 | [src/gating.py](src/gating.py) | Luật rẻ bắt sớm audio rỗng/quá ngắn, đặt trần `task_completion` | `GatingResult` |
+| 4 | [src/scoring.py](src/scoring.py) | Chấm theo rubric bằng Claude, structured output | `SpeakingResult` |
+| 5 | [src/report.py](src/report.py) | Lưu JSON đầy đủ + in console | file JSON + console |
+
+Phụ trợ: [src/config.py](src/config.py) (config/.env), [src/questions.py](src/questions.py) (ngân hàng câu hỏi), [src/rubrics/toeic.py](src/rubrics/toeic.py) (tiêu chí theo dạng câu), [src/schema.py](src/schema.py) (schema kết quả).
 
 ## Cài đặt
 
 ```bash
-cd toeic-speaking-grader
-python -m venv .venv
+cd speaking-grader
+py -m venv .venv
 # Windows:
 .venv\Scripts\activate
 # macOS/Linux:
@@ -30,10 +67,10 @@ cp .env.example .env   # rồi điền ANTHROPIC_API_KEY
 
 ```bash
 # Chấm đầy đủ (cần ANTHROPIC_API_KEY)
-python -m src.main --audio data/audio/sample.wav --question q1_read_aloud
+py -m src.main --audio data/audio/sample.wav --question q1_read_aloud
 
 # Chỉ ASR + features, KHÔNG gọi Claude (debug / hết quota / viết test)
-python -m src.main --audio data/audio/sample.wav --question q1_read_aloud --no-ai
+py -m src.main --audio data/audio/sample.wav --question q1_read_aloud --no-ai
 ```
 
 Kết quả lưu ở `outputs/<audio>__<question>.json`, log ở `logs/app.log`.
