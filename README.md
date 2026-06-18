@@ -2,7 +2,7 @@
 
 Chấm điểm bài nói TOEIC Speaking từ 1 file audio.
 
-Giai đoạn 1 tập trung **Read Aloud (Q1-2)** vì có script tham chiếu → chấm khách quan nhất.
+Giai đoạn 1 xong: **Read Aloud (Q1-2)**. Giai đoạn 2 hiện tại: **Describe Picture (Q3-4)** — thí sinh tả bức tranh, LLM xem ảnh kèm transcript để chấm.
 
 ## Luồng xử lý (pipeline)
 
@@ -66,8 +66,14 @@ cp .env.example .env   # rồi điền ANTHROPIC_API_KEY
 ## Dùng
 
 ```bash
-# Chấm đầy đủ (cần ANTHROPIC_API_KEY)
+# Read Aloud: chấm đầy đủ (cần ANTHROPIC_API_KEY)
 py -m src.main --audio data/audio/sample.wav --question q1_read_aloud
+
+# Describe Picture: ảnh lấy từ image_path trong ngân hàng câu hỏi
+py -m src.main --audio data/audio/answer.wav --question q3_describe_picture
+
+# Describe Picture: ghi đè ảnh bằng --image (hữu ích khi test nhanh)
+py -m src.main --audio data/audio/answer.wav --question q3_describe_picture --image data/images/q3_sample.jpg
 
 # Chỉ ASR + features, KHÔNG gọi Claude (debug / hết quota / viết test)
 py -m src.main --audio data/audio/sample.wav --question q1_read_aloud --no-ai
@@ -91,7 +97,7 @@ uvicorn src.api:app --reload --port 8000
 
 | Field | Bắt buộc | Ý nghĩa |
 |-------|----------|---------|
-| `audio` | ✅ | File ghi âm (.wav/.mp3/.m4a/.ogg/.flac/.webm/.aac) |
+| `audio` | ✅ | File ghi âm/clip có tiếng (.wav/.mp3/.m4a/.ogg/.flac/.webm/.aac/.mp4/.mov/.mkv/.avi) |
 | `text` | — | Script tham chiếu → chấm **Read Aloud** (so transcript, ra WER/coverage) |
 | `image` | — | Ảnh đề bài → chấm **Describe Picture** (gửi LLM dạng vision) |
 | `expected_duration_sec` | — | Thời lượng kỳ vọng (giây) — vào `reading_pace` + gating |
@@ -99,6 +105,8 @@ uvicorn src.api:app --reload --port 8000
 | `feedback_lang` | — | Ngôn ngữ nhận xét (vd `vi`, `en`) |
 | `prompt` | — | Đề bài hiển thị cho thí sinh |
 | `no_ai` | — | `true` = chỉ ASR + features, bỏ LLM |
+| `mode` | — | `default`/`fast`/`review`/`auto` (mặc định `auto`) |
+| `user_requested_review` | — | `true` = ép review khi `mode=auto` |
 
 Quy ước: truyền **`text`** (đọc to) **hoặc** **`image`** (tả tranh), không phải
 cả hai (trừ khi tự chỉ định `question_type`).
@@ -108,12 +116,14 @@ cả hai (trừ khi tự chỉ định `question_type`).
 curl -X POST http://localhost:8000/grade \
   -F audio=@data/audio/sample.wav \
   -F text="The weather is nice today." \
-  -F expected_duration_sec=12
+  -F expected_duration_sec=12 \
+  -F mode=auto
 
 # Describe Picture: so audio với ảnh
 curl -X POST http://localhost:8000/grade \
   -F audio=@answer.m4a \
-  -F image=@picture.jpg
+  -F image=@picture.jpg \
+  -F mode=review
 ```
 
 > ⚠️ **Windows cmd.exe / PowerShell**: dấu nháy ĐƠN `'...'` không được tước —
@@ -144,6 +154,40 @@ Trả về: `{question_type, count, succeeded, failed, concurrency, results:[{in
 - Tối đa 100 file/batch — lớp đông hơn thì chia nhỏ. Với backend local, chấm
   tuần tự nên ~40 em sẽ mất nhiều phút (mỗi bài vài chục giây); cân nhắc tăng
   client timeout hoặc giảm `TOEIC_MAX_TOKENS`.
+- `fast` hiện đã có fallback an toàn. Nếu adapter Insanely Fast Whisper chưa
+  được cấu hình/cài đặt, hệ thống sẽ tự động dùng `default` thay vì fail request.
+
+Telemetry trả về trong mỗi `result.telemetry`:
+
+- `submissionId`
+- `modeRequested`, `modeUsed`
+- `durationSeconds`
+- `transcriptionTimeMs`, `totalProcessingTimeMs`
+- `confidence`, `silenceRatio`, `wpm`
+- `reviewTriggered`, `reviewReason`
+- `fallbackReason` (`fast_backend_unavailable` / `fast_backend_failed` / `null`)
+- `scoreBeforeReview`, `scoreAfterReview`
+
+Ví dụ thực tế cho lớp 40 học sinh (PowerShell, liệt kê ngắn gọn):
+
+```powershell
+curl.exe -X POST http://localhost:8000/grade-batch ^
+  -F "audios=@hs01.mp4" ^
+  -F "audios=@hs02.mp4" ^
+  -F "audios=@hs03.mp4" ^
+  -F "text=The weather is nice today." ^
+  -F "expected_duration_sec=12" ^
+  -F "max_concurrency=4"
+```
+
+Mẹo tối ưu tốc độ chấm (quan trọng cho 40 em):
+
+- Dùng backend cloud (`TOEIC_BACKEND=anthropic`) + `max_concurrency=4` (hoặc 6-8 nếu máy/đường truyền ổn).
+- Nếu chấm local (`TOEIC_BACKEND=local`), để `max_concurrency=1` để tránh nghẽn model + tranh chấp Whisper.
+- Bật GPU cho ASR: `WHISPER_DEVICE=cuda`.
+- Chọn Whisper nhỏ hơn khi ưu tiên tốc độ: `WHISPER_MODEL=tiny` hoặc `base`.
+- Giữ model chấm ở mức nhanh: `TOEIC_MODEL=claude-sonnet-4-6` (không dùng Opus nếu mục tiêu là throughput).
+- Nếu chỉ cần transcript + metrics để lọc trước, gửi `no_ai=true` rồi chấm AI vòng 2 cho các bài cần review.
 
 > Chấm **ảnh** cần backend có thị giác: Claude (`TOEIC_BACKEND=anthropic`, đặt
 > `ANTHROPIC_API_KEY`) hoặc model local vision (vd Qwen-VL qua llama.cpp).
@@ -158,6 +202,13 @@ Trả về: `{question_type, count, succeeded, failed, concurrency, results:[{in
 | `TOEIC_MODEL` | `claude-sonnet-4-6` | Model chấm. Đổi `claude-opus-4-8` để benchmark chất lượng cao nhất |
 | `WHISPER_MODEL` | `base` | `tiny`/`base`/`small`/`medium`/`large-v3` |
 | `WHISPER_DEVICE` | `cpu` | `cpu` hoặc `cuda` |
+| `TOEIC_ASR_BACKEND_DEFAULT` | `faster_whisper` | ASR mặc định production |
+| `TOEIC_ASR_BACKEND_FAST` | `insanely_fast_whisper` | ASR fast lane khi `mode=fast` |
+| `TOEIC_ASR_BACKEND_REVIEW` | `whisperx` | ASR review chi tiết |
+| `TOEIC_FAST_BACKEND_ENABLED` | `true` | Bật/tắt fast lane; `false` thì `mode=fast` auto fallback về `default` |
+| `TOEIC_AUTO_CONFIDENCE_THRESHOLD` | `0.75` | Ngưỡng auto review theo confidence |
+| `TOEIC_AUTO_SILENCE_RATIO_THRESHOLD` | `0.35` | Ngưỡng auto review theo silence ratio |
+| `TOEIC_AUTO_COVERAGE_THRESHOLD` | `0.80` | Ngưỡng auto review theo coverage (Read Aloud) |
 | `TOEIC_MAX_TOKENS` | `30000` | Trần token LLM sinh ra. Nhận xét tiếng Việt dài dễ vượt 4096 → JSON bị cắt; để rộng (cả 2 backend dừng sớm khi xong nên không tốn thêm). |
 
 ## Lưu ý thiết kế
@@ -175,8 +226,8 @@ pytest -q
 
 ## Roadmap
 
-- Phase 1: Read Aloud (Q1-2) ← hiện tại
-- Phase 2: Describe Picture (Q3-4)
+- Phase 1: Read Aloud (Q1-2) ✅
+- Phase 2: Describe Picture (Q3-4) ← hiện tại
 - Phase 3: Respond to Questions (Q5-10)
 - Phase 4: Express Opinion (Q11)
 - Phase 5: IELTS Speaking

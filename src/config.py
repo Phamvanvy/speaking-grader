@@ -60,6 +60,12 @@ class Config:
     local_base_url: str = "http://localhost:8080/v1"
     local_model: str = "qwen3"
     local_api_key: str = "no-key"  # llama.cpp không kiểm tra key
+    # Bật reasoning ("thinking") cho model local kiểu Qwen3. Đo thực tế: bật
+    # thinking sinh ~6300 token reasoning → ~63s/bài; tắt còn ~960 token → ~9s
+    # (nhanh ~6.7×) mà vẫn trả đủ JSON justification/score_rationale. Mặc định
+    # TẮT cho local (vốn là backend dev, đã lệch calibration). Bật lại bằng
+    # TOEIC_LOCAL_ENABLE_THINKING=true khi cần reasoning kỹ hơn.
+    local_enable_thinking: bool = False
     # Ngôn ngữ cho phần nhận xét (justification/suggestions/summary_feedback).
     # Mã ngắn ('vi', 'en', 'ja'...) hoặc tên tự do. Mặc định tiếng Việt vì
     # người dùng chính là người học VN.
@@ -68,6 +74,21 @@ class Config:
     # dễ vượt 4096 → JSON bị cắt. Để rộng; cả 2 backend đều dừng sớm khi xong
     # nên đặt cao không tốn thêm (chỉ tính token thực sinh ra).
     max_tokens: int = 30000
+    # ASR backends cho routing nhiều tầng:
+    # - default: production mặc định
+    # - fast: lane tối ưu throughput (có thể fallback default nếu không sẵn sàng)
+    # - review: lane chấm chi tiết (chạy khi mode=review hoặc auto trigger)
+    asr_backend_default: str = "faster_whisper"
+    asr_backend_fast: str = "insanely_fast_whisper"
+    asr_backend_review: str = "whisperx"
+    # Bật/tắt fast lane ở runtime (dùng khi rollout production theo từng môi trường).
+    fast_backend_enabled: bool = True
+    # Model HF cho adapter Insanely Fast Whisper (transformers pipeline).
+    insanely_fast_model_id: str = "openai/whisper-small"
+    # Ngưỡng auto-review.
+    auto_confidence_threshold: float = 0.75
+    auto_silence_ratio_threshold: float = 0.35
+    auto_coverage_threshold: float = 0.80
 
     @property
     def has_api_key(self) -> bool:
@@ -79,15 +100,46 @@ class Config:
 
 
 def load_config() -> Config:
+    fast_enabled_raw = (os.getenv("TOEIC_FAST_BACKEND_ENABLED", "true") or "true").strip().lower()
     return Config(
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         model=os.getenv("TOEIC_MODEL", "claude-sonnet-4-6"),
         whisper_model=os.getenv("WHISPER_MODEL", "base"),
-        whisper_device=os.getenv("WHISPER_DEVICE", "cpu"),
+        # auto: ưu tiên CUDA khi môi trường torch hỗ trợ, fallback CPU.
+        whisper_device=os.getenv("WHISPER_DEVICE", "auto"),
         backend=(os.getenv("TOEIC_BACKEND", "anthropic") or "anthropic").lower(),
         local_base_url=os.getenv("TOEIC_LOCAL_BASE_URL", "http://localhost:8080/v1"),
         local_model=os.getenv("TOEIC_LOCAL_MODEL", "qwen3"),
         local_api_key=os.getenv("TOEIC_LOCAL_API_KEY", "no-key"),
+        local_enable_thinking=(
+            os.getenv("TOEIC_LOCAL_ENABLE_THINKING", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         feedback_lang=os.getenv("TOEIC_FEEDBACK_LANG", "vi") or "vi",
         max_tokens=int(os.getenv("TOEIC_MAX_TOKENS", "30000")),
+        asr_backend_default=(
+            os.getenv("TOEIC_ASR_BACKEND_DEFAULT", "faster_whisper")
+            or "faster_whisper"
+        ).lower(),
+        asr_backend_fast=(
+            os.getenv("TOEIC_ASR_BACKEND_FAST", "insanely_fast_whisper")
+            or "insanely_fast_whisper"
+        ).lower(),
+        asr_backend_review=(
+            os.getenv("TOEIC_ASR_BACKEND_REVIEW", "whisperx")
+            or "whisperx"
+        ).lower(),
+        fast_backend_enabled=fast_enabled_raw not in {"0", "false", "no", "off"},
+        insanely_fast_model_id=(
+            os.getenv("TOEIC_INSANELY_FAST_MODEL_ID", "openai/whisper-small")
+            or "openai/whisper-small"
+        ),
+        auto_confidence_threshold=float(
+            os.getenv("TOEIC_AUTO_CONFIDENCE_THRESHOLD", "0.75")
+        ),
+        auto_silence_ratio_threshold=float(
+            os.getenv("TOEIC_AUTO_SILENCE_RATIO_THRESHOLD", "0.35")
+        ),
+        auto_coverage_threshold=float(
+            os.getenv("TOEIC_AUTO_COVERAGE_THRESHOLD", "0.80")
+        ),
     )

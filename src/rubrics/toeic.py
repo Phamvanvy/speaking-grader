@@ -115,7 +115,33 @@ DESCRIBE_PICTURE = QuestionType(
     label="Describe a picture (Q3-4)",
     criteria=[PRONUNCIATION, INTONATION_STRESS, GRAMMAR, VOCABULARY, COHESION],
     scale_description=SCALE_0_3,
-    guidance="Mô tả tranh. Đánh giá thêm grammar, vocabulary, cohesion.",
+    guidance=(
+        "Thí sinh mô tả một bức tranh trong khoảng 30-45 giây. KHÔNG có script "
+        "tham chiếu — không có accuracy_metrics/WER.\n\n"
+        "CONTENT RELEVANCE (ưu tiên cao):\n"
+        "- Nếu có ảnh đính kèm: so sánh transcript với nội dung thực của ảnh. "
+        "Mô tả không khớp (tả người khi ảnh không có, nêu sai màu/số lượng/hoạt "
+        "động) PHẢI hạ content_relevance. Mô tả đúng, đầy đủ bối cảnh + đối tượng "
+        "chính + hoạt động + chi tiết nổi bật = content_relevance high.\n"
+        "- Nếu không có ảnh đính kèm: đánh giá content_relevance dựa vào mức độ cụ "
+        "thể và nhất quán nội bộ của mô tả.\n\n"
+        "TASK COMPLETION:\n"
+        "- < 10s hoặc < 20 từ → very_low.\n"
+        "- Chỉ nêu 1-2 chi tiết cực kỳ chung chung trong khi ảnh có nhiều yếu tố "
+        "→ low hoặc medium.\n"
+        "- Mô tả bao quát cảnh (location/setting), ít nhất 2-3 đối tượng/người, "
+        "hành động đang diễn ra → high.\n\n"
+        "TIÊU CHÍ NGÔN NGỮ:\n"
+        "- Pronunciation & Intonation: giọng rõ, nhịp tự nhiên; căn cứ vào "
+        "speech_rate_wpm, pause_count, giá trị confidence (bằng chứng phụ).\n"
+        "- Grammar: dùng đúng thì (present continuous cho hành động đang diễn ra: "
+        "'A man is sitting...'), câu rõ chủ-vị; lỗi ảnh hưởng nghĩa bị trừ điểm.\n"
+        "- Vocabulary: dùng từ miêu tả đa dạng (màu sắc, vị trí, số lượng, trạng "
+        "thái, cảm xúc); dùng được prepositional phrases (in the foreground / on "
+        "the left / next to...) là điểm cộng.\n"
+        "- Cohesion: mô tả có cấu trúc (tổng quan → chi tiết, hoặc từ trái sang "
+        "phải), không liệt kê rời rạc thiếu liên kết."
+    ),
 )
 
 RESPOND_QUESTIONS = QuestionType(

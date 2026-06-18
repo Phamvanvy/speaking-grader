@@ -269,6 +269,13 @@ def _score_local(
     else:
         user_content = user_prompt
 
+    # Tắt reasoning cho model kiểu Qwen3 trừ khi bật rõ ràng. Truyền qua
+    # chat_template_kwargs (llama.cpp với --jinja sẽ áp dụng vào chat template;
+    # các server khác bỏ qua key lạ). Tắt thinking nhanh ~6.7× (xem Config).
+    extra_body = {
+        "chat_template_kwargs": {"enable_thinking": config.local_enable_thinking}
+    }
+
     t0 = time.monotonic()
     response = client.chat.completions.create(
         model=config.local_model,
@@ -286,6 +293,7 @@ def _score_local(
                 "strict": True,
             },
         },
+        extra_body=extra_body,
     )
     latency = time.monotonic() - t0
 

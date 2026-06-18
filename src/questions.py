@@ -18,6 +18,8 @@ class Question:
     prompt: str
     reference_script: str | None = None
     expected_duration_sec: float | None = None
+    # Đường dẫn ảnh đề bài (tương đối từ project root) — dùng cho Describe Picture.
+    image_path: str | None = None
 
 
 def _load_all(path: Path = _DATA_FILE) -> dict[str, Question]:
@@ -32,6 +34,7 @@ def _load_all(path: Path = _DATA_FILE) -> dict[str, Question]:
             prompt=item.get("prompt", ""),
             reference_script=item.get("reference_script"),
             expected_duration_sec=item.get("expected_duration_sec"),
+            image_path=item.get("image_path"),
         )
         questions[q.id] = q
     return questions

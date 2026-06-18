@@ -18,6 +18,7 @@ def build_output(
     transcript: str,
     features: dict,
     scores: dict | None,
+    telemetry: dict | None = None,
 ) -> dict[str, Any]:
     """Gom toàn bộ kết quả thành 1 dict để lưu JSON (đầy đủ để debug sau)."""
     return {
@@ -28,6 +29,7 @@ def build_output(
         "transcript": transcript,
         "features": features,
         "scores": scores,
+        "telemetry": telemetry or {},
     }
 
 

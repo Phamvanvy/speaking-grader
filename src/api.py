@@ -31,7 +31,9 @@ import dataclasses
 import logging
 import os
 import tempfile
+from time import perf_counter
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -53,11 +55,25 @@ app = FastAPI(
 _BASE_CONFIG: Config = load_config()
 setup_logging()
 
-# Định dạng audio chấp nhận (theo phần mở rộng, dùng để đặt tên file tạm cho Whisper).
-_ALLOWED_AUDIO_SUFFIXES = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm", ".aac"}
+# Định dạng input chấp nhận (audio + một số video container có track audio).
+# faster-whisper đọc qua ffmpeg nên có thể xử lý clip có tiếng (vd .mp4/.mov).
+_ALLOWED_AUDIO_SUFFIXES = {
+    ".wav",
+    ".mp3",
+    ".m4a",
+    ".ogg",
+    ".flac",
+    ".webm",
+    ".aac",
+    ".mp4",
+    ".mov",
+    ".mkv",
+    ".avi",
+}
 
 # Trần số file trong 1 batch (chặn lạm dụng; 1 lớp thực tế ~40 em).
 _MAX_BATCH = 100
+_ALLOWED_MODES = {"default", "fast", "review", "auto"}
 
 
 def _resolve_config(feedback_lang: str | None) -> Config:
@@ -88,7 +104,13 @@ def _pick_question_type(
         return get_question_type("describe_picture")
     raise HTTPException(
         status_code=400,
-        detail="Cần ít nhất 'text' (đọc to) hoặc 'image' (tả tranh).",
+        detail=(
+            "Không xác định được dạng câu. Hãy truyền một trong: "
+            "'text' (script → read_aloud), 'image' (ảnh → describe_picture), "
+            "hoặc 'question_type' rõ ràng "
+            "(read_aloud / describe_picture / respond_questions / "
+            "respond_with_info / express_opinion)."
+        ),
     )
 
 
@@ -104,6 +126,31 @@ def _audio_suffix(filename: str | None) -> str:
     return suffix
 
 
+def _normalize_mode(mode: str | None) -> str:
+    value = (mode or "auto").strip().lower()
+    if value not in _ALLOWED_MODES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"mode không hợp lệ: '{mode}'. Hợp lệ: {sorted(_ALLOWED_MODES)}"
+            ),
+        )
+    return value
+
+
+def _extract_telemetry_signals(output: dict) -> tuple[float, float, float]:
+    """Trả về (confidence, silence_ratio, coverage) từ output."""
+    features = output.get("features") or {}
+    confidence = float(features.get("avg_word_probability") or 0.0)
+    audio_dur = float(features.get("audio_duration_sec") or 0.0)
+    silence_sec = float(features.get("silence_sec") or 0.0)
+    silence_ratio = silence_sec / audio_dur if audio_dur > 0 else 0.0
+    acc = features.get("accuracy_metrics") or {}
+    # Không có reference script thì không có coverage; coi như đạt để không tự trigger.
+    coverage = float(acc.get("coverage") or 1.0)
+    return confidence, silence_ratio, coverage
+
+
 def _grade_bytes(
     audio_bytes: bytes,
     suffix: str,
@@ -116,6 +163,8 @@ def _grade_bytes(
     expected_duration_sec: float | None,
     prompt: str,
     no_ai: bool,
+    mode: str,
+    user_requested_review: bool,
 ) -> dict:
     """Ghi audio ra file tạm rồi chạy pipeline (HÀM CHẶN — gọi qua threadpool).
 
@@ -125,19 +174,114 @@ def _grade_bytes(
     try:
         tmp.write(audio_bytes)
         tmp.close()
-        output = grade_response(
-            tmp.name,
-            config,
-            qt,
-            prompt_text=prompt,
-            reference_script=reference_script,
-            expected_duration_sec=expected_duration_sec,
-            image_b64=image_b64,
-            image_media_type=image_media_type,
-            no_ai=no_ai,
-            question_id=qt.key,
-            save=False,
+        submission_id = str(uuid4())
+        requested_mode = _normalize_mode(mode)
+        review_reasons: list[str] = []
+        started = perf_counter()
+
+        def _run_once(asr_backend: str) -> dict:
+            return grade_response(
+                tmp.name,
+                config,
+                qt,
+                prompt_text=prompt,
+                reference_script=reference_script,
+                expected_duration_sec=expected_duration_sec,
+                image_b64=image_b64,
+                image_media_type=image_media_type,
+                asr_backend=asr_backend,
+                no_ai=no_ai,
+                question_id=qt.key,
+                save=False,
+            )
+
+        score_before_review = None
+        score_after_review = None
+        used_mode = requested_mode
+        review_triggered = False
+        fallback_reason: str | None = None
+
+        if requested_mode == "review":
+            output = _run_once(config.asr_backend_review)
+            review_triggered = True
+        elif requested_mode == "fast":
+            if not config.fast_backend_enabled:
+                used_mode = "default"
+                fallback_reason = "fast_backend_unavailable"
+                review_reasons.append("fast backend disabled by config")
+                output = _run_once(config.asr_backend_default)
+            else:
+                try:
+                    output = _run_once(config.asr_backend_fast)
+                except Exception as fast_err:  # noqa: BLE001 - fallback đúng theo quyết định kiến trúc
+                    used_mode = "default"
+                    fallback_reason = "fast_backend_failed"
+                    review_reasons.append(
+                        f"fast_fallback_default: {type(fast_err).__name__}: {fast_err}"
+                    )
+                    output = _run_once(config.asr_backend_default)
+        elif requested_mode == "auto":
+            output = _run_once(config.asr_backend_default)
+            confidence, silence_ratio, coverage = _extract_telemetry_signals(output)
+            if confidence < config.auto_confidence_threshold:
+                review_reasons.append(
+                    f"low_confidence<{config.auto_confidence_threshold:.2f}"
+                )
+            if silence_ratio > config.auto_silence_ratio_threshold:
+                review_reasons.append(
+                    f"high_silence_ratio>{config.auto_silence_ratio_threshold:.2f}"
+                )
+            if coverage < config.auto_coverage_threshold:
+                review_reasons.append(
+                    f"low_coverage<{config.auto_coverage_threshold:.2f}"
+                )
+            if user_requested_review:
+                review_reasons.append("user_requested_review")
+
+            if review_reasons:
+                score_before_review = (
+                    (output.get("scores") or {}).get("estimated_toeic_score")
+                )
+                try:
+                    output = _run_once(config.asr_backend_review)
+                    review_triggered = True
+                    used_mode = "review"
+                    score_after_review = (
+                        (output.get("scores") or {}).get("estimated_toeic_score")
+                    )
+                except Exception as review_err:  # noqa: BLE001
+                    review_reasons.append(
+                        f"review_failed_kept_default: {type(review_err).__name__}: {review_err}"
+                    )
+                    used_mode = "default"
+            else:
+                used_mode = "default"
+        else:
+            output = _run_once(config.asr_backend_default)
+            used_mode = "default"
+
+        confidence, silence_ratio, _ = _extract_telemetry_signals(output)
+        total_ms = int((perf_counter() - started) * 1000)
+        telemetry = output.get("telemetry") or {}
+        telemetry.update(
+            {
+                "submissionId": submission_id,
+                "modeRequested": requested_mode,
+                "modeUsed": used_mode,
+                "durationSeconds": float((output.get("features") or {}).get("audio_duration_sec") or 0.0),
+                "transcriptionTimeMs": int(telemetry.get("transcription_time_ms") or 0),
+                "totalProcessingTimeMs": total_ms,
+                "confidence": round(confidence, 4),
+                "silenceRatio": round(silence_ratio, 4),
+                "wpm": float((output.get("features") or {}).get("speech_rate_wpm") or 0.0),
+                "reviewTriggered": review_triggered,
+                "reviewReason": ", ".join(review_reasons) if review_reasons else "",
+                "fallbackReason": fallback_reason,
+                "scoreBeforeReview": score_before_review,
+                "scoreAfterReview": score_after_review,
+            }
         )
+        output["telemetry"] = telemetry
     finally:
         try:
             os.unlink(tmp.name)
@@ -177,7 +321,9 @@ def health() -> dict:
 
 @app.post("/grade")
 async def grade(
-    audio: UploadFile = File(..., description="File audio (.wav/.mp3/...)"),
+    audio: UploadFile = File(
+        ..., description="File audio/clip (.wav/.mp3/.m4a/.webm/.mp4/...)"
+    ),
     text: str | None = Form(None, description="Script tham chiếu (Read Aloud)"),
     image: UploadFile | None = File(None, description="Ảnh đề bài (Describe Picture)"),
     expected_duration_sec: float | None = Form(None),
@@ -185,6 +331,10 @@ async def grade(
     feedback_lang: str | None = Form(None),
     prompt: str = Form("", description="Đề bài hiển thị cho thí sinh (optional)"),
     no_ai: bool = Form(False),
+    mode: str = Form("auto", description="default | fast | review | auto"),
+    user_requested_review: bool = Form(
+        False, description="Ép review khi mode=auto"
+    ),
 ) -> dict:
     """Chấm 1 bài nói. Trả về JSON {transcript, features, scores}."""
     has_image = image is not None
@@ -210,6 +360,8 @@ async def grade(
             expected_duration_sec=expected_duration_sec,
             prompt=prompt,
             no_ai=no_ai,
+            mode=mode,
+            user_requested_review=user_requested_review,
         )
     except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
         logger.exception("Lỗi khi chấm")
@@ -228,6 +380,10 @@ async def grade_batch(
     feedback_lang: str | None = Form(None),
     prompt: str = Form("", description="Đề bài hiển thị cho thí sinh (optional)"),
     no_ai: bool = Form(False),
+    mode: str = Form("auto", description="default | fast | review | auto"),
+    user_requested_review: bool = Form(
+        False, description="Ép review khi mode=auto"
+    ),
     max_concurrency: int = Form(
         0, description="Số bài chấm song song; 0 = tự (1 cho local, 4 cho cloud)"
     ),
@@ -252,6 +408,7 @@ async def grade_batch(
 
     has_image = image is not None
     qt = _pick_question_type(text, has_image, question_type)
+    requested_mode = _normalize_mode(mode)
     image_b64, image_media_type = await _read_image(image)
     config = _resolve_config(feedback_lang)
 
@@ -296,6 +453,8 @@ async def grade_batch(
                     expected_duration_sec=expected_duration_sec,
                     prompt=prompt,
                     no_ai=no_ai,
+                    mode=requested_mode,
+                    user_requested_review=user_requested_review,
                 )
                 return {"index": idx, "audio_filename": filename, "result": result}
             except Exception as e:  # noqa: BLE001 - lỗi 1 em không làm hỏng cả lớp
@@ -308,6 +467,7 @@ async def grade_batch(
     succeeded = sum(1 for r in results if "result" in r)
     return {
         "question_type": qt.key,
+        "mode_requested": requested_mode,
         "count": len(results),
         "succeeded": succeeded,
         "failed": len(results) - succeeded,
