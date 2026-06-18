@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOEIC Speaking Grader</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            color: #1a1a1a;
+            margin-bottom: 2rem;
+            font-size: 2rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 1.5rem;
+            font-size: 1.25rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+            font-family: monospace;
+        }
+
+        .file-upload {
+            border: 2px dashed #ddd;
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #fafafa;
+        }
+
+        .file-upload:hover {
+            border-color: #4f46e5;
+            background: #f0f0ff;
+        }
+
+        .file-upload.has-file {
+            border-color: #22c55e;
+            background: #f0fdf4;
+        }
+
+        .file-upload input {
+            display: none;
+        }
+
+        .file-upload-text {
+            color: #666;
+        }
+
+        .file-upload-text .icon {
+            font-size: 2rem;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+
+        .file-list {
+            margin-top: 1rem;
+            text-align: left;
+        }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 0.5rem;
+            background: #f0fdf4;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+        }
+
+        .file-item .name {
+            flex: 1;
+            color: #166534;
+            font-size: 0.9rem;
+        }
+
+        .file-item .remove {
+            background: none;
+            border: none;
+            color: #dc2626;
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 0 0.5rem;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .btn {
+            padding: 0.875rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .btn-primary {
+            background: #4f46e5;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #4338ca;
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #d1d5db;
+        }
+
+        .btn-secondary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .status-bar.info {
+            background: #eff6ff;
+            color: #1e40af;
+        }
+
+        .status-bar.success {
+            background: #f0fdf4;
+            color: #166534;
+        }
+
+        .status-bar.error {
+            background: #fef2f2;
+            color: #991b1b;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid currentColor;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .result {
+            display: none;
+        }
+
+        .result.visible {
+            display: block;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .score-display {
+            text-align: center;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            border-radius: 12px;
+            color: white;
+            margin-bottom: 1.5rem;
+        }
+
+        .score-display .score {
+            font-size: 3rem;
+            font-weight: 700;
+        }
+
+        .score-display .label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .result-section {
+            margin-bottom: 1.5rem;
+        }
+
+        .result-section h3 {
+            color: #333;
+            margin-bottom: 0.75rem;
+            font-size: 1.1rem;
+        }
+
+        .result-section p {
+            color: #555;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .feature-item {
+            background: #f9fafb;
+            padding: 0.75rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .feature-item .value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #4f46e5;
+        }
+
+        .feature-item .name {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+
+        .batch-result {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .batch-result .filename {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+
+        .batch-result .batch-score {
+            display: inline-block;
+            background: #4f46e5;
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .batch-result .batch-error {
+            color: #dc2626;
+        }
+
+        .api-config {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .api-config input {
+            flex: 1;
+        }
+
+        .api-config .btn {
+            width: auto;
+            padding: 0.75rem 1rem;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 TOEIC Speaking Grader</h1>
+
+        <!-- API Configuration -->
+        <div class="card">
+            <h2>⚙️ API Configuration</h2>
+            <div class="form-group">
+                <label for="api-url">API Base URL</label>
+                <div class="api-config">
+                    <input type="text" id="api-url" value="http://localhost:8000" placeholder="http://localhost:8000">
+                    <button class="btn btn-secondary" onclick="checkHealth()">Check</button>
+                </div>
+            </div>
+            <div id="health-status"></div>
+        </div>
+
+        <!-- Single Grading -->
+        <div class="card">
+            <h2>📝 Single Grading</h2>
+            
+            <div class="form-group">
+                <label class="file-upload" id="single-file-label">
+                    <input type="file" id="audio-file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4,.mov,.mkv,.avi">
+                    <div class="file-upload-text">
+                        <span class="icon">📁</span>
+                        <span>Click to select audio file</span>
+                    </div>
+                </label>
+                <div id="single-file-name" class="file-list"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="reference-text">Reference Script (optional - for Read Aloud)</label>
+                <textarea id="reference-text" placeholder="Enter the reference transcript here..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="prompt-text">Prompt (optional)</label>
+                <textarea id="prompt-text" placeholder="Enter the prompt shown to the test-taker..."></textarea>
+            </div>
+
+            <div class="row">
+                <div class="form-group">
+                    <label for="question-type">Question Type</label>
+                    <select id="question-type">
+                        <option value="">Auto-detect</option>
+                        <option value="read_aloud">Read Aloud</option>
+                        <option value="describe_picture">Describe Picture</option>
+                        <option value="respond_questions">Respond to Questions</option>
+                        <option value="respond_with_info">Respond with Info</option>
+                        <option value="express_opinion">Express Opinion</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="mode">Grading Mode</label>
+                    <select id="mode">
+                        <option value="auto">Auto (recommended)</option>
+                        <option value="default">Default</option>
+                        <option value="fast">Fast</option>
+                        <option value="review">Review</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="form-group">
+                    <label for="feedback-lang">Feedback Language</label>
+                    <select id="feedback-lang">
+                        <option value="">Default</option>
+                        <option value="vi">Vietnamese</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="expected-duration">Expected Duration (sec)</label>
+                    <input type="number" id="expected-duration" placeholder="e.g. 60" min="1">
+                </div>
+            </div>
+
+            <div class="checkbox-group" style="margin-bottom: 1.5rem;">
+                <input type="checkbox" id="no-ai">
+                <label for="no-ai">ASR only (skip AI scoring)</label>
+            </div>
+
+            <button class="btn btn-primary" id="grade-btn" onclick="gradeSingle()">Grade Now</button>
+        </div>
+
+        <!-- Results -->
+        <div class="result" id="result">
+            <div class="card">
+                <div class="result-header">
+                    <h2>📊 Results</h2>
+                    <button class="btn btn-secondary" onclick="closeResult()" style="width: auto; padding: 0.5rem 1rem;">Close</button>
+                </div>
+
+                <div class="score-display" id="score-display">
+                    <div class="label">Estimated TOEIC Speaking Score</div>
+                    <div class="score" id="toeic-score">--</div>
+                </div>
+
+                <div class="result-section">
+                    <h3>📝 Transcript</h3>
+                    <p id="transcript"></p>
+                </div>
+
+                <div class="result-section">
+                    <h3>📈 Features</h3>
+                    <div class="features-grid" id="features-grid"></div>
+                </div>
+
+                <div class="result-section">
+                    <h3>📋 Scores Breakdown</h3>
+                    <div id="scores-breakdown"></div>
+                </div>
+
+                <div class="result-section">
+                    <h3>💬 Feedback</h3>
+                    <p id="feedback"></p>
+                </div>
+
+                <div class="result-section">
+                    <h3>🔍 Telemetry</h3>
+                    <div id="telemetry"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Batch Results -->
+        <div class="result" id="batch-result">
+            <div class="card">
+                <div class="result-header">
+                    <h2>📊 Batch Results</h2>
+                    <button class="btn btn-secondary" onclick="closeBatchResult()" style="width: auto; padding: 0.5rem 1rem;">Close</button>
+                </div>
+                <div id="batch-summary"></div>
+                <div id="batch-results-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL_KEY = 'toeic-grader-api-url';
+
+        // Load saved API URL
+        const savedUrl = localStorage.getItem(API_URL_KEY);
+        if (savedUrl) {
+            document.getElementById('api-url').value = savedUrl;
+        }
+
+        // File upload handling
+        const fileLabel = document.getElementById('single-file-label');
+        const fileInput = document.getElementById('audio-file');
+        const fileNameDisplay = document.getElementById('single-file-name');
+
+        fileLabel.addEventListener('click', (e) => {
+            if (e.target !== fileInput) {
+                fileInput.click();
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                fileLabel.classList.add('has-file');
+                fileNameDisplay.innerHTML = `
+                    <div class="file-item">
+                        <span class="name">📄 ${fileInput.files[0].name}</span>
+                        <button class="remove" onclick="clearFile(event)">✕</button>
+                    </div>
+                `;
+            } else {
+                fileLabel.classList.remove('has-file');
+                fileNameDisplay.innerHTML = '';
+            }
+        });
+
+        function clearFile(e) {
+            e.stopPropagation();
+            fileInput.value = '';
+            fileLabel.classList.remove('has-file');
+            fileNameDisplay.innerHTML = '';
+        }
+
+        // Health check
+        async function checkHealth() {
+            const url = document.getElementById('api-url').value.replace(/\/$/, '');
+            const statusDiv = document.getElementById('health-status');
+            
+            statusDiv.innerHTML = '<div class="status-bar info"><div class="spinner"></div><span>Checking...</span></div>';
+
+            try {
+                const res = await fetch(`${url}/health`);
+                const data = await res.json();
+                
+                if (res.ok) {
+                    localStorage.setItem(API_URL_KEY, url);
+                    statusDiv.innerHTML = `
+                        <div class="status-bar success">
+                            <span>✅ Connected to ${data.backend || 'TOEIC Speaking Grader'}</span>
+                        </div>
+                    `;
+                } else {
+                    statusDiv.innerHTML = `
+                        <div class="status-bar error">
+                            <span>❌ API returned error: ${res.status}</span>
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                statusDiv.innerHTML = `
+                    <div class="status-bar error">
+                        <span>❌ Cannot connect: ${err.message}</span>
+                    </div>
+                `;
+            }
+        }
+
+        // Single grade
+        async function gradeSingle() {
+            const url = document.getElementById('api-url').value.replace(/\/$/, '');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('Please select an audio file');
+                return;
+            }
+
+            const btn = document.getElementById('grade-btn');
+            btn.disabled = true;
+            btn.textContent = 'Grading...';
+
+            const formData = new FormData();
+            formData.append('audio', file);
+            
+            const referenceText = document.getElementById('reference-text').value;
+            if (referenceText) formData.append('text', referenceText);
+
+            const promptText = document.getElementById('prompt-text').value;
+            if (promptText) formData.append('prompt', promptText);
+
+            const questionType = document.getElementById('question-type').value;
+            if (questionType) formData.append('question_type', questionType);
+
+            const mode = document.getElementById('mode').value;
+            formData.append('mode', mode);
+
+            const feedbackLang = document.getElementById('feedback-lang').value;
+            if (feedbackLang) formData.append('feedback_lang', feedbackLang);
+
+            const expectedDuration = document.getElementById('expected-duration').value;
+            if (expectedDuration) formData.append('expected_duration_sec', expectedDuration);
+
+            const noAi = document.getElementById('no-ai').checked;
+            formData.append('no_ai', noAi);
+
+            try {
+                const res = await fetch(`${url}/grade`, { method: 'POST', body: formData });
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'API error');
+                }
+
+                const data = await res.json();
+                showSingleResult(data);
+            } catch (err) {
+                alert(`Error: ${err.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Grade Now';
+            }
+        }
+
+        function showSingleResult(data) {
+            const resultDiv = document.getElementById('result');
+            
+            // Score
+            const score = data.scores?.estimated_toeic_score ?? '--';
+            document.getElementById('toeic-score').textContent = score;
+
+            // Transcript
+            document.getElementById('transcript').textContent = data.transcript || 'No transcript available';
+
+            // Features
+            const features = data.features || {};
+            const featuresGrid = document.getElementById('features-grid');
+            const featureItems = [
+                { name: 'Accuracy', value: ((features.accuracy_metrics?.accuracy || 0) * 100).toFixed(1) + '%' },
+                { name: 'Coverage', value: ((features.accuracy_metrics?.coverage || 0) * 100).toFixed(1) + '%' },
+                { name: 'Fluency', value: ((features.fluency_metrics?.fluency_score || 0) * 100).toFixed(1) + '%' },
+                { name: 'WPM', value: features.speech_rate_wpm?.toFixed(0) || '--' },
+                { name: 'Duration', value: (features.audio_duration_sec || 0).toFixed(1) + 's' },
+                { name: 'Confidence', value: ((data.telemetry?.confidence || 0) * 100).toFixed(1) + '%' },
+            ];
+            featuresGrid.innerHTML = featureItems.map(f => `
+                <div class="feature-item">
+                    <div class="value">${f.value}</div>
+                    <div class="name">${f.name}</div>
+                </div>
+            `).join('');
+
+            // Scores breakdown
+            const scoresDiv = document.getElementById('scores-breakdown');
+            if (data.scores) {
+                const scoreEntries = Object.entries(data.scores);
+                scoresDiv.innerHTML = scoreEntries.map(([key, val]) => `
+                    <div style="display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #e5e7eb;">
+                        <span style="color: #555;">${formatLabel(key)}</span>
+                        <span style="color: #333; font-weight: 600;">${typeof val === 'number' ? val.toFixed(2) : val}</span>
+                    </div>
+                `).join('');
+            }
+
+            // Feedback
+            document.getElementById('feedback').textContent = data.feedback || 'No feedback available';
+
+            // Telemetry
+            const tel = data.telemetry || {};
+            const telDiv = document.getElementById('telemetry');
+            telDiv.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem;">
+                    <div class="feature-item"><div class="value">${tel.modeUsed || '--'}</div><div class="name">Mode Used</div></div>
+                    <div class="feature-item"><div class="value">${(tel.totalProcessingTimeMs || 0).toFixed(0)}ms</div><div class="name">Processing Time</div></div>
+                    <div class="feature-item"><div class="value">${(tel.durationSeconds || 0).toFixed(1)}s</div><div class="name">Audio Duration</div></div>
+                    <div class="feature-item"><div class="value">${tel.wpm?.toFixed(0) || '--'}</div><div class="name">WPM</div></div>
+                    <div class="feature-item"><div class="value">${(tel.confidence || 0).toFixed(4)}</div><div class="name">Confidence</div></div>
+                    <div class="feature-item"><div class="value">${(tel.silenceRatio || 0).toFixed(4)}</div><div class="name">Silence Ratio</div></div>
+                    <div class="feature-item"><div class="value">${tel.reviewTriggered ? 'Yes' : 'No'}</div><div class="name">Review Triggered</div></div>
+                    <div class="feature-item"><div class="value" style="font-size: 0.8rem;">${tel.reviewReason || 'N/A'}</div><div class="name">Review Reason</div></div>
+                </div>
+            `;
+
+            resultDiv.classList.add('visible');
+            resultDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function closeResult() {
+            document.getElementById('result').classList.remove('visible');
+        }
+
+        function formatLabel(key) {
+            return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        }
+    </script>
+</body>
+</html>
