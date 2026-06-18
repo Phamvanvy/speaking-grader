@@ -64,6 +64,10 @@ class Config:
     # Mã ngắn ('vi', 'en', 'ja'...) hoặc tên tự do. Mặc định tiếng Việt vì
     # người dùng chính là người học VN.
     feedback_lang: str = "vi"
+    # Trần token sinh ra của LLM. Nhận xét tiếng Việt nhiều tiêu chí + rationale
+    # dễ vượt 4096 → JSON bị cắt. Để rộng; cả 2 backend đều dừng sớm khi xong
+    # nên đặt cao không tốn thêm (chỉ tính token thực sinh ra).
+    max_tokens: int = 30000
 
     @property
     def has_api_key(self) -> bool:
@@ -85,4 +89,5 @@ def load_config() -> Config:
         local_model=os.getenv("TOEIC_LOCAL_MODEL", "qwen3"),
         local_api_key=os.getenv("TOEIC_LOCAL_API_KEY", "no-key"),
         feedback_lang=os.getenv("TOEIC_FEEDBACK_LANG", "vi") or "vi",
+        max_tokens=int(os.getenv("TOEIC_MAX_TOKENS", "30000")),
     )

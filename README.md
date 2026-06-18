@@ -116,6 +116,35 @@ curl -X POST http://localhost:8000/grade \
   -F image=@picture.jpg
 ```
 
+> ⚠️ **Windows cmd.exe / PowerShell**: dấu nháy ĐƠN `'...'` không được tước —
+> nếu dùng `-F 'audio=@...'` thì tên trường thành `'audio` và server báo
+> *"audio field required"*. Dùng nháy **kép** `-F "audio=@data/audio/sample.wav"`,
+> và trong PowerShell gọi `curl.exe` (không phải alias `curl`). Trên Git Bash thì
+> nháy đơn chuẩn Linux dùng được.
+
+### Chấm cả lớp một lần — `POST /grade-batch`
+
+Nhiều file audio (mỗi file = 1 học sinh) cho **cùng** đề bài. Mỗi file chấm độc
+lập; 1 file lỗi không làm hỏng cả lớp (lỗi gói vào trường `error` của file đó).
+
+```bash
+curl -X POST http://localhost:8000/grade-batch \
+  -F audios=@hs_an.wav \
+  -F audios=@hs_binh.m4a \
+  -F audios=@hs_chi.wav \
+  -F text="The weather is nice today." \
+  -F expected_duration_sec=12
+```
+
+Trả về: `{question_type, count, succeeded, failed, concurrency, results:[{index, audio_filename, result|error}]}`.
+
+- `max_concurrency` (form, mặc định `0`=tự): số bài chấm song song. Tự chọn **1**
+  cho backend local (llama.cpp xử lý 1 request/lúc, Whisper không an toàn đa
+  luồng) và **4** cho cloud (Anthropic). Chỉ tăng khi hiểu rủi ro.
+- Tối đa 100 file/batch — lớp đông hơn thì chia nhỏ. Với backend local, chấm
+  tuần tự nên ~40 em sẽ mất nhiều phút (mỗi bài vài chục giây); cân nhắc tăng
+  client timeout hoặc giảm `TOEIC_MAX_TOKENS`.
+
 > Chấm **ảnh** cần backend có thị giác: Claude (`TOEIC_BACKEND=anthropic`, đặt
 > `ANTHROPIC_API_KEY`) hoặc model local vision (vd Qwen-VL qua llama.cpp).
 > Trả về JSON `{question_type, transcript, features, scores}` (scores = `null`
@@ -129,6 +158,7 @@ curl -X POST http://localhost:8000/grade \
 | `TOEIC_MODEL` | `claude-sonnet-4-6` | Model chấm. Đổi `claude-opus-4-8` để benchmark chất lượng cao nhất |
 | `WHISPER_MODEL` | `base` | `tiny`/`base`/`small`/`medium`/`large-v3` |
 | `WHISPER_DEVICE` | `cpu` | `cpu` hoặc `cuda` |
+| `TOEIC_MAX_TOKENS` | `30000` | Trần token LLM sinh ra. Nhận xét tiếng Việt dài dễ vượt 4096 → JSON bị cắt; để rộng (cả 2 backend dừng sớm khi xong nên không tốn thêm). |
 
 ## Lưu ý thiết kế
 

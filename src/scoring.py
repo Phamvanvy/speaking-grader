@@ -202,7 +202,7 @@ def _score_anthropic(
     t0 = time.monotonic()
     response = client.messages.parse(
         model=config.model,
-        max_tokens=4096,
+        max_tokens=config.max_tokens,
         thinking={"type": "adaptive"},
         system=system_prompt,
         messages=[{"role": "user", "content": content}],
@@ -223,9 +223,15 @@ def _score_anthropic(
     result = response.parsed_output
     if result is None:
         # stop_reason refusal / max_tokens → parsed_output có thể None
+        hint = (
+            f" JSON bị cắt vì chạm trần max_tokens={config.max_tokens} — "
+            f"tăng TOEIC_MAX_TOKENS."
+            if response.stop_reason == "max_tokens"
+            else ""
+        )
         raise RuntimeError(
             f"Claude không trả về kết quả đúng schema "
-            f"(stop_reason={response.stop_reason})."
+            f"(stop_reason={response.stop_reason}).{hint}"
         )
     return result
 
@@ -266,7 +272,7 @@ def _score_local(
     t0 = time.monotonic()
     response = client.chat.completions.create(
         model=config.local_model,
-        max_tokens=4096,
+        max_tokens=config.max_tokens,
         temperature=0,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -294,9 +300,15 @@ def _score_local(
         getattr(usage, "completion_tokens", "?"),
     )
 
+    finish = response.choices[0].finish_reason
     content = response.choices[0].message.content
+    if finish == "length":
+        raise RuntimeError(
+            f"Model local bị cắt vì chạm trần max_tokens={config.max_tokens} "
+            f"(finish_reason=length) → JSON dở dang. Tăng TOEIC_MAX_TOKENS, "
+            f"hoặc giảm độ dài nhận xét."
+        )
     if not content:
-        finish = response.choices[0].finish_reason
         raise RuntimeError(
             f"Model local không trả về nội dung (finish_reason={finish})."
         )
