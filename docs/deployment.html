@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TOEIC Speaking Grader — Hướng dẫn Deploy lên Cloud</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --ink: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent-2: #a78bfa;
+    --ok: #34d399;
+    --warn: #fbbf24;
+    --danger: #f87171;
+    --border: #334155;
+    --mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, system-ui, sans-serif;
+    background: radial-gradient(1200px 600px at 50% -10%, #1e293b 0%, var(--bg) 60%);
+    color: var(--ink);
+    line-height: 1.6;
+    padding: 32px 16px 80px;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 30px; }
+  header h1 { font-size: 1.9rem; margin: 0 0 6px; }
+  header p { color: var(--muted); margin: 0; }
+
+  h2.section {
+    font-size: 1.25rem; margin: 44px 0 16px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px;
+  }
+  h2.section .badge {
+    width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
+    color: #06283d; font-weight: 700; display: grid; place-items: center; font-size: .95rem;
+  }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 18px 20px; margin: 14px 0; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  }
+  .card h3 { margin: 0 0 8px; font-size: 1.02rem; color: var(--accent); }
+  .card h3 .file { font-family: var(--mono); font-size: .78rem; color: var(--accent-2); }
+  .card p { margin: 8px 0; font-size: .92rem; }
+  .card ul { margin: 8px 0; padding-left: 20px; font-size: .9rem; }
+  .card li { margin: 5px 0; }
+  .muted { color: var(--muted); }
+  code { font-family: var(--mono); color: var(--accent-2); background: var(--panel-2);
+         padding: 1px 5px; border-radius: 5px; font-size: .85em; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 720px){ .grid2 { grid-template-columns: 1fr; } }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: .85rem; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td code { background: transparent; padding: 0; }
+  .pill { display: inline-block; font-size: .72rem; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .pill.good { background: rgba(52,211,153,.15); color: var(--ok); border: 1px solid rgba(52,211,153,.4); }
+  .pill.mid  { background: rgba(251,191,36,.15); color: var(--warn); border: 1px solid rgba(251,191,36,.4); }
+  .pill.bad  { background: rgba(248,113,113,.15); color: var(--danger); border: 1px solid rgba(248,113,113,.4); }
+
+  pre {
+    background: #0b1220; border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; overflow-x: auto; font-family: var(--mono);
+    font-size: .82rem; line-height: 1.5; color: #cbd5e1; margin: 10px 0;
+  }
+  pre .c { color: #64748b; }        /* comment */
+  pre .k { color: var(--accent); }  /* keyword */
+  pre .s { color: var(--ok); }      /* string */
+
+  .note {
+    font-size: .86rem; background: #1e293b; border-left: 3px solid var(--accent-2);
+    border-radius: 8px; padding: 12px 16px; color: var(--muted); margin: 12px 0;
+  }
+  .note.warn { border-left-color: var(--warn); }
+  .note.danger { border-left-color: var(--danger); }
+  .note b { color: var(--ink); }
+
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: center;
+          font-size: .82rem; margin: 8px 0; }
+  .flow .box { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+               padding: 8px 12px; font-family: var(--mono); }
+  .flow .box.hl { border-color: var(--accent); color: var(--accent); }
+  .flow .arr { color: var(--muted); }
+
+  .check { list-style: none; padding-left: 0; }
+  .check li { padding-left: 26px; position: relative; margin: 7px 0; font-size: .9rem; }
+  .check li::before { content: "✓"; position: absolute; left: 0; color: var(--ok); font-weight: 700; }
+
+  footer { text-align: center; color: var(--muted); font-size: .78rem; margin-top: 56px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>☁️ TOEIC Speaking Grader — Hướng dẫn Deploy lên Cloud</h1>
+    <p>Đưa FastAPI + faster-whisper + Claude API lên production một cách tối ưu (chi phí, tốc độ, độ ổn định)</p>
+  </header>
+
+  <!-- ============ 0. Đặc điểm app ============ -->
+  <h2 class="section"><span class="badge">0</span> Đặc điểm app quyết định cách deploy</h2>
+  <div class="card">
+    <p>Trước khi chọn nền tảng, cần hiểu 5 ràng buộc kỹ thuật của project này — chúng chi phối mọi quyết định bên dưới:</p>
+    <ul>
+      <li><b>Model ASR nặng, nạp 1 lần/process.</b> <code>src/api.py</code> nạp config + cache Whisper trong RAM/VRAM lúc khởi động → <b>cold start chậm</b> (vài giây ~ vài chục giây). Không hợp serverless "scale-to-zero" thuần nếu cần phản hồi tức thì.</li>
+      <li><b>CPU chạy được, GPU nhanh hơn nhiều.</b> <code>WHISPER_DEVICE=cpu|cuda</code>. CPU rẻ nhưng chậm; GPU (T4/L4) tăng tốc 5–15×.</li>
+      <li><b>Whisper KHÔNG an toàn đa luồng.</b> Đừng scale bằng nhiều thread trong 1 process — scale bằng <b>nhiều replica</b>, mỗi replica <code>uvicorn --workers 1</code> (1 GPU/replica).</li>
+      <li><b>Request batch chạy lâu.</b> <code>/grade-batch</code> chấm 40 em có thể mất nhiều phút → cần tăng timeout hoặc chuyển sang kiến trúc job + queue.</li>
+      <li><b>Phụ thuộc ffmpeg + secret + egress.</b> faster-whisper đọc audio qua <b>ffmpeg</b> (phải có trong image); cần <code>ANTHROPIC_API_KEY</code> (secret) và mạng ra ngoài để gọi Claude.</li>
+    </ul>
+  </div>
+
+  <!-- ============ 1. Stack đề xuất ============ -->
+  <h2 class="section"><span class="badge">1</span> Stack tối ưu — nên dùng gì</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>🐳 Đóng gói &amp; Build</h3>
+      <ul>
+        <li><b>Docker</b> (multi-stage) — môi trường giống hệt local, kèm <code>ffmpeg</code>.</li>
+        <li><b>Bake model Whisper vào image</b> hoặc volume cache → tránh tải lúc cold start.</li>
+        <li>Registry: <b>GHCR / Docker Hub / ECR / Artifact Registry</b>.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>🚀 Nơi chạy (Runtime)</h3>
+      <ul>
+        <li><b>CPU, dùng thưa:</b> Cloud Run / Azure Container Apps (scale-to-zero).</li>
+        <li><b>GPU, theo lượt:</b> Modal / RunPod / Replicate (serverless GPU).</li>
+        <li><b>Always-on đơn giản:</b> 1 VM GPU + Docker Compose.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>🔐 Secrets &amp; Config</h3>
+      <ul>
+        <li><b>Không</b> đưa <code>.env</code> thật vào image/git.</li>
+        <li>Dùng Secret Manager của nền tảng (GCP/AWS/Azure) hoặc biến môi trường runtime.</li>
+        <li>Inject <code>ANTHROPIC_API_KEY</code>, <code>TOEIC_MODEL</code>, <code>WHISPER_*</code> lúc deploy.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>📦 Lưu trữ &amp; Quan sát</h3>
+      <ul>
+        <li>Container ephemeral → đừng ghi <code>outputs/</code> ra đĩa local. API đã <code>save=False</code>; nếu cần lưu, đẩy <b>S3/GCS</b> hoặc DB.</li>
+        <li>Log ra <b>stdout</b> (không chỉ <code>logs/app.log</code>) để cloud thu được.</li>
+        <li>Healthcheck: dùng sẵn <code>GET /health</code> làm liveness/readiness probe.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ 2. Kiến trúc ============ -->
+  <h2 class="section"><span class="badge">2</span> Kiến trúc tham chiếu</h2>
+  <div class="card">
+    <p class="muted">Phương án A — đồng bộ (đơn giản, hợp lớp nhỏ / chấm lẻ):</p>
+    <div class="flow">
+      <span class="box">Client</span><span class="arr">▶</span>
+      <span class="box">HTTPS / LB</span><span class="arr">▶</span>
+      <span class="box hl">Container: uvicorn src.api:app</span><span class="arr">▶</span>
+      <span class="box">Claude API</span>
+    </div>
+    <p class="muted" style="margin-top:18px;">Phương án B — bất đồng bộ (khuyến nghị cho <code>/grade-batch</code> lớp 40 em):</p>
+    <div class="flow">
+      <span class="box">Client</span><span class="arr">▶</span>
+      <span class="box">API (nhận job, trả jobId)</span><span class="arr">▶</span>
+      <span class="box">Queue<br/>(Redis/SQS)</span><span class="arr">▶</span>
+      <span class="box hl">Worker GPU<br/>(chấm)</span><span class="arr">▶</span>
+      <span class="box">Store kết quả<br/>(S3/DB)</span>
+    </div>
+    <div class="note">
+      <b>Khi nào cần B?</b> Khi request vượt timeout của nền tảng (Cloud Run tối đa 60 phút,
+      nhiều LB/proxy chỉ 30–60 giây). Tách <b>nhận việc</b> khỏi <b>xử lý</b>: API trả ngay
+      <code>jobId</code>, client poll <code>GET /jobs/{id}</code>; worker chấm nền và lưu kết quả.
+    </div>
+  </div>
+
+  <!-- ============ 3. So sánh nền tảng ============ -->
+  <h2 class="section"><span class="badge">3</span> So sánh nền tảng — chọn theo nhu cầu</h2>
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>Nền tảng</th><th>GPU</th><th>Scale&nbsp;0</th><th>Hợp khi</th><th>Lưu ý</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>Google Cloud Run</b></td>
+          <td><span class="pill mid">L4 (mới)</span></td>
+          <td><span class="pill good">Có</span></td>
+          <td>Chấm thưa, muốn trả tiền theo dùng, ưa CPU</td>
+          <td>Cold start nạp Whisper; đặt <code>min-instances=1</code> để giữ ấm. Timeout ≤ 60′.</td>
+        </tr>
+        <tr>
+          <td><b>Modal</b></td>
+          <td><span class="pill good">T4/L4/A10</span></td>
+          <td><span class="pill good">Có</span></td>
+          <td>Workload ML/GPU theo lượt, muốn giữ model warm dễ dàng</td>
+          <td>Hợp nhất cho ASR. Định nghĩa image + GPU bằng Python.</td>
+        </tr>
+        <tr>
+          <td><b>RunPod / Replicate</b></td>
+          <td><span class="pill good">Đa dạng</span></td>
+          <td><span class="pill good">Có</span></td>
+          <td>Cần GPU rẻ, serverless endpoint</td>
+          <td>RunPod rẻ; Replicate đóng gói model nhanh.</td>
+        </tr>
+        <tr>
+          <td><b>Azure Container Apps</b></td>
+          <td><span class="pill mid">Có (serverless GPU)</span></td>
+          <td><span class="pill good">Có</span></td>
+          <td>Đã trong hệ sinh thái Azure</td>
+          <td>KEDA autoscale theo concurrency/queue.</td>
+        </tr>
+        <tr>
+          <td><b>AWS ECS Fargate / App Runner</b></td>
+          <td><span class="pill bad">CPU only*</span></td>
+          <td><span class="pill mid">App Runner: gần 0</span></td>
+          <td>Đã dùng AWS, chấm CPU base/small</td>
+          <td>Cần GPU → EC2 <code>g4dn/g5</code> + ECS hoặc EKS.</td>
+        </tr>
+        <tr>
+          <td><b>VM + Docker Compose</b><br/><span class="muted">(GCE / EC2 / Azure VM / VPS)</span></td>
+          <td><span class="pill good">Tùy chọn</span></td>
+          <td><span class="pill bad">Không</span></td>
+          <td>Muốn đơn giản, chi phí dự đoán được, luôn bật</td>
+          <td>Tự lo HTTPS (Caddy/Nginx), update, monitoring.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="muted" style="margin-top:10px;">* Fargate hiện không có GPU; muốn GPU trên AWS dùng EC2 GPU instance.</p>
+  </div>
+
+  <div class="card">
+    <h3>🎯 Gợi ý nhanh theo tình huống</h3>
+    <ul>
+      <li><b>Demo / lớp nhỏ, ngân sách thấp:</b> Cloud Run (CPU, <code>WHISPER_MODEL=base</code>) + Claude cloud. Trả theo dùng, gần như $0 khi rảnh.</li>
+      <li><b>Chấm cả lớp thường xuyên, cần tốc độ:</b> Modal hoặc RunPod (GPU T4/L4, <code>WHISPER_DEVICE=cuda</code>) + queue (Phương án B).</li>
+      <li><b>Muốn kiểm soát hoàn toàn / on-prem:</b> 1 VM GPU + Docker Compose + Caddy (HTTPS tự động).</li>
+    </ul>
+  </div>
+
+  <!-- ============ 4. Dockerfile ============ -->
+  <h2 class="section"><span class="badge">4</span> Đóng gói Docker (đã có sẵn trong repo)</h2>
+  <div class="note">
+    ✅ <b>Đã smoke-test local:</b> server boot, <code>GET /health</code> &amp; <code>/docs</code> trả 200,
+    <code>POST /grade</code> (ASR, <code>no_ai=true</code>) chạy đúng. Bộ file dưới đây đã nằm sẵn trong repo:
+    <code>Dockerfile</code>, <code>.dockerignore</code>, <code>docker-compose.yml</code>.
+  </div>
+  <div class="card">
+    <p>Image CPU gọn, có sẵn <code>ffmpeg</code>, prefetch Whisper để giảm cold start. Đổi base sang
+       <code>nvidia/cuda:12.x-cudnn-runtime</code> khi chạy GPU (xem mục 6).</p>
+    <pre><span class="c"># ---- Dockerfile (CPU) ----</span>
+<span class="k">FROM</span> python:3.11-slim
+
+<span class="c"># ffmpeg cho faster-whisper đọc audio; rm cache để image nhẹ</span>
+<span class="k">RUN</span> apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+<span class="k">WORKDIR</span> /app
+<span class="k">COPY</span> requirements.txt .
+<span class="k">RUN</span> pip install --no-cache-dir -r requirements.txt
+
+<span class="c"># Prefetch model Whisper vào image → không tải lúc cold start</span>
+<span class="k">ENV</span> WHISPER_MODEL=base \
+    WHISPER_DEVICE=cpu
+<span class="k">RUN</span> python -c <span class="s">"from faster_whisper import WhisperModel; WhisperModel('base')"</span>
+
+<span class="k">COPY</span> src ./src
+
+<span class="c"># Workers=1: Whisper không an toàn đa luồng → scale bằng replica</span>
+<span class="k">ENV</span> PORT=8000
+<span class="k">EXPOSE</span> 8000
+<span class="k">CMD</span> ["sh","-c","uvicorn src.api:app --host 0.0.0.0 --port ${PORT} --workers 1"]</pre>
+    <div class="note warn">
+      <code>.dockerignore</code> (đã có) loại: <code>.venv/ .git/ .gitnexus/ data/ outputs/
+      logs/ .env __pycache__/ .pytest_cache/ docs/ tests/ *.md</code> — giữ build context nhỏ &amp;
+      tránh rò rỉ key/dữ liệu vào image.
+    </div>
+    <div class="note">
+      <b>ffmpeg:</b> ASR thực tế chạy được cả khi thiếu ffmpeg trên PATH (faster-whisper dùng PyAV
+      đã bundle), nhưng image vẫn cài <code>ffmpeg</code> cho chắc với mọi định dạng/đường dẫn.
+    </div>
+    <div class="note danger">
+      <b>Tầng ASR fast/review KHÔNG được bundle.</b> <code>requirements.txt</code> chỉ có
+      <code>faster-whisper</code>; <code>whisperx</code> (lane <code>review</code>) và
+      <code>insanely_fast_whisper</code> (lane <code>fast</code>) rất nặng + thiên GPU nên bị bỏ ra.
+      Hệ quả: <code>mode=fast</code> tự fallback về <code>default</code>, nhưng
+      <code>mode=review</code> <b>fail cứng</b> nếu chưa cài <code>whisperx</code>.
+      <b>Cách xử lý cho image CPU:</b> ép cả 3 tầng về <code>faster_whisper</code> bằng env
+      (<code>docker-compose.yml</code> đã làm sẵn) để mọi mode chạy được:
+      <pre style="margin-top:8px"><span class="k">TOEIC_ASR_BACKEND_DEFAULT</span>=faster_whisper
+<span class="k">TOEIC_ASR_BACKEND_FAST</span>=faster_whisper
+<span class="k">TOEIC_ASR_BACKEND_REVIEW</span>=faster_whisper</pre>
+      Muốn dùng đúng multi-tier (fast/review riêng) thì cài thêm backend → xem mục 6.
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Chạy thử local (giống production)</h3>
+    <pre><span class="c"># Cách 1 — docker run trực tiếp</span>
+<span class="k">docker build</span> -t speaking-grader .
+<span class="k">docker run</span> --rm -p 8000:8000 \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e TOEIC_BACKEND=anthropic \
+  -e TOEIC_MODEL=claude-sonnet-4-6 \
+  speaking-grader
+
+<span class="c"># Cách 2 — docker compose (tự đọc biến từ .env, có healthcheck /health)</span>
+<span class="k">docker compose</span> up --build
+
+<span class="c"># Kiểm tra: http://localhost:8000/health và /docs</span>
+<span class="c"># Không có key? gửi no_ai=true (chỉ ASR) hoặc TOEIC_BACKEND=local (llama.cpp)</span></pre>
+  </div>
+
+  <!-- ============ 5. Tối ưu ============ -->
+  <h2 class="section"><span class="badge">5</span> Tối ưu chi phí &amp; hiệu năng</h2>
+  <div class="grid2">
+    <div class="card">
+      <h3>⚡ Giảm cold start</h3>
+      <ul>
+        <li>Bake model vào image (mục 4) hoặc mount volume cache <code>~/.cache/huggingface</code>.</li>
+        <li>Giữ <code>min-instances ≥ 1</code> nếu cần phản hồi nhanh.</li>
+        <li>Whisper nhỏ hơn (<code>tiny</code>/<code>base</code>) nạp nhanh hơn.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>💰 Giảm chi phí</h3>
+      <ul>
+        <li>Scale-to-zero khi rảnh (Cloud Run/Modal).</li>
+        <li>GPU spot/preemptible cho batch không gấp.</li>
+        <li>Chấm tầng: <code>no_ai=true</code> lọc nhanh, chỉ gọi Claude cho bài cần.</li>
+        <li><code>TOEIC_MODEL=claude-sonnet-4-6</code> cho throughput; Opus chỉ khi cần chất lượng cao nhất.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>🏎️ Tăng throughput</h3>
+      <ul>
+        <li>Scale <b>theo replica</b>, mỗi replica 1 worker / 1 GPU.</li>
+        <li><code>WHISPER_DEVICE=cuda</code> nếu có GPU.</li>
+        <li><code>/grade-batch</code> với <code>max_concurrency=4–8</code> khi backend cloud.</li>
+        <li>Autoscale theo độ dài queue (Phương án B) chuẩn hơn theo CPU.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>⏱️ Tránh timeout</h3>
+      <ul>
+        <li>Tăng request timeout của nền tảng &amp; LB.</li>
+        <li>Tăng client timeout khi gọi batch.</li>
+        <li>Lớp đông → cắt nhỏ batch (≤ giới hạn 100 file) hoặc chuyển sang job async.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>🔐 Secrets đúng cách</h3>
+    <pre><span class="c"># Cloud Run: gắn secret từ Secret Manager</span>
+gcloud run deploy speaking-grader \
+  --image REGION-docker.pkg.dev/PROJECT/repo/speaking-grader \
+  --region asia-southeast1 --port 8000 \
+  --memory 4Gi --cpu 2 --timeout 3600 --min-instances 1 \
+  --set-secrets ANTHROPIC_API_KEY=anthropic-key:latest \
+  --set-env-vars TOEIC_MODEL=claude-sonnet-4-6,WHISPER_MODEL=base</pre>
+    <div class="note danger">
+      <b>Không bao giờ</b> commit <code>.env</code> thật hay nhúng key vào image. File <code>.env</code> hiện
+      đã nằm trong thư mục project — kiểm tra nó đã được <code>.gitignore</code> bỏ qua trước khi build/push.
+    </div>
+  </div>
+
+  <!-- ============ 6. GPU ============ -->
+  <h2 class="section"><span class="badge">6</span> Bản GPU (khi cần tốc độ)</h2>
+  <div class="card">
+    <p>faster-whisper trên GPU cần CUDA 12 + cuDNN (đã khai báo <code>nvidia-cublas-cu12</code>,
+       <code>nvidia-cudnn-cu12</code> trong <code>requirements.txt</code>). Dùng base image CUDA và bật <code>cuda</code>:</p>
+    <pre><span class="k">FROM</span> nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+<span class="k">RUN</span> apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip ffmpeg && rm -rf /var/lib/apt/lists/*
+<span class="k">WORKDIR</span> /app
+<span class="k">COPY</span> requirements.txt .
+<span class="k">RUN</span> pip3 install --no-cache-dir -r requirements.txt
+<span class="k">ENV</span> WHISPER_MODEL=medium WHISPER_DEVICE=cuda
+<span class="k">RUN</span> python3 -c <span class="s">"from faster_whisper import WhisperModel; WhisperModel('medium')"</span>
+<span class="k">COPY</span> src ./src
+<span class="k">CMD</span> ["sh","-c","uvicorn src.api:app --host 0.0.0.0 --port 8000 --workers 1"]</pre>
+    <ul>
+      <li>Chạy với <code>docker run --gpus all ...</code> (hoặc nền tảng tự cấp GPU).</li>
+      <li>GPU rẻ &amp; đủ mạnh: <b>T4 / L4</b>; <code>medium</code>/<code>large-v3</code> cần VRAM lớn hơn.</li>
+      <li>1 GPU = 1 replica = 1 worker. Cần nhiều thông lượng → thêm replica, không thêm worker.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Bật multi-tier ASR (fast / review) — chỉ trên GPU</h3>
+    <p>Chỉ cài khi thật sự cần lane <code>fast</code> (insanely_fast_whisper) và <code>review</code>
+       (whisperx) riêng. Các gói này kéo theo <code>torch</code>/<code>pyannote</code> rất nặng —
+       không nên đưa vào image CPU.</p>
+    <pre><span class="c"># Thêm vào Dockerfile bản GPU, SAU khi cài requirements.txt</span>
+<span class="k">RUN</span> pip3 install --no-cache-dir whisperx insanely-fast-whisper</pre>
+    <ul>
+      <li>Cài xong thì <b>bỏ</b> phần override <code>TOEIC_ASR_BACKEND_*</code> trong
+          <code>docker-compose.yml</code> để dùng đúng từng lane.</li>
+      <li>Chưa cài: cứ ép cả 3 tầng về <code>faster_whisper</code> (mục 4) — an toàn cho CPU.</li>
+    </ul>
+  </div>
+
+  <!-- ============ 7. CI/CD ============ -->
+  <h2 class="section"><span class="badge">7</span> CI/CD (GitHub Actions)</h2>
+  <div class="card">
+    <pre><span class="c"># .github/workflows/deploy.yml (rút gọn)</span>
+<span class="k">on</span>: { push: { branches: [main] } }
+<span class="k">jobs</span>:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - <span class="k">run</span>: pip install -r requirements.txt && pytest -q   <span class="c"># test trước khi deploy</span>
+      - <span class="k">run</span>: docker build -t $IMAGE .
+      - <span class="k">run</span>: docker push $IMAGE
+      - <span class="k">run</span>: gcloud run deploy speaking-grader --image $IMAGE  <span class="c"># hoặc modal deploy / runpod</span></pre>
+    <p class="muted">Pipeline: <b>test → build image → push registry → deploy</b>. Key/secret lấy từ GitHub Secrets, không hard-code.</p>
+  </div>
+
+  <!-- ============ 8. Checklist ============ -->
+  <h2 class="section"><span class="badge">8</span> Checklist trước khi lên production</h2>
+  <div class="card">
+    <ul class="check">
+      <li><code>ffmpeg</code> có trong image (faster-whisper bắt buộc).</li>
+      <li>Model Whisper được prefetch/cache → cold start chấp nhận được.</li>
+      <li><code>ANTHROPIC_API_KEY</code> nạp qua Secret Manager, KHÔNG nằm trong image/git.</li>
+      <li><code>.dockerignore</code> loại <code>.venv .git data outputs logs .env</code>.</li>
+      <li><code>uvicorn --workers 1</code> mỗi replica; scale bằng replica (Whisper không đa luồng).</li>
+      <li>Request &amp; LB timeout đủ lớn cho <code>/grade-batch</code> (hoặc đã chuyển job async).</li>
+      <li>Log ra stdout; <code>GET /health</code> gắn vào liveness/readiness probe.</li>
+      <li>Sizing RAM/VRAM khớp <code>WHISPER_MODEL</code> (base CPU ~2–4GB; medium/large GPU nhiều hơn).</li>
+      <li>HTTPS + xác thực (API key/JWT) trước endpoint — tránh lạm dụng tốn tiền Claude.</li>
+      <li>Kết quả lưu vào S3/GCS/DB nếu cần giữ (container ephemeral).</li>
+      <li>Theo dõi chi phí Claude API + cảnh báo ngân sách.</li>
+    </ul>
+  </div>
+
+  <footer>
+    TOEIC Speaking Grader · Hướng dẫn deploy · Xem thêm luồng xử lý tại
+    <a href="pipeline.html">docs/pipeline.html</a>
+  </footer>
+</div>
+</body>
+</html>

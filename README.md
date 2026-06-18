@@ -194,6 +194,56 @@ Mẹo tối ưu tốc độ chấm (quan trọng cho 40 em):
 > Trả về JSON `{question_type, transcript, features, scores}` (scores = `null`
 > khi `no_ai` hoặc audio rỗng).
 
+## Chạy bằng Docker
+
+Đóng gói sẵn: [Dockerfile](Dockerfile) (image CPU, có `ffmpeg`, prefetch Whisper
+`base`), [.dockerignore](.dockerignore) và [docker-compose.yml](docker-compose.yml).
+API chạy `uvicorn src.api:app` với **1 worker** (Whisper không an toàn đa luồng —
+cần nhiều thông lượng thì chạy thêm container, đừng tăng worker).
+
+```bash
+# Cách 1: docker run trực tiếp
+docker build -t speaking-grader .
+docker run --rm -p 8000:8000 \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e TOEIC_BACKEND=anthropic \
+  -e TOEIC_MODEL=claude-sonnet-4-6 \
+  speaking-grader
+# Swagger: http://localhost:8000/docs · Healthcheck: http://localhost:8000/health
+```
+
+```powershell
+# Windows PowerShell (xuống dòng bằng backtick `)
+docker run --rm -p 8000:8000 `
+  -e ANTHROPIC_API_KEY=sk-ant-... `
+  -e TOEIC_BACKEND=anthropic `
+  -e TOEIC_MODEL=claude-sonnet-4-6 `
+  speaking-grader
+```
+
+```bash
+# Cách 2: docker compose (tự đọc biến từ .env)
+docker compose up --build
+```
+
+- **Secret**: truyền `ANTHROPIC_API_KEY` qua `-e`/`--env-file`/compose `env_file`, KHÔNG
+  build vào image (`.env` đã bị `.dockerignore` loại khỏi build context).
+- **Chấm thử không cần key**: gửi `no_ai=true` (chỉ ASR + features), hoặc `TOEIC_BACKEND=local`
+  trỏ tới llama.cpp server.
+- **GPU**: đổi base image sang `nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04`, đặt
+  `WHISPER_DEVICE=cuda`, chạy `docker run --gpus all ...` (hoặc bỏ comment khối `deploy.resources`
+  trong `docker-compose.yml`). Chi tiết: [docs/deployment.html](docs/deployment.html).
+
+> ⚠️ **Backend ASR `fast`/`review`:** image chỉ cài `faster-whisper`. `whisperx` (lane
+> `review`) và `insanely_fast_whisper` (lane `fast`) **không** có trong `requirements.txt`
+> (rất nặng + thiên GPU). Hệ quả: `mode=fast` tự fallback về `default`, nhưng `mode=review`
+> sẽ **fail cứng** nếu chưa cài `whisperx`. `docker-compose.yml` đã ép cả 3 tầng về
+> `faster_whisper` để mọi mode chạy được trên CPU. Muốn dùng đúng multi-tier thì cài thêm
+> các backend đó (xem [docs/deployment.html](docs/deployment.html) mục 6) và bỏ phần override.
+
+> Lên cloud (Cloud Run / Modal / RunPod / VM…): xem hướng dẫn tối ưu chi phí &
+> hiệu năng tại **[docs/deployment.html](docs/deployment.html)**.
+
 ## Cấu hình (.env)
 
 | Biến | Mặc định | Ý nghĩa |

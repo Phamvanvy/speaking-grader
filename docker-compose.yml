@@ -1,0 +1,50 @@
+# Chạy thử local: `docker compose up --build`
+# Đọc biến môi trường từ file .env (ANTHROPIC_API_KEY, TOEIC_MODEL, WHISPER_*...).
+services:
+  grader:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    # Cache model Whisper sống qua mọi lần recreate → không tải lại ~1.6GB
+    # (large-v3-turbo) mỗi lần khởi động. faster-whisper tải qua HuggingFace Hub
+    # vào ~/.cache/huggingface (container chạy root → /root/.cache/huggingface).
+    volumes:
+      - whisper-cache:/root/.cache/huggingface
+    # Cho phép container gọi service trên host (llama.cpp) qua host.docker.internal.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Image này CHỈ cài faster-whisper (whisperx/insanely_fast_whisper không có
+    # trong requirements.txt vì rất nặng + thiên GPU). Ép cả 3 tầng ASR về
+    # faster_whisper để mọi mode (default/fast/review/auto) chạy được trên CPU.
+    # `environment` ghi đè giá trị tương ứng trong .env.
+    # → Đã cài whisperx/insanely_fast_whisper (bản GPU)? Xóa/comment 3 dòng dưới.
+    environment:
+      TOEIC_ASR_BACKEND_DEFAULT: faster_whisper
+      TOEIC_ASR_BACKEND_FAST: faster_whisper
+      TOEIC_ASR_BACKEND_REVIEW: faster_whisper
+      # GPU: cần WHISPER_DEVICE=cuda (đặt trong .env). cuBLAS/cuDNN lấy từ wheel
+      # nvidia-*-cu12 + LD_LIBRARY_PATH trong Dockerfile; GPU do khối deploy inject.
+      # Máy KHÔNG có GPU? Bỏ comment dòng dưới để ép CPU (và comment khối deploy).
+      # WHISPER_DEVICE: cpu
+    # Healthcheck dùng endpoint /health có sẵn của app.
+    # healthcheck:
+    #   test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+    #   interval: 30s
+    #   timeout: 5s
+    #   retries: 3
+    #   start_period: 40s
+    restart: unless-stopped
+
+    # Muốn chạy GPU: build bằng Dockerfile bản CUDA rồi bỏ comment khối dưới.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  whisper-cache:

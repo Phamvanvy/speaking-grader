@@ -1,0 +1,20 @@
+# Giữ build context nhỏ + tránh rò rỉ secret/dữ liệu vào image.
+.venv/
+venv/
+.git/
+.gitnexus/
+.pytest_cache/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Secret & dữ liệu cục bộ — KHÔNG đưa vào image.
+.env
+data/
+outputs/
+logs/
+
+# Tài liệu/khác không cần cho runtime.
+docs/
+tests/
+*.md
