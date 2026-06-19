@@ -22,13 +22,91 @@ from .features import Features
 from .gating import GatingResult
 from .phoneme.models import PhonemeResult
 from .rubrics.toeic import QuestionType
-from .schema import SpeakingResult
+from .schema import CompletionLevel, SpeakingResult
 
 logger = logging.getLogger("toeic.scoring")
+
+# --- Quy đổi điểm tiêu chí (0-3) → điểm TOEIC Speaking (0-200) -----------------
+# Vì sao có khối này: trước đây estimated_toeic_score do LLM TỰ CHỌN trong prose
+# ("rơi vào khoảng 80-90 → 85"), nên cùng một bộ điểm tiêu chí mỗi lần lại ra số
+# khác (85 vs 75) — nhất là với model local nhỏ/nén. Giờ LLM chỉ chấm 0-3 mỗi
+# tiêu chí + mức hoàn thành; con số 0-200 được TÍNH bằng công thức dưới đây nên
+# CỐ ĐỊNH với cùng input. Hằng số để lộ ở module-level cho dễ tinh chỉnh.
+#
+# Mốc neo theo thang proficiency ETS: điểm tiêu chí 2/3 ("đạt, vài lỗi") ~ level
+# 5 (~110đ), 3/3 ~ level 7-8 (~190đ). Nội suy tuyến tính cho điểm float.
+_CRIT_ANCHORS: tuple[tuple[float, float], ...] = (
+    (0.0, 0.0),
+    (1.0, 60.0),
+    (2.0, 110.0),
+    (3.0, 190.0),
+)
+
+# task_completion / content_relevance dưới mức 'high' nhân phạt vào điểm tổng
+# (mắt xích yếu nhất quyết định). Đảm bảo bài làm dở/lạc đề không được điểm cao
+# dù phát âm tốt — khớp yêu cầu gating trong system prompt.
+_LEVEL_PENALTY: dict[CompletionLevel, float] = {
+    CompletionLevel.very_low: 0.35,
+    CompletionLevel.low: 0.60,
+    CompletionLevel.medium: 0.85,
+    CompletionLevel.high: 1.0,
+}
+
+
+def _interp_crit_points(score: float) -> float:
+    """Nội suy điểm tiêu chí (0-3) → điểm thành phần (0-190) theo _CRIT_ANCHORS."""
+    s = max(0.0, min(3.0, score))
+    for (x0, y0), (x1, y1) in zip(_CRIT_ANCHORS, _CRIT_ANCHORS[1:]):
+        if s <= x1:
+            return y0 + (y1 - y0) * (s - x0) / (x1 - x0)
+    return _CRIT_ANCHORS[-1][1]
+
+
+def _compute_toeic_score(result: SpeakingResult) -> int:
+    """Tính estimated_toeic_score (0-200) TẤT ĐỊNH từ điểm tiêu chí + mức hoàn thành.
+
+    Cùng một bộ (điểm tiêu chí, task_completion, content_relevance) luôn cho cùng
+    một số → loại bỏ dao động do LLM tự bốc số. Làm tròn về bội số của 10 (thang
+    TOEIC Speaking báo theo bước 10).
+    """
+    if not result.criteria:
+        return 0
+    base = sum(_interp_crit_points(c.score) for c in result.criteria) / len(
+        result.criteria
+    )
+    penalty = min(
+        _LEVEL_PENALTY.get(result.task_completion, 1.0),
+        _LEVEL_PENALTY.get(result.content_relevance, 1.0),
+    )
+    raw = base * penalty
+    return max(0, min(200, int(round(raw / 10.0) * 10)))
 
 # Directory to store prompt logs for debugging / model comparison.
 # Enable by setting env var TOEIC_LOG_PROMPTS=1 or Config.log_prompts=True.
 _PROMPT_LOG_DIR = Path("outputs/prompt_logs")
+
+# Chính sách xoay log: mỗi LẦN CHẠY (process mới) sẽ dọn sạch log của lần chạy
+# trước ở lần ghi đầu tiên — nên chạy lại app = log mới "ghi đè" log cũ. Nhưng
+# trong CÙNG một phiên, các lần chấm tiếp theo chỉ GHI THÊM (append), không xoá
+# nhau. Cờ dưới đảm bảo bước dọn chạy đúng một lần cho mỗi process.
+_prompt_log_reset_done = False
+
+
+def _ensure_prompt_log_dir() -> None:
+    """Tạo thư mục log; lần ĐẦU trong process thì xoá log của lần chạy trước.
+
+    Hiệu ứng: chạy lại app → log mới ghi đè (dọn) log cũ; nhiều lần chấm trong
+    cùng một phiên → tích luỹ thêm (append), không đè lên nhau.
+    """
+    global _prompt_log_reset_done
+    _PROMPT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    if not _prompt_log_reset_done:
+        for old in _PROMPT_LOG_DIR.glob("*.json"):
+            try:
+                old.unlink()
+            except OSError as e:  # pragma: no cover - file bị khoá/đang mở hiếm gặp
+                logger.warning("Không xoá được log cũ %s: %s", old, e)
+        _prompt_log_reset_done = True
 
 
 def _build_system_prompt(qt: QuestionType, feedback_lang: str) -> str:
@@ -80,19 +158,24 @@ short or off-topic answer must get a LOW task_completion.
 - If a completion floor is provided by upstream rule-based checks, do not score \
 task_completion higher than that floor.
 
-Map the per-criterion scores to estimated_toeic_score on the 0-200 TOEIC \
-Speaking scale (TOEIC does NOT use IELTS bands). Be consistent and calibrated.
+FINAL SCORE (important):
+- Do NOT compute or output the 0-200 estimated_toeic_score. It is derived \
+AUTOMATICALLY by the system from your per-criterion 0-3 scores plus \
+task_completion / content_relevance. Your job is ONLY to score each criterion \
+0-3 accurately and consistently (TOEIC does NOT use IELTS bands).
+- Be calibrated on the 0-3 scale: anchor every criterion to the SCORING SCALE \
+above and to the objective evidence, since the final number depends entirely on \
+these per-criterion scores.
 Give concrete, actionable suggestions for each criterion.
 
 EXPLAIN YOUR REASONING (important):
 - Each criterion's `justification` must be a clear, logical chain: cite the \
 specific objective metric or transcript evidence, say what it implies, then why \
 that lands the criterion at this 0-3 score and not one higher or lower.
-- `score_rationale` must explain step by step how the per-criterion scores \
-combine into the final estimated_toeic_score: which criteria pulled the score \
-up or down, how task_completion / content_relevance and any gating floor were \
-applied, and why the result falls in this 0-200 band rather than higher/lower. \
-Do not just restate the number — justify it.
+- `score_rationale` must explain which criteria are strong vs weak, how \
+task_completion / content_relevance and any gating floor affect the overall \
+quality, and what level the response is at. Do NOT state a specific 0-200 \
+number — that total is computed automatically from your per-criterion scores.
 
 OUTPUT LANGUAGE (important):
 - Write ALL human-readable text — every `justification`, every entry in \
@@ -264,6 +347,9 @@ def score(
             )
         last_problems = _validate_result(result, qt)
         if not last_problems:
+            # Ghi đè điểm tổng bằng giá trị TÍNH TẤT ĐỊNH từ điểm tiêu chí —
+            # bỏ qua số (nếu có) mà LLM trả về để đảm bảo nhất quán giữa các lần.
+            result.estimated_toeic_score = _compute_toeic_score(result)
             return result
         logger.warning(
             "Kết quả chấm không hợp lệ (lần %d/%d): %s",
@@ -563,7 +649,7 @@ def _log_api_request(
     system_prompt: str | None = None,
 ) -> None:
     """Log the full API request payload (messages, params) to outputs/prompt_logs/."""
-    _PROMPT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_prompt_log_dir()
     ts = time.strftime("%Y%m%d_%H%M%S")
     
     # Sanitize messages: strip image base64 data, keep structure
@@ -618,7 +704,7 @@ def _log_api_request(
 
 def _log_response(config: Config, backend: str, response_json: str) -> None:
     """Log AI response JSON to outputs/prompt_logs/."""
-    _PROMPT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_prompt_log_dir()
     ts = time.strftime("%Y%m%d_%H%M%S")
     stem = f"{ts}_{backend}_resp_{hash(response_json) % 100000:05d}"
     log_file = _PROMPT_LOG_DIR / f"{stem}.json"

@@ -18,7 +18,7 @@ from src.phoneme.models import (
     PhonemeSegment,
 )
 from src.scoring import _build_system_prompt, _build_user_prompt, score
-from src.schema import SpeakingResult
+from src.schema import CriterionScore, SpeakingResult
 
 
 class TestPhonemeInUserPrompt:
@@ -236,14 +236,20 @@ class TestScoreFunctionAcceptsPhonemeResult:
 
         # Patch Anthropic client to avoid actual API call
         mock_response = MagicMock()
+        # estimated_toeic_score do model trả KHÔNG còn được dùng — score() tính
+        # lại tất định từ điểm tiêu chí. Đặt số khác (30) để chứng minh nó bị ghi
+        # đè. read_aloud yêu cầu 2 tiêu chí: pronunciation + intonation_stress.
         mock_response.parsed_output = SpeakingResult(
-            estimated_toeic_score=150,
+            estimated_toeic_score=30,
             task_completion="medium",
             content_relevance="medium",
             question_type="read_aloud",
-            criteria=[],
-            criterion_scores=[],
-            suggestions=[],
+            criteria=[
+                CriterionScore(criterion="pronunciation", score=2, justification="ok"),
+                CriterionScore(
+                    criterion="intonation_stress", score=2, justification="ok"
+                ),
+            ],
             score_rationale="Test",
             summary_feedback="Test",
         )
@@ -266,8 +272,10 @@ class TestScoreFunctionAcceptsPhonemeResult:
                 phoneme_result=phoneme,
             )
 
-            # Verify the call went through
-            assert result.estimated_toeic_score == 150
+            # Điểm tổng được TÍNH lại tất định, KHÔNG lấy 999 từ model:
+            # base = (110 + 110) / 2 = 110; penalty = min(medium, medium) = 0.85
+            # → 93.5 → làm tròn về bội số 10 = 90.
+            assert result.estimated_toeic_score == 90
             # Verify _build_user_prompt was called (indirectly via the message content)
             call_args = mock_client.messages.parse.call_args
             user_content = call_args.kwargs["messages"][0]["content"]

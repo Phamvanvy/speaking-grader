@@ -35,17 +35,28 @@ class SpeakingResult(BaseModel):
     content_relevance: CompletionLevel
     criteria: list[CriterionScore]
     # TOEIC Speaking dùng thang 0-200, KHÔNG dùng Band như IELTS.
+    # QUAN TRỌNG: trường này KHÔNG do LLM sinh nữa — nó được TÍNH TỰ ĐỘNG trong
+    # code (scoring._compute_toeic_score) từ điểm tiêu chí 0-3 + task_completion
+    # + content_relevance, để cùng một bộ điểm tiêu chí luôn ra cùng một số (loại
+    # bỏ dao động do model tự "bốc" số). Có default=0 nên không bắt buộc trong
+    # schema gửi cho model; giá trị model trả (nếu có) sẽ bị ghi đè.
     estimated_toeic_score: int = Field(
-        ge=0, le=200, description="Điểm TOEIC Speaking ước tính (0-200)"
+        default=0,
+        ge=0,
+        le=200,
+        description=(
+            "Điểm TOEIC Speaking (0-200) — TÍNH TỰ ĐỘNG từ điểm tiêu chí, model "
+            "KHÔNG cần điền."
+        ),
     )
-    # Giải thích logic vì sao ra đúng số điểm tổng: nối điểm từng tiêu chí +
-    # số liệu khách quan + cờ gating -> khoảng điểm 0-200. Phải viết bằng
+    # Giải thích logic chấm: tiêu chí nào mạnh/yếu và mức độ hoàn thành tổng thể.
+    # KHÔNG nêu một con số 0-200 cụ thể (số tổng do code tính). Phải viết bằng
     # ngôn ngữ nhận xét được cấu hình.
     score_rationale: str = Field(
         description=(
-            "Lập luận từng bước dẫn tới estimated_toeic_score: tiêu chí nào kéo "
-            "điểm lên/xuống và vì sao rơi vào khoảng điểm này chứ không phải cao "
-            "hay thấp hơn."
+            "Lập luận từng bước: tiêu chí nào kéo chất lượng lên/xuống, mức "
+            "task_completion / content_relevance, và vì sao bài ở mức này. "
+            "KHÔNG cần nêu con số tổng 0-200 — số đó được tính tự động."
         )
     )
     summary_feedback: str

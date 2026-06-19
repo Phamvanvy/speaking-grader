@@ -41,6 +41,13 @@ h1 {
     margin-bottom: 1.25rem;
 }
 
+.mode-note {
+    margin: 0.4rem 0 0;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: #888;
+}
+
 label {
     display: block;
     margin-bottom: 0.5rem;

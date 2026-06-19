@@ -36,6 +36,30 @@ fileLabel.addEventListener('click', (e) => {
 
 fileInput.addEventListener('change', renderFileList);
 
+// ── Grading mode notes ────────────────────────────────────────────────
+// Each mode uses a different ASR backend and toggles phoneme analysis on/off,
+// so scores can legitimately differ across modes (by design). This note under
+// the selector explains why.
+const MODE_NOTES = {
+    auto: 'Starts in Default; auto-escalates to Review (better ASR + phoneme '
+        + 'analysis) when confidence/coverage is low. Recommended.',
+    default: 'Balanced ASR (faster-whisper). Phoneme analysis follows server config.',
+    fast: 'Fastest ASR, phoneme analysis OFF → pronunciation scored more leniently, '
+        + 'so scores may be HIGHER than Review. Quick estimate only.',
+    review: 'Most accurate: best ASR (WhisperX) + phoneme analysis ON. '
+        + 'Use this as the reference score.',
+};
+
+const modeSelect = document.getElementById('mode');
+const modeNote = document.getElementById('mode-note');
+
+function updateModeNote() {
+    modeNote.textContent = MODE_NOTES[modeSelect.value] || '';
+}
+
+modeSelect.addEventListener('change', updateModeNote);
+updateModeNote();
+
 function renderFileList() {
     const files = Array.from(fileInput.files);
     if (files.length === 0) {
