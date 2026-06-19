@@ -112,6 +112,7 @@ def _build_user_prompt(
     gating: GatingResult,
     phoneme_result: PhonemeResult | None = None,
     has_image: bool = False,
+    provided_info: str | None = None,
 ) -> str:
     payload: dict = {
         "task_prompt": prompt_text,
@@ -126,6 +127,10 @@ def _build_user_prompt(
         },
     }
 
+    # Tài liệu cho sẵn (Q8-10): chỉ đưa vào khi dạng câu dùng provided_info.
+    if qt.uses_provided_info and provided_info:
+        payload["provided_info"] = provided_info
+
     # Include phoneme data if available
     if phoneme_result is not None:
         payload["phoneme_data"] = phoneme_result.to_dict()
@@ -137,15 +142,26 @@ def _build_user_prompt(
             len(phoneme_result.segments),
         )
 
-    image_note = (
-        "An IMAGE of the picture the test-taker was asked to describe is attached "
-        "to this message. Judge whether the spoken transcript accurately and "
-        "completely describes what is actually in the picture (objects, people, "
-        "actions, setting). A description that does not match the picture must "
-        "lower content_relevance / relevance.\n\n"
-        if has_image
-        else ""
-    )
+    if not has_image:
+        image_note = ""
+    elif qt.uses_provided_info:
+        # Q8-10: ảnh là TÀI LIỆU NGUỒN (lịch trình/agenda...), không phải tranh để tả.
+        image_note = (
+            "An IMAGE is attached: it is the SOURCE DOCUMENT (e.g. a schedule, "
+            "agenda, itinerary, or information table) that the test-taker had to "
+            "answer from. Do NOT treat it as a picture to describe. Judge whether "
+            "the spoken transcript answers the question using the information in "
+            "this document ACCURATELY — wrong facts (times, dates, names, rooms, "
+            "prices) or invented details must lower relevance / content_relevance.\n\n"
+        )
+    else:
+        image_note = (
+            "An IMAGE of the picture the test-taker was asked to describe is attached "
+            "to this message. Judge whether the spoken transcript accurately and "
+            "completely describes what is actually in the picture (objects, people, "
+            "actions, setting). A description that does not match the picture must "
+            "lower content_relevance / relevance.\n\n"
+        )
     return (
         "Score the following TOEIC Speaking response. All numeric metrics are "
         "pre-computed and objective.\n\n"
@@ -208,6 +224,7 @@ def score(
     phoneme_result: PhonemeResult | None = None,
     image_b64: str | None = None,
     image_media_type: str | None = None,
+    provided_info: str | None = None,
 ) -> SpeakingResult:
     """Gọi LLM (Claude hoặc model local) và trả về SpeakingResult.
 
@@ -215,6 +232,8 @@ def score(
         Nếu có thì thêm vào payload để AI dùng làm evidence cho pronunciation.
     image_b64/image_media_type: ảnh đề bài (vd Describe Picture) gửi kèm dạng
     vision. Cả hai backend đều hỗ trợ; bỏ trống nếu không có ảnh.
+    provided_info: tài liệu cho sẵn (Q8-10) dạng text; chỉ đưa vào payload khi
+        dạng câu có uses_provided_info.
     """
     system_prompt = _build_system_prompt(qt, config.feedback_lang)
     user_prompt = _build_user_prompt(
@@ -226,6 +245,7 @@ def score(
         gating,
         phoneme_result=phoneme_result,
         has_image=bool(image_b64),
+        provided_info=provided_info,
     )
 
     # Gọi backend rồi validate; nếu output rác thì retry 1 lần và raise rõ ràng

@@ -2,7 +2,10 @@
 
 Chấm điểm bài nói TOEIC Speaking từ 1 file audio.
 
-Giai đoạn 1 xong: **Read Aloud (Q1-2)**. Giai đoạn 2 hiện tại: **Describe Picture (Q3-4)** — thí sinh tả bức tranh, LLM xem ảnh kèm transcript để chấm.
+Hỗ trợ đủ 5 dạng câu TOEIC Speaking: **Read Aloud (Q1-2)**, **Describe Picture
+(Q3-4)** (LLM xem ảnh kèm transcript), **Respond to Questions (Q5-7)**, **Respond
+using Information Provided (Q8-10)** (chấm theo tài liệu cho sẵn — text và/hoặc ảnh),
+và **Express an Opinion (Q11)**.
 
 ## Luồng xử lý (pipeline)
 
@@ -101,9 +104,10 @@ uvicorn src.api:app --reload --port 8000
 | `text` | — | Script tham chiếu → chấm **Read Aloud** (so transcript, ra WER/coverage) |
 | `image` | — | Ảnh đề bài → chấm **Describe Picture** (gửi LLM dạng vision) |
 | `expected_duration_sec` | — | Thời lượng kỳ vọng (giây) — vào `reading_pace` + gating |
-| `question_type` | — | Ép dạng câu (`read_aloud`/`describe_picture`/...) thay vì suy từ text/image |
+| `question_type` | — | Ép dạng câu (`read_aloud`/`describe_picture`/`respond_questions`/`respond_with_info`/`express_opinion`) thay vì suy từ text/image |
 | `feedback_lang` | — | Ngôn ngữ nhận xét (vd `vi`, `en`) |
 | `prompt` | — | Đề bài hiển thị cho thí sinh |
+| `provided_info` | — | Tài liệu cho sẵn dạng text → chấm **Respond with info (Q8-10)** (đối chiếu độ chính xác). Có thể kèm `image` nếu tài liệu là ảnh |
 | `no_ai` | — | `true` = chỉ ASR + features, bỏ LLM |
 | `mode` | — | `default`/`fast`/`review`/`auto` (mặc định `auto`) |
 | `user_requested_review` | — | `true` = ép review khi `mode=auto` |
@@ -124,7 +128,39 @@ curl -X POST http://localhost:8000/grade \
   -F audio=@answer.m4a \
   -F image=@picture.jpg \
   -F mode=review
+
+# Respond to questions (Q5-7): chọn dạng câu rõ ràng + đề bài
+curl -X POST http://localhost:8000/grade \
+  -F audio=@answer.wav \
+  -F question_type=respond_questions \
+  -F prompt="What kind of books do you enjoy reading, and why?" \
+  -F expected_duration_sec=15
+
+# Respond with info (Q8-10): tài liệu cho sẵn dạng text
+curl -X POST http://localhost:8000/grade \
+  -F audio=@answer.wav \
+  -F question_type=respond_with_info \
+  -F prompt="What time does the first session start, and what is its topic?" \
+  -F provided_info="9:00 AM Opening Keynote (Room A); 10:30 AM Session 1..." \
+  -F expected_duration_sec=15
+
+# Respond with info (Q8-10): tài liệu là ẢNH (lịch trình chụp lại)
+curl -X POST http://localhost:8000/grade \
+  -F audio=@answer.wav \
+  -F question_type=respond_with_info \
+  -F image=@schedule.jpg \
+  -F prompt="Which sessions is Mark Lee leading?"
+
+# Express an opinion (Q11)
+curl -X POST http://localhost:8000/grade \
+  -F audio=@answer.wav \
+  -F question_type=express_opinion \
+  -F prompt="Do you think working from home is more beneficial than working in an office?" \
+  -F expected_duration_sec=60
 ```
+
+> Q5-11 không tự suy ra từ `text`/`image` (đó là quy ước cho Read Aloud /
+> Describe Picture) — phải truyền `question_type` rõ ràng.
 
 > ⚠️ **Windows cmd.exe / PowerShell**: dấu nháy ĐƠN `'...'` không được tước —
 > nếu dùng `-F 'audio=@...'` thì tên trường thành `'audio` và server báo
@@ -277,8 +313,8 @@ pytest -q
 ## Roadmap
 
 - Phase 1: Read Aloud (Q1-2) ✅
-- Phase 2: Describe Picture (Q3-4) ← hiện tại
-- Phase 3: Respond to Questions (Q5-10)
-- Phase 4: Express Opinion (Q11)
-- Phase 5: IELTS Speaking
+- Phase 2: Describe Picture (Q3-4) ✅
+- Phase 3: Respond to Questions (Q5-10) ✅
+- Phase 4: Express Opinion (Q11) ✅
+- Phase 5: IELTS Speaking ← tiếp theo
 - Nâng cấp: ghi âm mic → Web UI (FastAPI) → chấm phát âm theo âm vị (wav2vec2/Azure) → lưu lịch sử (SQLite)

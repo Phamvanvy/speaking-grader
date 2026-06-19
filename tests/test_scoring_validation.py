@@ -85,6 +85,33 @@ def test_truncated_text_flagged():
     assert any("summary_feedback bị cắt" in p for p in problems)
 
 
+def test_express_opinion_clean_passes():
+    qt = get_question_type("express_opinion")
+    result = _result(
+        [_crit(c.key) for c in qt.criteria],
+    )
+    result.question_type = "express_opinion"
+    assert _validate_result(result, qt) == []
+
+
+def test_express_opinion_missing_organization_flagged():
+    qt = get_question_type("express_opinion")
+    # Bỏ tiêu chí organization đặc trưng của Q11 → phải bị bắt.
+    criteria = [_crit(c.key) for c in qt.criteria if c.key != "organization"]
+    result = _result(criteria)
+    result.question_type = "express_opinion"
+    problems = _validate_result(result, qt)
+    assert any("organization" in p and "thiếu" in p for p in problems)
+
+
+def test_respond_types_clean_pass():
+    for key in ("respond_questions", "respond_with_info"):
+        qt = get_question_type(key)
+        result = _result([_crit(c.key) for c in qt.criteria])
+        result.question_type = key
+        assert _validate_result(result, qt) == [], key
+
+
 def test_real_broken_sample_caught():
     # Tái hiện đúng outputs/sample__q1_read_aloud.json (glitch thực tế):
     # thiếu intonation_stress + suggestions=tên key + justification/summary cụt.

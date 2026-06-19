@@ -30,6 +30,7 @@ def grade_response(
     expected_duration_sec: float | None = None,
     image_b64: str | None = None,
     image_media_type: str | None = None,
+    provided_info: str | None = None,
     asr_backend: str = "faster_whisper",
     no_ai: bool = False,
     question_id: str = "adhoc",
@@ -40,6 +41,8 @@ def grade_response(
     - qt: dạng câu (quyết định tiêu chí + có dùng script tham chiếu không).
     - reference_script: text dùng cho Read Aloud (để so transcript ra WER/coverage).
     - image_b64 / image_media_type: ảnh đề bài cho Describe Picture (gửi LLM dạng vision).
+    - provided_info: tài liệu cho sẵn (Q8-10) dạng text; vào payload chấm khi dạng câu
+      có uses_provided_info.
     - expected_duration_sec: optional, vào features (reading_pace) + gating.
     - no_ai: chỉ chạy ASR + features, bỏ qua LLM.
     - save: ghi JSON ra outputs/ (CLI cần; API có thể tắt).
@@ -164,6 +167,7 @@ def grade_response(
             phoneme_result=phoneme_result,
             image_b64=image_b64,
             image_media_type=image_media_type,
+            provided_info=provided_info,
         )
         step_timings_ms["scoring"] = int((time.perf_counter() - step_started) * 1000)
         scores_dict = result.model_dump(mode="json")

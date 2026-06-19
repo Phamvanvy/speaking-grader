@@ -221,6 +221,7 @@ def _grade_bytes(
     no_ai: bool,
     mode: str,
     user_requested_review: bool,
+    provided_info: str | None = None,
 ) -> dict:
     """Ghi audio ra file tạm rồi chạy pipeline (HÀM CHẶN — gọi qua threadpool).
 
@@ -250,6 +251,7 @@ def _grade_bytes(
                 expected_duration_sec=expected_duration_sec,
                 image_b64=image_b64,
                 image_media_type=image_media_type,
+                provided_info=provided_info,
                 asr_backend=asr_backend,
                 no_ai=no_ai,
                 question_id=qt.key,
@@ -391,6 +393,9 @@ async def grade(
     question_type: str | None = Form(None),
     feedback_lang: str | None = Form(None),
     prompt: str = Form("", description="Đề bài hiển thị cho thí sinh (optional)"),
+    provided_info: str | None = Form(
+        None, description="Tài liệu cho sẵn dạng text (Respond with info, Q8-10)"
+    ),
     no_ai: bool = Form(False),
     mode: str = Form("auto", description="default | fast | review | auto"),
     user_requested_review: bool = Form(
@@ -420,6 +425,7 @@ async def grade(
             image_media_type=image_media_type,
             expected_duration_sec=expected_duration_sec,
             prompt=prompt,
+            provided_info=provided_info,
             no_ai=no_ai,
             mode=mode,
             user_requested_review=user_requested_review,
@@ -440,6 +446,9 @@ async def grade_batch(
     question_type: str | None = Form(None),
     feedback_lang: str | None = Form(None),
     prompt: str = Form("", description="Đề bài hiển thị cho thí sinh (optional)"),
+    provided_info: str | None = Form(
+        None, description="Tài liệu cho sẵn dạng text (Respond with info, Q8-10)"
+    ),
     no_ai: bool = Form(False),
     mode: str = Form("auto", description="default | fast | review | auto"),
     user_requested_review: bool = Form(
@@ -513,6 +522,7 @@ async def grade_batch(
                     image_media_type=image_media_type,
                     expected_duration_sec=expected_duration_sec,
                     prompt=prompt,
+                    provided_info=provided_info,
                     no_ai=no_ai,
                     mode=requested_mode,
                     user_requested_review=user_requested_review,

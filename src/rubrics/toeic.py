@@ -28,6 +28,9 @@ class QuestionType:
     # Hướng dẫn riêng cho dạng câu này (đưa vào system prompt)
     guidance: str = ""
     uses_reference_script: bool = False
+    # Dạng câu có tài liệu cho sẵn (Q8-10): thí sinh phải trả lời dựa trên
+    # provided_info (text) và/hoặc ảnh đính kèm.
+    uses_provided_info: bool = False
 
 
 # --- Các tiêu chí dùng chung -------------------------------------------------
@@ -149,7 +152,30 @@ RESPOND_QUESTIONS = QuestionType(
     label="Respond to questions (Q5-7)",
     criteria=[PRONUNCIATION, INTONATION_STRESS, GRAMMAR, VOCABULARY, RELEVANCE],
     scale_description=SCALE_0_3,
-    guidance="Trả lời câu hỏi. Đặc biệt chú ý relevance & completeness.",
+    guidance=(
+        "Thí sinh trả lời một câu hỏi ngắn về chủ đề quen thuộc (đời sống, công "
+        "việc, sở thích...). KHÔNG có thời gian chuẩn bị, KHÔNG có script tham "
+        "chiếu — không có accuracy_metrics/WER. Câu hỏi sau trong một bộ "
+        "thường đòi hỏi câu trả lời dài hơn (nêu lý do/ví dụ), không phải một từ.\n\n"
+        "RELEVANCE & COMPLETENESS (ưu tiên cao nhất):\n"
+        "- Phải trả lời ĐÚNG TRỌNG TÂM câu hỏi (task_prompt). Lạc đề, né câu hỏi, "
+        "hoặc nói chung chung không đụng tới nội dung hỏi PHẢI hạ relevance và "
+        "content_relevance.\n"
+        "- Trả lời trực tiếp + có phát triển (lý do, ví dụ, chi tiết) = relevance "
+        "high. Trả lời đúng hướng nhưng cụt lủn, thiếu phát triển = medium.\n\n"
+        "TASK COMPLETION:\n"
+        "- Không trả lời / chỉ vài từ rời rạc / im lặng phần lớn → very_low.\n"
+        "- Trả lời được nhưng quá ngắn so với yêu cầu (vd câu hỏi cần lý do mà chỉ "
+        "đáp 'Yes.') → low.\n"
+        "- Trả lời trực tiếp, đủ ý, có phát triển hợp lý → high.\n\n"
+        "TIÊU CHÍ NGÔN NGỮ:\n"
+        "- Pronunciation & Intonation: giọng rõ, nhịp tự nhiên; căn cứ "
+        "speech_rate_wpm, pause_count, filler_count (bằng chứng phụ). Quá nhiều "
+        "filler/ngắt nghỉ dài làm gián đoạn → trừ điểm intonation/fluency.\n"
+        "- Grammar: câu đúng chủ-vị, đúng thì; lỗi ảnh hưởng nghĩa bị trừ.\n"
+        "- Vocabulary: từ vựng chính xác, phù hợp ngữ cảnh; lặp từ nghèo nàn hạn "
+        "chế điểm."
+    ),
 )
 
 RESPOND_WITH_INFO = QuestionType(
@@ -157,7 +183,29 @@ RESPOND_WITH_INFO = QuestionType(
     label="Respond using information provided (Q8-10)",
     criteria=[PRONUNCIATION, INTONATION_STRESS, GRAMMAR, VOCABULARY, RELEVANCE],
     scale_description=SCALE_0_3,
-    guidance="Trả lời dựa trên thông tin cho sẵn. Chú ý dùng đúng thông tin.",
+    uses_provided_info=True,
+    guidance=(
+        "Thí sinh được cho một tài liệu (lịch trình, agenda, itinerary, bảng "
+        "thông tin...) — cung cấp dưới dạng provided_info (text) và/hoặc ẢNH đính "
+        "kèm — rồi trả lời câu hỏi DỰA TRÊN tài liệu đó. KHÔNG có script tham "
+        "chiếu cho phát âm.\n\n"
+        "ĐỘ CHÍNH XÁC THÔNG TIN (quyết định relevance — quan trọng nhất):\n"
+        "- Đối chiếu câu trả lời với provided_info / ảnh. Sai dữ kiện (sai giờ, "
+        "ngày, phòng, tên, số lượng, giá...) PHẢI hạ MẠNH relevance và "
+        "content_relevance, KỂ CẢ khi nói trôi chảy. Nói hay nhưng sai thông tin "
+        "KHÔNG được điểm cao.\n"
+        "- BỊA thông tin không có trong tài liệu (tự thêm chi tiết) bị phạt.\n"
+        "- Trả lời đúng, đủ, trích đúng dữ kiện được hỏi = relevance high. Đúng "
+        "một phần / thiếu dữ kiện được hỏi = medium.\n\n"
+        "TASK COMPLETION:\n"
+        "- Không trả lời / không dùng tài liệu / nói lạc → very_low.\n"
+        "- Trả lời nhưng thiếu phần lớn dữ kiện được hỏi → low.\n"
+        "- Trả lời trực tiếp, trích đúng và đủ thông tin yêu cầu → high.\n\n"
+        "TIÊU CHÍ NGÔN NGỮ (như Respond to questions):\n"
+        "- Pronunciation & Intonation: căn cứ speech_rate_wpm, pause_count, "
+        "filler_count (bằng chứng phụ).\n"
+        "- Grammar & Vocabulary: chính xác, phù hợp; lỗi ảnh hưởng nghĩa bị trừ."
+    ),
 )
 
 EXPRESS_OPINION = QuestionType(
@@ -173,9 +221,29 @@ EXPRESS_OPINION = QuestionType(
     ],
     scale_description=SCALE_0_3,
     guidance=(
-        "Trình bày ý kiến. Đánh giá đầy đủ các tiêu chí + organization. "
-        "Trả lời quá ngắn (vd 'Yes, I think so.') phải bị hạ task_completion "
-        "dù grammar/vocabulary có tốt."
+        "Thí sinh nêu và BẢO VỆ một quan điểm trong khoảng 60 giây. KHÔNG có "
+        "script tham chiếu. Đây là dạng câu khó nhất — đánh giá đủ các tiêu chí "
+        "ngôn ngữ CỘNG với organization.\n\n"
+        "ORGANIZATION (tiêu chí đặc trưng của dạng này):\n"
+        "- Thưởng điểm cho bố cục rõ: nêu lập trường → (các) lý do → ví dụ/dẫn "
+        "chứng → kết luận ngắn. Dùng từ nối hợp lý (first, because, for example, "
+        "in conclusion...).\n"
+        "- Phạt nói lan man, liệt kê rời rạc, đổi ý giữa chừng, hoặc không có "
+        "mạch lập luận.\n\n"
+        "RELEVANCE & COMPLETENESS:\n"
+        "- Phải nêu RÕ một lập trường VÀ chống đỡ bằng lý do + ví dụ. Nêu quan "
+        "điểm nhưng không có lý do nào → relevance thấp.\n\n"
+        "TASK COMPLETION:\n"
+        "- Trả lời quá ngắn (vd 'Yes, I think so.'), không có lập luận, hoặc "
+        "không chọn lập trường → very_low/low, DÙ grammar/vocabulary có tốt.\n"
+        "- Quá ngắn so với expected_duration_sec hoặc chỉ 1 lý do trống rỗng → low.\n"
+        "- Lập trường rõ, ≥2 lý do có phát triển + ví dụ, bố cục mạch lạc → high.\n\n"
+        "TIÊU CHÍ NGÔN NGỮ:\n"
+        "- Pronunciation & Intonation: căn cứ speech_rate_wpm, pause_count, "
+        "filler_count (bằng chứng phụ).\n"
+        "- Grammar: thưởng cấu trúc đa dạng (câu phức, mệnh đề lý do/điều kiện); "
+        "lỗi ảnh hưởng nghĩa bị trừ.\n"
+        "- Vocabulary: từ vựng phong phú, chính xác, hợp ngữ cảnh tranh luận."
     ),
 )
 

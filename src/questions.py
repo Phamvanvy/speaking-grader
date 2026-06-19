@@ -20,6 +20,8 @@ class Question:
     expected_duration_sec: float | None = None
     # Đường dẫn ảnh đề bài (tương đối từ project root) — dùng cho Describe Picture.
     image_path: str | None = None
+    # Tài liệu cho sẵn (text) — dùng cho Respond with info (Q8-10).
+    provided_info: str | None = None
 
 
 def _load_all(path: Path = _DATA_FILE) -> dict[str, Question]:
@@ -35,6 +37,7 @@ def _load_all(path: Path = _DATA_FILE) -> dict[str, Question]:
             reference_script=item.get("reference_script"),
             expected_duration_sec=item.get("expected_duration_sec"),
             image_path=item.get("image_path"),
+            provided_info=item.get("provided_info"),
         )
         questions[q.id] = q
     return questions

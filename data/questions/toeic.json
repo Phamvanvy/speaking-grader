@@ -35,6 +35,45 @@
     "expected_duration_sec": 45
   },
   {
+    "id": "q5_respond",
+    "type": "respond_questions",
+    "prompt": "Imagine that a marketing firm is doing research in your area. You have agreed to participate in a telephone interview about reading. How often do you read books, and where do you usually read?",
+    "expected_duration_sec": 15
+  },
+  {
+    "id": "q6_respond",
+    "type": "respond_questions",
+    "prompt": "What kind of books do you enjoy reading the most, and why?",
+    "expected_duration_sec": 15
+  },
+  {
+    "id": "q7_respond",
+    "type": "respond_questions",
+    "prompt": "Some people say that reading printed books is better than reading on a screen. Do you agree? Give reasons to support your answer.",
+    "expected_duration_sec": 30
+  },
+  {
+    "id": "q8_respond_info",
+    "type": "respond_with_info",
+    "prompt": "Hi, this is one of the attendees. I have a few questions about the workshop schedule. What time does the first session start, and what is its topic?",
+    "provided_info": "Marketing Strategy Workshop — Saturday, June 20\n9:00 AM  Opening Keynote: Trends in Digital Marketing (Room A, Speaker: Dr. Helen Carter)\n10:30 AM  Session 1: Social Media Advertising (Room B, Speaker: Mark Lee)\n12:00 PM  Lunch (Main Hall)\n1:30 PM  Session 2: Email Campaigns (Room B, Speaker: Mark Lee)\n3:00 PM  Panel Discussion: Measuring ROI (Room A)\nRegistration fee: $50 (includes lunch)",
+    "expected_duration_sec": 15
+  },
+  {
+    "id": "q9_respond_info",
+    "type": "respond_with_info",
+    "prompt": "I heard Mark Lee is speaking. Which sessions is he leading, and in which room?",
+    "provided_info": "Marketing Strategy Workshop — Saturday, June 20\n9:00 AM  Opening Keynote: Trends in Digital Marketing (Room A, Speaker: Dr. Helen Carter)\n10:30 AM  Session 1: Social Media Advertising (Room B, Speaker: Mark Lee)\n12:00 PM  Lunch (Main Hall)\n1:30 PM  Session 2: Email Campaigns (Room B, Speaker: Mark Lee)\n3:00 PM  Panel Discussion: Measuring ROI (Room A)\nRegistration fee: $50 (includes lunch)",
+    "expected_duration_sec": 15
+  },
+  {
+    "id": "q10_respond_info",
+    "type": "respond_with_info",
+    "prompt": "Could you give me an overview of everything happening after lunch, including the topics, rooms, and speakers?",
+    "provided_info": "Marketing Strategy Workshop — Saturday, June 20\n9:00 AM  Opening Keynote: Trends in Digital Marketing (Room A, Speaker: Dr. Helen Carter)\n10:30 AM  Session 1: Social Media Advertising (Room B, Speaker: Mark Lee)\n12:00 PM  Lunch (Main Hall)\n1:30 PM  Session 2: Email Campaigns (Room B, Speaker: Mark Lee)\n3:00 PM  Panel Discussion: Measuring ROI (Room A)\nRegistration fee: $50 (includes lunch)",
+    "expected_duration_sec": 30
+  },
+  {
     "id": "q11_opinion_remote_work",
     "type": "express_opinion",
     "prompt": "Do you think working from home is more beneficial than working in an office? Give reasons and examples to support your opinion.",

@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_duration_sec=question.expected_duration_sec,
             image_b64=image_b64,
             image_media_type=image_media_type,
+            provided_info=question.provided_info,
             asr_backend=config.asr_backend_default,
             no_ai=args.no_ai,
             question_id=question.id,
