@@ -98,6 +98,16 @@ class Config:
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
+    # Số bài chấm song song trong /grade-batch. 0 = tự chọn (1 cho local, 4 cho
+    # cloud). Với local có thể đặt 2-3: ASR (Whisper) đã được serialize bằng lock
+    # riêng nên Whisper vẫn chạy 1 lúc/lần, phần chồng lấn là tầng LLM của bài đã
+    # xong ASR với ASR của bài kế. Đặt qua TOEIC_BATCH_CONCURRENCY.
+    batch_concurrency: int = 0
+    # Bật prefix caching phía server local (llama.cpp): gửi cache_prompt=true để
+    # tái dùng KV-cache của phần system prompt (rubric) — giống nhau giữa mọi bài
+    # cùng đề trong batch. Server không hỗ trợ sẽ bỏ qua key này. Tắt bằng
+    # TOEIC_LOCAL_PREFIX_CACHE=false. (Không ảnh hưởng backend Anthropic.)
+    local_prefix_cache: bool = True
 
     @property
     def has_api_key(self) -> bool:
@@ -171,5 +181,9 @@ def load_config() -> Config:
         ),
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        batch_concurrency=int(os.getenv("TOEIC_BATCH_CONCURRENCY", "0") or "0"),
+        local_prefix_cache=(
+            os.getenv("TOEIC_LOCAL_PREFIX_CACHE", "true") or "true"
         ).strip().lower() in {"1", "true", "yes", "on"},
     )

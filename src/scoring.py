@@ -26,6 +26,22 @@ from .schema import CompletionLevel, SpeakingResult
 
 logger = logging.getLogger("toeic.scoring")
 
+# Tái dùng OpenAI client cho backend local: trước đây mỗi bài tạo client mới →
+# connection pool mới mỗi lần. Cache theo (base_url, api_key) để batch dùng lại
+# một pool. Client của openai-python thread-safe nên dùng chung giữa các luồng.
+_local_client_cache: dict[tuple[str, str], object] = {}
+
+
+def _get_local_client(base_url: str, api_key: str):
+    key = (base_url, api_key)
+    client = _local_client_cache.get(key)
+    if client is None:
+        from openai import OpenAI
+
+        client = OpenAI(base_url=base_url, api_key=api_key)
+        _local_client_cache[key] = client
+    return client
+
 # --- Quy đổi điểm tiêu chí (0-3) → điểm TOEIC Speaking (0-200) -----------------
 # Vì sao có khối này: trước đây estimated_toeic_score do LLM TỰ CHỌN trong prose
 # ("rơi vào khoảng 80-90 → 85"), nên cùng một bộ điểm tiêu chí mỗi lần lại ra số
@@ -475,13 +491,11 @@ def _score_local(
     Claude; nếu model hỗ trợ reasoning (Qwen3) có thể bật qua chat template.
     """
     try:
-        from openai import OpenAI
+        client = _get_local_client(config.local_base_url, config.local_api_key)
     except ImportError as e:  # pragma: no cover - phụ thuộc tuỳ chọn
         raise RuntimeError(
             "Backend local cần gói 'openai'. Cài: pip install openai"
         ) from e
-
-    client = OpenAI(base_url=config.local_base_url, api_key=config.local_api_key)
 
     # Định dạng vision OpenAI-compatible: data URI base64. Cần model local có
     # thị giác (vd Qwen2.5-VL); model thuần text sẽ bỏ qua/lỗi khối ảnh.
@@ -500,6 +514,12 @@ def _score_local(
     extra_body = {
         "chat_template_kwargs": {"enable_thinking": config.local_enable_thinking}
     }
+    # Prefix caching phía server (llama.cpp): tái dùng KV-cache của system prompt
+    # (rubric) — giống nhau giữa mọi bài cùng đề trong batch nên prefill chỉ tính
+    # 1 lần. Server không hỗ trợ key này sẽ bỏ qua. (vLLM bật bằng cờ server
+    # --enable-prefix-caching, không qua field này.)
+    if config.local_prefix_cache:
+        extra_body["cache_prompt"] = True
 
     messages = [
         {"role": "system", "content": system_prompt},

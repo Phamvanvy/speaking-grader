@@ -509,8 +509,13 @@ async def grade_batch(
         data = await up.read()
         items.append((name, data, suffix))
 
+    # Ưu tiên: tham số form > cấu hình env (TOEIC_BATCH_CONCURRENCY) > tự chọn.
+    # ASR (Whisper) đã được serialize bằng lock GPU riêng nên đặt >1 cho local là
+    # an toàn: chỉ một ASR chạy/lúc, tầng LLM chồng lấn để tăng throughput batch.
     if max_concurrency and max_concurrency > 0:
         concurrency = max_concurrency
+    elif config.batch_concurrency and config.batch_concurrency > 0:
+        concurrency = config.batch_concurrency
     else:
         concurrency = 1 if config.is_local else 4
     sem = asyncio.Semaphore(concurrency)

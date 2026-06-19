@@ -89,6 +89,12 @@ _whisperx_align_cache: dict[tuple[str, str], tuple[object, object]] = {}
 # chỉ 1 luồng nạp, các luồng còn lại chờ rồi dùng lại model trong cache.
 _whisperx_load_lock = threading.Lock()
 
+# Khóa inference ASR: cho phép /grade-batch chạy nhiều luồng (concurrency>1) để
+# tầng LLM của bài N chồng lấn với ASR của bài N+1, nhưng Whisper KHÔNG an toàn
+# khi chạy song song trên cùng GPU → serialize phần inference để chỉ một ASR
+# chạy tại một thời điểm. Đây là chokepoint chung cho mọi backend.
+_asr_inference_lock = threading.Lock()
+
 
 def _resolve_torch_device(requested_device: str, backend_name: str) -> str:
     """Torch-based backends should degrade to CPU if CUDA is unavailable.
@@ -235,21 +241,25 @@ def transcribe_with_backend(
     started = time.perf_counter()
     key = (backend or "faster_whisper").lower()
 
-    if key == "faster_whisper":
-        out = transcribe(audio_path, model_size=model_size, device=device, language=language)
-    elif key == "whisperx":
-        out = _transcribe_whisperx(
-            audio_path, model_size=model_size, device=device, language=language
-        )
-    elif key == "insanely_fast_whisper":
-        out = _transcribe_insanely_fast_whisper(
-            audio_path,
-            model_size=model_size,
-            device=device,
-            language=language,
-        )
-    else:
-        raise RuntimeError(f"ASR backend không hợp lệ: {backend}")
+    # Serialize inference (xem _asr_inference_lock): với batch concurrency>1, các
+    # luồng vào đây tuần tự nên chỉ một ASR chạy/lúc, trong khi tầng LLM của bài
+    # đã xong ASR vẫn chồng lấn ở luồng khác.
+    with _asr_inference_lock:
+        if key == "faster_whisper":
+            out = transcribe(audio_path, model_size=model_size, device=device, language=language)
+        elif key == "whisperx":
+            out = _transcribe_whisperx(
+                audio_path, model_size=model_size, device=device, language=language
+            )
+        elif key == "insanely_fast_whisper":
+            out = _transcribe_insanely_fast_whisper(
+                audio_path,
+                model_size=model_size,
+                device=device,
+                language=language,
+            )
+        else:
+            raise RuntimeError(f"ASR backend không hợp lệ: {backend}")
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     return ASRRun(transcription=out, backend_used=key, elapsed_ms=elapsed_ms)
