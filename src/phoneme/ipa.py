@@ -9,8 +9,11 @@ Cung cấp:
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Final
+
+logger = logging.getLogger("toeic.phoneme.ipa")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Tập phonemes IPA tiếng Anh (RP/General American unified)
@@ -174,16 +177,46 @@ def _same_place_of_articulation(p1: str, p2: str) -> bool:
     return False
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Chuẩn hóa IPA — gộp khác biệt hệ thống giữa eSpeak (output wav2vec) và
+# ARPAbet→IPA / g2p_en (reference) để không tính nhầm phát âm đúng thành lỗi.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Các cặp tương đương (sau khi đã bỏ dấu trường ː).
+# Gộp back-vowels (cot-caught merger), r-âm, schwa nhấn/không nhấn... — chấp nhận
+# được cho chấm phát âm ESL; thà bỏ sót lỗi còn hơn báo sai phát âm đúng.
+_IPA_EQUIV: Final[dict[str, str]] = {
+    "ɹ": "r",                 # eSpeak r ↔ CMU r
+    "ɾ": "t",                 # flap (water/store kiểu Mỹ) ↔ t (allophone, không phải lỗi)
+    "g": "ɡ",                 # ascii g ↔ IPA ɡ
+    "ɚ": "ɜ", "ɝ": "ɜ",       # r-colored schwa ↔ ER
+    "ʌ": "ə", "ɐ": "ə",       # schwa nhấn/không nhấn
+    "ɛ": "e",                 # EH
+    "ɒ": "ɔ", "ɑ": "ɔ", "o": "ɔ",  # back vowels gộp 1 nhóm
+    "oʊ": "əʊ",               # OW
+}
+
+
+def normalize_ipa(phoneme: str) -> str:
+    """Quy 1 ký hiệu IPA về dạng chuẩn để so khớp giữa eSpeak và ARPAbet.
+
+    Bỏ dấu trường (ː) rồi áp bảng tương đương. Diphthong là 1 token nên xử lý
+    nguyên khối (vd 'oʊ' → 'əʊ').
+    """
+    p = phoneme.strip().replace("ː", "")
+    return _IPA_EQUIV.get(p, p)
+
+
 def phoneme_similarity(p1: str, p2: str) -> float:
     """Tính độ tương đồng giữa 2 phonemes (0.0 = hoàn toàn khác, 1.0 = giống hệt).
 
     Algorithm:
-      - Giống hệt: 1.0
+      - Giống hệt (sau chuẩn hóa eSpeak↔ARPAbet): 1.0
       - Cùng class + cùng place: 0.7
       - Cùng class hoặc cùng place: 0.4
       - Khác hoàn toàn: 0.0
     """
-    if p1 == p2:
+    if p1 == p2 or normalize_ipa(p1) == normalize_ipa(p2):
         return 1.0
     same_cls = _same_class(p1, p2)
     same_place = _same_place_of_articulation(p1, p2)
@@ -207,12 +240,51 @@ def error_severity(similarity: float) -> str:
 # Word → IPA sequence
 # ──────────────────────────────────────────────────────────────────────────────
 
+# g2p_en.G2p() nặng (nạp CMUdict + POS tagger) → khởi tạo 1 lần, cache lại.
+# None = chưa thử; False = không khả dụng (thiếu package / lỗi nạp).
+_g2p_instance: object | None | bool = None
+
+
+def _ensure_nltk_data() -> None:
+    """Tải dữ liệu NLTK g2p_en cần (nếu thiếu). nltk mới đổi tên tagger thành
+    '..._eng' mà g2p_en không tự tải → tự xử lý để chạy ngay lần đầu."""
+    import nltk
+
+    resources = [
+        ("taggers/averaged_perceptron_tagger_eng", "averaged_perceptron_tagger_eng"),
+        ("taggers/averaged_perceptron_tagger", "averaged_perceptron_tagger"),
+        ("corpora/cmudict", "cmudict"),
+    ]
+    for path, name in resources:
+        try:
+            nltk.data.find(path)
+        except LookupError:
+            try:
+                nltk.download(name, quiet=True)
+            except Exception:  # noqa: BLE001 - mạng/permission; g2p sẽ tự báo lỗi
+                pass
+
+
+def _get_g2p() -> object | None:
+    """Lazy-init + cache g2p_en.G2p(). Trả None nếu không khả dụng."""
+    global _g2p_instance
+    if _g2p_instance is None:
+        try:
+            import g2p_en
+
+            _ensure_nltk_data()
+            _g2p_instance = g2p_en.G2p()
+        except Exception:  # noqa: BLE001 - thiếu package / lỗi nạp model
+            _g2p_instance = False
+    return _g2p_instance or None
+
+
 def word_to_ipa(word: str) -> list[str]:
     """Chuyển 1 từ tiếng Anh thành danh sách IPA phonemes.
 
     Priority:
       1. Built-in dictionary (_COMMON_WORD_PRONUNCIATIONS)
-      2. Try g2p module (grapheme-to-phoneme)
+      2. g2p module (grapheme-to-phoneme), instance được cache
       3. Fallback: empty list (caller sẽ handle missing words)
     """
     key = word.lower().strip(".,;:!?\"'()[]{}")
@@ -224,22 +296,23 @@ def word_to_ipa(word: str) -> list[str]:
         arpabet = _COMMON_WORD_PRONUNCIATIONS[key]
         return [ARPABET_TO_IPA.get(a, a) for a in arpabet]
 
-    # Try g2p if available
-    try:
-        import g2p_en
-        transcriber = g2p_en.G2p()
-        # g2p_en trả về list của (word, [(token, arpabet), ...])
-        result = transcriber(key)
-        if result and len(result) > 0:
-            arpabet_seq = [a for _, a in result[0]]
-            return [ARPABET_TO_IPA.get(a, a) for a in arpabet_seq]
-    except ImportError:
-        pass
-    except Exception:
-        pass
+    # Try g2p if available (cached instance — KHÔNG khởi tạo lại mỗi từ)
+    transcriber = _get_g2p()
+    if transcriber is not None:
+        try:
+            # g2p_en trả về flat list các ARPAbet token (kèm stress digit + space)
+            arpabet_seq = [
+                re.sub(r"\d", "", p)  # bỏ stress marker (AH0 → AH)
+                for p in transcriber(key)
+                if p.strip()
+            ]
+            ipa = [ARPABET_TO_IPA.get(a, a) for a in arpabet_seq if a in ARPABET_TO_IPA]
+            if ipa:
+                return ipa
+        except Exception:  # noqa: BLE001 - lỗi runtime g2p
+            pass
 
-    # Fallback: return the word itself as placeholder
-    # (caller should detect empty results and handle gracefully)
+    # Fallback: empty list (caller detect và handle missing words)
     return []
 
 
@@ -254,12 +327,23 @@ def text_to_ipa_sequence(text: str) -> list[str]:
 
     words = re.findall(r"[a-zA-Z'-]+", text)
     phonemes: list[str] = []
+    dropped: list[str] = []
     for word in words:
         word_phones = word_to_ipa(word)
         if word_phones:
             phonemes.extend(word_phones)
         else:
-            # Word not in dictionary — skip but don't fail
-            pass
+            # Word không tra được IPA (không có trong dict & g2p) — bỏ qua, ghi log.
+            dropped.append(word)
+
+    if dropped:
+        logger.warning(
+            "text_to_ipa_sequence: bỏ %d/%d từ không tra được IPA "
+            "(reference sẽ thiếu → điểm phoneme kém tin cậy): %s%s",
+            len(dropped),
+            len(words),
+            ", ".join(dropped[:10]),
+            " ..." if len(dropped) > 10 else "",
+        )
 
     return phonemes

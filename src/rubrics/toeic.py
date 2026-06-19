@@ -191,6 +191,9 @@ _REGISTRY: dict[str, QuestionType] = {
     ]
 }
 
+# Public alias — convenient dictionary access (e.g. TOEIC_QUESTION_TYPES["read_aloud"])
+TOEIC_QUESTION_TYPES: dict[str, QuestionType] = _REGISTRY
+
 
 def get_question_type(key: str) -> QuestionType:
     if key not in _REGISTRY:

@@ -24,6 +24,7 @@ services:
       TOEIC_ASR_BACKEND_DEFAULT: faster_whisper
       TOEIC_ASR_BACKEND_FAST: faster_whisper
       TOEIC_ASR_BACKEND_REVIEW: faster_whisper
+      TOEIC_PHONEME_ANALYSIS_ENABLED: "true"
       # GPU: cần WHISPER_DEVICE=cuda (đặt trong .env). cuBLAS/cuDNN lấy từ wheel
       # nvidia-*-cu12 + LD_LIBRARY_PATH trong Dockerfile; GPU do khối deploy inject.
       # Máy KHÔNG có GPU? Bỏ comment dòng dưới để ép CPU (và comment khối deploy).

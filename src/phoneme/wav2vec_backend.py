@@ -9,10 +9,14 @@ Architecture:
   - predict_phonemes(): audio path → list[PhonemeSegment]
   - _frames_to_segments(): merge frame-level predictions → phoneme segments
 
-Model: facebook/wav2vec2-lg-960h (960-hour, phoneme-trained)
-  - Size: ~680MB
-  - Output: frame-level logits over ~41 phoneme classes ( LibriSpeech ARPAbet set)
+Model: facebook/wav2vec2-xlsr-53-espeak-cv-ft (phoneme-CTC, output IPA eSpeak)
+  - Size: ~1.2GB
+  - Output: frame-level logits over các token IPA eSpeak (vocab của tokenizer)
   - Frame rate: ~50 Hz (20ms/frame)
+
+LƯU Ý: phải dùng model phoneme-CTC (output IPA), KHÔNG dùng wav2vec2-*-960h —
+các model 960h là CTC ký tự (A-Z), không phải phoneme. Token của model này đã là
+IPA nên decode bằng tokenizer trực tiếp, không cần map ARPAbet thủ công.
 
 Graceful degradation:
   - Nếu torch/transformers không cài → trả về empty segments + warning
@@ -36,8 +40,8 @@ logger = logging.getLogger("toeic.phoneme.wav2vec")
 # wav2vec 2.0 model config
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Model HF được train trên LibriSpeech với phoneme labels (41 classes)
-DEFAULT_WAV2VEC_MODEL: str = "facebook/wav2vec2-lg-960h"
+# Model HF phoneme-CTC: output token IPA eSpeak trực tiếp (không phải ký tự).
+DEFAULT_WAV2VEC_MODEL: str = "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
 
 # Sample rate của wav2vec
 WAV2VEC_SAMPLE_RATE: int = 16000
@@ -50,11 +54,11 @@ PHONEME_CONFIDENCE_THRESHOLD: float = 0.1
 MIN_PHONEME_DURATION_SEC: float = 0.1
 
 # ──────────────────────────────────────────────────────────────────────────────
-# LibriSpeech ARPAbet → IPA mapping (41 phoneme classes của wav2vec)
+# ARPAbet → IPA mapping (CHỈ là fallback cho model phoneme dạng ARPAbet)
 # ──────────────────────────────────────────────────────────────────────────────
 
-# wav2vec2-lg-960h token labels (từ model config.label2id)
-# Đây là mapping chuẩn từ LibriSpeech phoneme labels → IPA
+# Model mặc định (espeak-cs-ft) đã output token IPA → không cần bảng này. Giữ lại
+# để tương thích nếu ai đó cấu hình một model phoneme dùng nhãn ARPAbet.
 WAV2VEC_LABEL_TO_IPA: dict[str, str] = {
     # Silence
     "<unk>": "",
@@ -110,6 +114,26 @@ WAV2VEC_LABEL_TO_IPA: dict[str, str] = {
 
 # Reverse: IPA → label name (cho debugging)
 _IPA_TO_LABEL: dict[str, str] = {v: k for k, v in WAV2VEC_LABEL_TO_IPA.items() if v}
+
+# Token coi như "không phải phoneme" (silence/blank/special/word-boundary).
+# CTC blank = pad token; ngoài ra còn các special token và dấu phân từ "|".
+_SILENCE_TOKENS: frozenset[str] = frozenset(
+    {"", " ", "|", "sil", "sp", "spn", "pau", "<pad>", "<s>", "</s>", "<unk>"}
+)
+
+
+def _resolve_ipa(token: str, silence_tokens: frozenset[str]) -> str:
+    """Quy 1 token của model về ký hiệu IPA, '' nếu là silence/blank.
+
+    - Token nằm trong silence set → '' (bị bỏ qua, tạo khoảng lặng tự nhiên).
+    - Token là nhãn ARPAbet (vd 'AA', 'TH') → map qua WAV2VEC_LABEL_TO_IPA.
+    - Còn lại: coi token đã là IPA (model espeak) → trả nguyên token.
+    """
+    if token in silence_tokens:
+        return ""
+    if token in WAV2VEC_LABEL_TO_IPA:
+        return WAV2VEC_LABEL_TO_IPA[token]
+    return token.strip()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -173,12 +197,41 @@ def _load_audio(audio_path: str, target_sr: int = WAV2VEC_SAMPLE_RATE) -> np.nda
 # Model cache
 # ──────────────────────────────────────────────────────────────────────────────
 
-_model_cache: dict[str, tuple[Any, Any]] = {}  # model_id → (processor, model)
+# model_id → (feature_extractor, model, id_to_token)
+_model_cache: dict[str, tuple[Any, Any, dict[int, str]]] = {}
 _model_lock = threading.Lock()
 
 
-def _get_wav2vec_model(model_id: str, device: str = "cpu") -> tuple[Any, Any]:
-    """Lazy-load wav2vec model + processor, cache trong process."""
+def _load_id_to_token(model_id: str, model: Any) -> dict[int, str]:
+    """Lấy map id → token (IPA) của model, KHÔNG cần tokenizer/phonemizer.
+
+    Model phoneme espeak dùng Wav2Vec2PhonemeCTCTokenizer vốn yêu cầu thư viện
+    `phonemizer` (kéo theo espeak-ng) chỉ để phonemize text — không cần cho việc
+    decode id → token. Nên ta đọc thẳng vocab.json từ repo (token → id) rồi đảo
+    lại. Fallback: model.config.label2id.
+    """
+    try:
+        import json as _json
+
+        from huggingface_hub import hf_hub_download
+
+        vocab_path = hf_hub_download(model_id, "vocab.json")
+        with open(vocab_path, encoding="utf-8") as f:
+            vocab: dict[str, int] = _json.load(f)
+        return {int(idx): tok for tok, idx in vocab.items()}
+    except Exception as e:  # noqa: BLE001 - fallback an toàn về config
+        logger.warning(
+            "Không đọc được vocab.json của %s (%s) — fallback model.config.label2id.",
+            model_id,
+            e,
+        )
+        return {int(idx): tok for tok, idx in model.config.label2id.items()}
+
+
+def _get_wav2vec_model(
+    model_id: str, device: str = "cpu"
+) -> tuple[Any, Any, dict[int, str]]:
+    """Lazy-load feature_extractor + model + id→token map, cache trong process."""
     key = f"{model_id}:{device}"
     if key in _model_cache:
         return _model_cache[key]
@@ -205,6 +258,8 @@ def _get_wav2vec_model(model_id: str, device: str = "cpu") -> tuple[Any, Any]:
             device,
         )
 
+        # Chỉ nạp feature_extractor (nhẹ, không cần phonemizer). Việc decode
+        # id → token IPA dùng vocab.json đọc riêng (xem _load_id_to_token).
         feature_extractor = AutoFeatureExtractor.from_pretrained(model_id)
         model = AutoModelForCTC.from_pretrained(
             model_id,
@@ -214,8 +269,12 @@ def _get_wav2vec_model(model_id: str, device: str = "cpu") -> tuple[Any, Any]:
             model = model.to("cuda")
         model.eval()
 
-        logger.info("wav2vec model đã sẵn sàng.")
-        _model_cache[key] = (feature_extractor, model)
+        id_to_token = _load_id_to_token(model_id, model)
+
+        logger.info(
+            "wav2vec model đã sẵn sàng (vocab=%d tokens).", len(id_to_token)
+        )
+        _model_cache[key] = (feature_extractor, model, id_to_token)
         return _model_cache[key]
 
 
@@ -223,78 +282,47 @@ def _get_wav2vec_model(model_id: str, device: str = "cpu") -> tuple[Any, Any]:
 # Frame-level → segment conversion
 # ──────────────────────────────────────────────────────────────────────────────
 
-def _frames_to_segments(
-    frame_predictions: list[tuple[str, float]],  # (ipa_phoneme, confidence)
-    frame_duration: float,  # giây mỗi frame
+def _ctc_decode_segments(
+    pred_ids: np.ndarray,       # (num_frames,) argmax token id mỗi frame
+    pred_probs: np.ndarray,     # (num_frames,) prob của token đó
+    id_to_label: dict[int, str],
+    frame_duration: float,      # giây mỗi frame
     audio_duration: float,
-    min_duration: float = MIN_PHONEME_DURATION_SEC,
+    confidence_threshold: float = PHONEME_CONFIDENCE_THRESHOLD,
 ) -> list[PhonemeSegment]:
-    """Merge các frame liên tiếp cùng phoneme → phoneme segments.
+    """CTC greedy decode: frame-level argmax → phoneme segments.
 
-    Algorithm:
-      1. Group consecutive frames with same phoneme
-      2. Merge groups with same phoneme if gap < min_duration
-      3. Filter: confidence >= threshold AND duration >= min_duration
+    Output của wav2vec CTC rất "spiky": phần lớn frame là blank (<pad>), mỗi
+    phoneme chỉ chiếm 1-vài frame. Quy tắc CTC:
+      1. Gộp các frame liên tiếp cùng token id thành 1 "run".
+      2. Bỏ run là blank/silence (chính các blank này phân tách phoneme lặp).
+      3. Mỗi run phoneme còn lại = 1 segment, timestamp theo vị trí frame thật.
+    KHÔNG lọc theo min_duration (sẽ giết hết các spike hợp lệ).
     """
-    if not frame_predictions:
+    n = len(pred_ids)
+    if n == 0:
         return []
 
-    # Step 1: group consecutive same-phoneme frames
-    groups: list[tuple[str, int, int, float]] = []  # (phoneme, start_frame, end_frame, avg_conf)
-    current_phoneme, current_start, conf_sum = frame_predictions[0][0], 0, 0.0
-    current_count = 0
-
-    for i, (phoneme, conf) in enumerate(frame_predictions):
-        if phoneme == current_phoneme:
-            conf_sum += conf
-            current_count += 1
-        else:
-            if current_count > 0:
-                groups.append((current_phoneme, current_start, i - 1, conf_sum / current_count))
-            current_phoneme = phoneme
-            current_start = i
-            conf_sum = conf
-            current_count = 1
-
-    # Last group
-    if current_count > 0:
-        groups.append((current_phoneme, current_start, len(frame_predictions) - 1, conf_sum / current_count))
-
-    # Step 2: merge groups with same phoneme if gap < threshold_frames
-    threshold_frames = max(1, int(min_duration / max(frame_duration, 1e-6)))
-    merged: list[tuple[str, int, int, float]] = [groups[0]] if groups else []
-
-    for group in groups[1:]:
-        prev = merged[-1]
-        gap = group[1] - prev[2] - 1  # frames between groups
-        if group[0] == prev[0] and gap < threshold_frames:
-            # Merge: extend end frame, weighted avg confidence
-            prev_len = prev[2] - prev[1] + 1
-            curr_len = group[2] - group[1] + 1
-            new_conf = (prev[3] * prev_len + group[3] * curr_len) / (prev_len + curr_len)
-            merged[-1] = (prev[0], prev[1], group[2], new_conf)
-        else:
-            merged.append(group)
-
-    # Step 3: filter by confidence and duration
     segments: list[PhonemeSegment] = []
-    for phoneme, start_frame, end_frame, avg_conf in merged:
-        duration = (end_frame - start_frame + 1) * frame_duration
-        if avg_conf < PHONEME_CONFIDENCE_THRESHOLD:
-            continue
-        if duration < min_duration:
-            continue
-        start_time = start_frame * frame_duration
-        end_time = (end_frame + 1) * frame_duration
-        # Clamp to audio duration
-        end_time = min(end_time, audio_duration)
-        segments.append(PhonemeSegment(
-            phoneme=phoneme,
-            start=round(start_time, 3),
-            end=round(end_time, 3),
-            confidence=round(avg_conf, 4),
-            backend="wav2vec",
-        ))
+    run_start = 0
+    for i in range(1, n + 1):
+        # Kết thúc 1 run khi đổi id hoặc hết frame.
+        if i == n or pred_ids[i] != pred_ids[run_start]:
+            token = id_to_label.get(int(pred_ids[run_start]), "")
+            ipa = _resolve_ipa(token, _SILENCE_TOKENS)
+            if ipa:
+                avg_conf = float(pred_probs[run_start:i].mean())
+                if avg_conf >= confidence_threshold:
+                    start_time = run_start * frame_duration
+                    end_time = min(i * frame_duration, audio_duration)
+                    segments.append(PhonemeSegment(
+                        phoneme=ipa,
+                        start=round(start_time, 3),
+                        end=round(end_time, 3),
+                        confidence=round(avg_conf, 4),
+                        backend="wav2vec",
+                    ))
+            run_start = i
 
     return segments
 
@@ -332,8 +360,30 @@ class Wav2VecPhonemePredictor:
         try:
             _get_wav2vec_model(self.model_id, self.device)
             self._available = True
-        except (RuntimeError, ImportError, OSError):
+        except (RuntimeError, ImportError, OSError) as e:
             self._available = False
+            # Log the REAL reason (not generic "install torch" message)
+            err_type = type(e).__name__
+            err_msg = str(e)
+            logger.warning(
+                "wav2vec backend KHÔNG khả dụng (%s): %s",
+                err_type,
+                err_msg,
+            )
+            # Detect common causes
+            if "CUDA" in err_type or "out of memory" in err_msg.lower() or "cuda" in err_msg.lower():
+                logger.warning(
+                    "Nguyên nhân: GPU không đủ memory (Whisper %s + wav2vec %s cùng lúc). "
+                    "Khắc phục: (a) dùng GPU lớn hơn, (b) chạy wav2vec trên CPU bằng "
+                    "TOEIC_PHONEME_DEVICE=cpu, hoặc (c) tắt phoneme analysis "
+                    "TOEIC_PHONEME_ANALYSIS_ENABLED=false.",
+                    self.model_id,
+                    self.model_id,
+                )
+            elif "ImportError" in err_type:
+                logger.warning(
+                    "Nguyên nhân: thiếu package. Cài: pip install torch transformers librosa"
+                )
         return self._available
 
     def predict(
@@ -349,50 +399,46 @@ class Wav2VecPhonemePredictor:
             return [], f"Audio file không tồn tại: {audio_path}"
 
         if not self.is_available:
-            return [], (
-                "wav2vec backend không sẵn sàng. "
-                "Cài: pip install torch transformers librosa"
-            )
+            return [], "wav2vec backend không khả dụng (xem log chi tiết)."
 
         try:
+            import torch
+
+            # Free CUDA memory before loading model (helps avoid OOM with Whisper)
+            if self.device == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                free_mem = torch.cuda.mem_get_info()[0] / (1024**3)
+                logger.debug("CUDA free memory before wav2vec: %.2f GB", free_mem)
+
             # Load audio
             waveform = _load_audio(audio_path, WAV2VEC_SAMPLE_RATE)
             audio_duration = len(waveform) / WAV2VEC_SAMPLE_RATE
 
-            # Get model
-            feature_extractor, model = _get_wav2vec_model(self.model_id, self.device)
+            # Get feature_extractor + model + id→token map
+            feature_extractor, model, id_to_label = _get_wav2vec_model(
+                self.model_id, self.device
+            )
 
             # Extract features
             inputs = feature_extractor(waveform, sampling_rate=WAV2VEC_SAMPLE_RATE, return_tensors="pt")
             input_values = inputs.input_values
 
+            # Move input to device
+            if self.device == "cuda" and torch.cuda.is_available():
+                input_values = input_values.to("cuda")
+
             # Forward pass (no grad)
-            import torch
             with torch.no_grad():
                 logits = model(input_values).logits
 
-            # Convert to probabilities per frame
+            # Move results back to CPU before freeing GPU memory
             probs = torch.softmax(logits, dim=-1)
-            prob_numpy = probs[0].numpy()  # (num_frames, num_labels)
-
-            # Get label ids from model config
-            label_ids = model.config.label2id
-            id_to_label = {v: k for k, v in label_ids.items()}
-
-            # For each frame, get the predicted phoneme
-            frame_predictions: list[tuple[str, float]] = []
+            prob_numpy = probs[0].cpu().numpy()  # (num_frames, num_labels)
             num_frames = prob_numpy.shape[0]
 
-            for frame_idx in range(num_frames):
-                frame_probs = prob_numpy[frame_idx]
-                top_label_id = int(np.argmax(frame_probs))
-                top_prob = float(frame_probs[top_label_id])
-                label_name = id_to_label.get(top_label_id, "")
-                ipa = WAV2VEC_LABEL_TO_IPA.get(label_name, "")
-
-                if ipa:  # Only non-silence phonemes
-                    frame_predictions.append((ipa, top_prob))
-                # Silence frames are skipped — they create natural gaps
+            # Per-frame argmax token id + prob (CTC decode dùng cả blank frames)
+            pred_ids = np.argmax(prob_numpy, axis=-1)
+            pred_probs = prob_numpy[np.arange(num_frames), pred_ids]
 
             # Calculate frame duration
             # wav2vec output frames ≠ input frames; need to estimate
@@ -402,13 +448,22 @@ class Wav2VecPhonemePredictor:
             else:
                 frame_duration = 0.02  # fallback: 50Hz
 
-            # Convert to segments
-            segments = _frames_to_segments(
-                frame_predictions,
+            # CTC greedy decode → segments. id_to_label đến từ vocab.json
+            # (model espeak: token = IPA). _resolve_ipa bỏ silence/blank.
+            segments = _ctc_decode_segments(
+                pred_ids,
+                pred_probs,
+                id_to_label,
                 frame_duration=frame_duration,
                 audio_duration=audio_duration,
-                min_duration=self.min_phoneme_duration,
+                confidence_threshold=self.confidence_threshold,
             )
+
+            # Free CUDA memory after prediction
+            if self.device == "cuda" and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                free_mem = torch.cuda.mem_get_info()[0] / (1024**3)
+                logger.debug("CUDA free memory after wav2vec: %.2f GB", free_mem)
 
             logger.info(
                 "wav2vec predict: %s → %d phoneme segments (%d frames, %.1fs audio)",
@@ -420,8 +475,16 @@ class Wav2VecPhonemePredictor:
 
             return segments, None
 
-        except RuntimeError:
-            raise  # Re-raise model errors
+        except RuntimeError as e:
+            # CUDA OOM: suggest CPU fallback
+            if self.device == "cuda" and "cuda" in str(e).lower():
+                logger.error(
+                    "wav2vec CUDA OOM for '%s': %s\n"
+                    "Khắc phục: đặt TOEIC_PHONEME_DEVICE=cpu để chạy trên CPU, "
+                    "hoặc TOEIC_PHONEME_ANALYSIS_ENABLED=false để tắt phoneme analysis.",
+                    audio_path, e,
+                )
+            raise  # Re-raise for proper upstream handling
         except Exception as e:
             logger.error("wav2vec prediction failed for '%s': %s", audio_path, e, exc_info=True)
             return [], f"wav2vec prediction error: {e}"

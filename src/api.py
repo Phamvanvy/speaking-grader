@@ -37,6 +37,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+import subprocess
 
 from .config import Config, load_config
 from .core import grade_response
@@ -70,6 +71,9 @@ _ALLOWED_AUDIO_SUFFIXES = {
     ".mkv",
     ".avi",
 }
+
+# Video containers cần extract audio trước (ffmpeg → .wav mono 16kHz)
+_VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi"}
 
 # Trần số file trong 1 batch (chặn lạm dụng; 1 lớp thực tế ~40 em).
 _MAX_BATCH = 100
@@ -151,6 +155,58 @@ def _extract_telemetry_signals(output: dict) -> tuple[float, float, float]:
     return confidence, silence_ratio, coverage
 
 
+def _extract_audio_from_video(video_bytes: bytes, suffix: str) -> tuple[bytes, str]:
+    """Extract audio track from video container → WAV mono 16kHz.
+
+    Returns (audio_bytes, ".wav"). Falls back to raw bytes if ffmpeg unavailable.
+    """
+    try:
+        # Write video to temp file for ffmpeg
+        video_tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        video_tmp.write(video_bytes)
+        video_tmp.close()
+
+        # Extract audio: mono, 16kHz, WAV format (optimal for ASR + wav2vec)
+        result = subprocess.run(
+            [
+                "ffmpeg", "-i", video_tmp.name,
+                "-vn",                # no video
+                "-acodec", "pcm_s16le",  # 16-bit PCM
+                "-ar", "16000",       # 16kHz sample rate
+                "-ac", "1",           # mono
+                "-y",                 # overwrite output
+                "-f", "wav",          # force WAV format
+                "-",                  # stdout
+            ],
+            capture_output=True,
+            timeout=60,               # 60s timeout for extraction
+        )
+
+        audio_output = result.stdout
+        Path(video_tmp.name).unlink(missing_ok=True)
+
+        if not audio_output:
+            logger.warning("ffmpeg extract returned empty audio, falling back to raw bytes.")
+            return video_bytes, suffix
+
+        logger.info(
+            "Extracted audio from video (%.1fKB → %.1fKB WAV, 16kHz mono)",
+            len(video_bytes) / 1024,
+            len(audio_output) / 1024,
+        )
+        return audio_output, ".wav"
+
+    except FileNotFoundError:
+        logger.warning("ffmpeg not found — passing video bytes as-is (ASR may fail).")
+        return video_bytes, suffix
+    except subprocess.TimeoutExpired:
+        logger.warning("ffmpeg extraction timed out — passing video bytes as-is.")
+        return video_bytes, suffix
+    except Exception as e:
+        logger.warning("ffmpeg audio extraction failed: %s — passing as-is.", e)
+        return video_bytes, suffix
+
+
 def _grade_bytes(
     audio_bytes: bytes,
     suffix: str,
@@ -169,7 +225,12 @@ def _grade_bytes(
     """Ghi audio ra file tạm rồi chạy pipeline (HÀM CHẶN — gọi qua threadpool).
 
     Tự dọn file tạm. Trả dict kết quả (đã bỏ audio_path tạm).
+    Video containers (mp4, mov, avi) được extract audio trước bằng ffmpeg.
     """
+    # Pre-convert video to audio if needed
+    if suffix in _VIDEO_SUFFIXES:
+        audio_bytes, suffix = _extract_audio_from_video(audio_bytes, suffix)
+
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     try:
         tmp.write(audio_bytes)

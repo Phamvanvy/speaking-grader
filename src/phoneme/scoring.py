@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Final
 
-from .ipa import error_severity, phoneme_similarity
+from .ipa import error_severity, normalize_ipa, phoneme_similarity
 from .models import PhonemeError, PhonemeErrorType, PhonemeSegment, PhonemeScore
 
 logger = logging.getLogger("toeic.phoneme.scoring")
@@ -80,7 +80,7 @@ def _dtw_align(
                 path.append((i, j))  # match or substitution
             elif cum_up == minimum:
                 i -= 1
-                path.append((i, j))  # insertion
+                path.append((i, -1))  # insertion (predicted i, không có reference)
             else:
                 j -= 1
                 path.append((-1, j))  # deletion
@@ -106,7 +106,7 @@ def _classify_errors(
             # Match or substitution
             pred_ph = predicted[pred_idx]
             ref_ph = reference[ref_idx]
-            if pred_ph != ref_ph:
+            if normalize_ipa(pred_ph) != normalize_ipa(ref_ph):
                 sim = phoneme_similarity(pred_ph, ref_ph)
                 errors.append(PhonemeError(
                     error_type=PhonemeErrorType.SUBSTITUTION,
@@ -203,7 +203,8 @@ def compute_phoneme_score(
     # Count matches from path
     matches = sum(
         1 for pi, ri in path
-        if pi >= 0 and ri >= 0 and predicted_phonemes[pi] == reference_phonemes[ri]
+        if pi >= 0 and ri >= 0
+        and normalize_ipa(predicted_phonemes[pi]) == normalize_ipa(reference_phonemes[ri])
     )
 
     # Accuracy = matches / reference_count

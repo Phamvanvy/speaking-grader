@@ -91,10 +91,13 @@ class Config:
     auto_coverage_threshold: float = 0.80
     # Phoneme analysis (wav2vec 2.0 backend — Phase 1, hybrid-ready for MFA Phase 2)
     phoneme_analysis_enabled: bool = False
-    phoneme_wav2vec_model: str = "facebook/wav2vec2-lg-960h"
+    phoneme_wav2vec_model: str = "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
     phoneme_device: str = "cpu"
     phoneme_confidence_threshold: float = 0.1
     phoneme_min_duration_sec: float = 0.1
+    # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
+    # Enable with TOEIC_LOG_PROMPTS=1.
+    log_prompts: bool = False
 
     @property
     def has_api_key(self) -> bool:
@@ -155,9 +158,9 @@ def load_config() -> Config:
         phoneme_wav2vec_model=(
             os.getenv(
                 "TOEIC_PHONEME_WAV2VEC_MODEL",
-                "facebook/wav2vec2-lg-960h",
+                "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
             )
-            or "facebook/wav2vec2-lg-960h"
+            or "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
         ),
         phoneme_device=os.getenv("TOEIC_PHONEME_DEVICE", "cpu") or "cpu",
         phoneme_confidence_threshold=float(
@@ -166,4 +169,7 @@ def load_config() -> Config:
         phoneme_min_duration_sec=float(
             os.getenv("TOEIC_PHONEME_MIN_DURATION_SEC", "0.1")
         ),
+        log_prompts=(
+            os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
     )

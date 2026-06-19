@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 venv/
 outputs/*.json
+outputs/prompt_logs/
 logs/*.log
 data/audio/*.wav
 data/audio/*.mp3

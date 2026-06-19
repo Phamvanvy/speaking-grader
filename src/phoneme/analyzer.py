@@ -35,7 +35,7 @@ class HybridPhonemeAnalyzer:
     """Phoneme analyzer — wav2vec backend (Phase 1), MFA-ready (Phase 2).
 
     Args:
-        wav2vec_model: model ID trên HuggingFace (default: facebook/wav2vec2-lg-960h)
+        wav2vec_model: model ID trên HuggingFace (default: facebook/wav2vec2-xlsr-53-espeak-cv-ft)
         device: "cpu" | "cuda" | "auto"
         min_phoneme_duration: segment ngắn nhất được giữ (giây)
         confidence_threshold: probability threshold cho phoneme

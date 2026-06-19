@@ -1,120 +1,97 @@
 ---
-description: Analyze blast radius of code changes — identify callers, callees, affected processes, and risk before editing
+name: gitnexus-impact-analysis
+description: "Use when the user wants to know what will break if they change something, or needs safety analysis before editing code. Examples: \"Is it safe to change X?\", \"What depends on this?\", \"What will break?\""
 ---
 
-# Impact Analysis
+# Impact Analysis with GitNexus
 
-**Goal:** Understand what breaks before you break it. Run impact analysis on any function, class, method, or module BEFORE making changes, so you know the blast radius.
+## When to Use
 
-> **RULE:** Never edit a symbol without first checking its impact. A 5-line impact query takes 2 seconds; fixing unintended regressions takes 2 hours.
+- "Is it safe to change this function?"
+- "What will break if I modify X?"
+- "Show me the blast radius"
+- "Who uses this code?"
+- Before making non-trivial code changes
+- Before committing — to understand what your changes affect
 
 ## Workflow
 
-### 1. Identify the target
+```
+1. impact({target: "X", direction: "upstream"})  → What depends on this
+2. READ gitnexus://repo/{name}/processes                   → Check affected execution flows
+3. detect_changes()                               → Map current git changes to affected flows
+4. Assess risk and report to user
+```
 
-Decide what you will change — a function name, a class, a config key, a shared utility.
+> If "Index is stale" → run `node .gitnexus/run.cjs analyze` in terminal.
 
-### 2. Run impact upstream
+## Checklist
+
+```
+- [ ] impact({target, direction: "upstream"}) to find dependents
+- [ ] Review d=1 items first (these WILL BREAK)
+- [ ] Check high-confidence (>0.8) dependencies
+- [ ] READ processes to check affected execution flows
+- [ ] detect_changes() for pre-commit check
+- [ ] Assess risk level and report to user
+```
+
+## Understanding Output
+
+| Depth | Risk Level       | Meaning                  |
+| ----- | ---------------- | ------------------------ |
+| d=1   | **WILL BREAK**   | Direct callers/importers |
+| d=2   | LIKELY AFFECTED  | Indirect dependencies    |
+| d=3   | MAY NEED TESTING | Transitive effects       |
+
+## Risk Assessment
+
+| Affected                       | Risk     |
+| ------------------------------ | -------- |
+| <5 symbols, few processes      | LOW      |
+| 5-15 symbols, 2-5 processes    | MEDIUM   |
+| >15 symbols or many processes  | HIGH     |
+| Critical path (auth, payments) | CRITICAL |
+
+## Tools
+
+**impact** — the primary tool for symbol blast radius:
 
 ```
 impact({
-  target: "functionName",
+  target: "validateUser",
   direction: "upstream",
-  maxDepth: 3,
-  limit: 50
+  minConfidence: 0.8,
+  maxDepth: 3
 })
+
+→ d=1 (WILL BREAK):
+  - loginHandler (src/auth/login.ts:42) [CALLS, 100%]
+  - apiMiddleware (src/api/middleware.ts:15) [CALLS, 100%]
+
+→ d=2 (LIKELY AFFECTED):
+  - authRouter (src/routes/auth.ts:22) [CALLS, 95%]
 ```
 
-This returns every symbol that **depends on** the target, grouped by depth:
-
-| Depth | Meaning |
-|-------|---------|
-| d=1 | **WILL BREAK** — direct callers / importers |
-| d=2 | **LIKELY AFFECTED** — indirect callers |
-| d=3 | **MAY NEED TESTING** — transitive dependents |
-
-It also returns:
-
-- **risk:** `LOW` / `MEDIUM` / `HIGH` / `CRITICAL`
-- **affected_processes:** execution flows that pass through this symbol
-- **affected_modules:** functional areas hit (direct vs indirect)
-
-### 3. Interpret the risk
-
-| Risk | Action |
-|------|--------|
-| **LOW** (0-3 consumers) | Proceed with change; update d=1 callers |
-| **MEDIUM** (4-9 consumers, or mismatches) | Review all d=1 + d=2; write tests first |
-| **HIGH** (10+ consumers, or mismatches with 4+) | **Warn the user.** Consider alternative approach. |
-| **CRITICAL** (hub symbol, base class, core config) | **Stop.** Refactor with extreme care. Migrate in small steps. |
-
-### 4. Drill into high-risk symbols
-
-For each d=1 symbol that concerns you:
+**detect_changes** — git-diff based impact analysis:
 
 ```
-context({name: "highRiskSymbol"})
+detect_changes({scope: "staged"})
+
+→ Changed: 5 symbols in 3 files
+→ Affected: LoginFlow, TokenRefresh, APIMiddlewarePipeline
+→ Risk: MEDIUM
 ```
 
-This shows every caller, callee, method, property, and process membership — full 360° view.
-
-### 5. Check downstream too (optional)
-
-If you want to know what the target **depends on** (libraries it imports, base classes it extends):
+## Example: "What breaks if I change validateUser?"
 
 ```
-impact({
-  target: "functionName",
-  direction: "downstream",
-  maxDepth: 2
-})
+1. impact({target: "validateUser", direction: "upstream"})
+   → d=1: loginHandler, apiMiddleware (WILL BREAK)
+   → d=2: authRouter, sessionManager (LIKELY AFFECTED)
+
+2. READ gitnexus://repo/my-app/processes
+   → LoginFlow and TokenRefresh touch validateUser
+
+3. Risk: 2 direct callers, 2 processes = MEDIUM
 ```
-
-Useful for: "If this library changes, what happens inside my function?"
-
-## Quick Reference
-
-| Question | Tool | Parameters |
-|----------|------|------------|
-| "What calls this function?" | `impact` | `direction: "upstream"` |
-| "What does this class import?" | `impact` | `direction: "downstream"` |
-| "Which processes use this?" | `context` | `name: "symbol"` |
-| "How risky is this change?" | `impact` | look at `risk` field |
-| "Show me only top-level callers" | `impact` | `maxDepth: 1` |
-| "Hub symbol — too many results" | `impact` | `summaryOnly: true` |
-| "Field read/write tracking" | `impact` | `relationTypes: ["ACCESSES"]` |
-| "Method override chain" | `impact` | `relationTypes: ["HAS_METHOD", "METHOD_OVERRIDES"]` |
-
-## Tips
-
-- **Hub symbols** (base errors, shared utilities, config loaders) have hundreds of d=1 dependents. Use `summaryOnly: true` first to see counts, then drill into specific depths with `limit`/`offset`.
-- **`relationTypes`** defaults to `CALLS`/`IMPORTS`/`EXTENDS`/`IMPLEMENTS`. Add `ACCESSES` for field-level tracking, `HAS_METHOD`/`HAS_PROPERTY` for class members.
-- **Group mode:** set `repo: "@groupName"` for cross-repo impact. The tool fans out through the contract bridge automatically.
-- **Before committing:** always run `detect_changes()` to verify your edits only affected expected symbols.
-
-## Example
-
-You want to rename `validate_user_input` → `validate_request`:
-
-```
-# 1. Impact upstream — who calls it?
-impact({target: "validate_user_input", direction: "upstream", maxDepth: 2})
-
-# Result: risk=MEDIUM, 7 direct callers, 2 processes affected
-
-# 2. Check a high-risk caller
-context({name: "api_handler_process"})
-
-# 3. Coordinated rename (uses call graph, NOT find-and-replace)
-rename({symbol_name: "validate_user_input", new_name: "validate_request"})
-
-# 4. Verify only expected symbols changed
-detect_changes()
-```
-
-## Anti-patterns
-
-- ❌ **Find-and-replace** for renames → misses imports, breaks string literals
-- ❌ **Editing without impact check** → silent regressions in callers you forgot
-- ❌ **Ignoring CRITICAL risk** → hub symbol changes need migration strategy
-- ❌ **Skipping `detect_changes()` before commit** → untracked side effects

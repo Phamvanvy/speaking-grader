@@ -14,15 +14,21 @@ from __future__ import annotations
 import json
 import logging
 import time
+from pathlib import Path
 
 from .asr import Transcription
 from .config import Config, resolve_language_name
 from .features import Features
 from .gating import GatingResult
+from .phoneme.models import PhonemeResult
 from .rubrics.toeic import QuestionType
 from .schema import SpeakingResult
 
 logger = logging.getLogger("toeic.scoring")
+
+# Directory to store prompt logs for debugging / model comparison.
+# Enable by setting env var TOEIC_LOG_PROMPTS=1 or Config.log_prompts=True.
+_PROMPT_LOG_DIR = Path("outputs/prompt_logs")
 
 
 def _build_system_prompt(qt: QuestionType, feedback_lang: str) -> str:
@@ -59,6 +65,13 @@ limits. Use them ONLY as "words worth reviewing": you may say the ASR may have \
 misheard a word and suggest the test-taker double-check it. NEVER state with \
 certainty that the test-taker pronounced a specific word wrong based on a \
 word_issue alone.
+- PHONEME METRICS (if available): phoneme_data provides deep pronunciation \
+evidence at the phoneme level (IPA). Use overall_accuracy as a STRONG signal for \
+the pronunciation score. High-severity errors indicate clear mispronunciations. \
+Pay special attention to substitution errors where similar-sounding phonemes are \
+confused (e.g. /θ/ → /s/, /æ/ → /ɛ/) — these are common ESL mistakes. Low \
+severity errors may be acceptable regional variants. If phoneme_data is null or \
+disabled, rely on word-level evidence only.
 
 TASK COMPLETION:
 - task_completion reflects whether the response actually fulfils the prompt \
@@ -97,9 +110,10 @@ def _build_user_prompt(
     transcription: Transcription,
     features: Features,
     gating: GatingResult,
+    phoneme_result: PhonemeResult | None = None,
     has_image: bool = False,
 ) -> str:
-    payload = {
+    payload: dict = {
         "task_prompt": prompt_text,
         "reference_script": reference_script if qt.uses_reference_script else None,
         "transcript": transcription.text,
@@ -111,6 +125,18 @@ def _build_user_prompt(
             "fail_reference_match": gating.fail_reference_match,
         },
     }
+
+    # Include phoneme data if available
+    if phoneme_result is not None:
+        payload["phoneme_data"] = phoneme_result.to_dict()
+        logger.info(
+            "Phoneme data included in scoring payload: "
+            "backend=%s | available=%s | segments=%d",
+            phoneme_result.backend_used,
+            phoneme_result.backend_available,
+            len(phoneme_result.segments),
+        )
+
     image_note = (
         "An IMAGE of the picture the test-taker was asked to describe is attached "
         "to this message. Judge whether the spoken transcript accurately and "
@@ -128,6 +154,49 @@ def _build_user_prompt(
     )
 
 
+# Ký tự mở ngoặc ở cuối chuỗi → dấu hiệu text bị cắt giữa chừng (JSON degenerate).
+_DANGLING_OPEN = ("(", "[", "{", "（", "［", "｛")
+
+
+def _is_truncated(text: str) -> bool:
+    """True nếu chuỗi rỗng hoặc kết thúc bằng dấu mở ngoặc (bị cắt giữa chừng)."""
+    s = (text or "").strip()
+    return not s or s.endswith(_DANGLING_OPEN)
+
+
+def _validate_result(result: SpeakingResult, qt: QuestionType) -> list[str]:
+    """Bắt output 'hợp lệ schema nhưng rác' mà Pydantic không chặn được.
+
+    Trả về danh sách mô tả lỗi (rỗng nếu OK). Chỉ gắn cờ 3 dạng hỏng đã quan
+    sát thực tế: thiếu tiêu chí bắt buộc, suggestions điền nhầm tên key tiêu chí,
+    và text bị cắt/rỗng. KHÔNG bắt suggestions rỗng — model trả thiếu suggestions
+    vẫn là output hợp lệ.
+    """
+    problems: list[str] = []
+    required = {c.key for c in qt.criteria}
+
+    present = {c.criterion for c in result.criteria}
+    missing = required - present
+    if missing:
+        problems.append(f"thiếu tiêu chí bắt buộc: {sorted(missing)}")
+
+    for c in result.criteria:
+        polluted = [s for s in c.suggestions if s in required]
+        if polluted:
+            problems.append(
+                f"suggestions của '{c.criterion}' chứa tên tiêu chí: {polluted}"
+            )
+        if _is_truncated(c.justification):
+            problems.append(f"justification của '{c.criterion}' bị cắt/rỗng")
+
+    if _is_truncated(result.score_rationale):
+        problems.append("score_rationale bị cắt/rỗng")
+    if _is_truncated(result.summary_feedback):
+        problems.append("summary_feedback bị cắt/rỗng")
+
+    return problems
+
+
 def score(
     config: Config,
     qt: QuestionType,
@@ -136,11 +205,14 @@ def score(
     transcription: Transcription,
     features: Features,
     gating: GatingResult,
+    phoneme_result: PhonemeResult | None = None,
     image_b64: str | None = None,
     image_media_type: str | None = None,
 ) -> SpeakingResult:
     """Gọi LLM (Claude hoặc model local) và trả về SpeakingResult.
 
+    phoneme_result: kết quả phoneme analysis từ wav2vec/MFA (optional).
+        Nếu có thì thêm vào payload để AI dùng làm evidence cho pronunciation.
     image_b64/image_media_type: ảnh đề bài (vd Describe Picture) gửi kèm dạng
     vision. Cả hai backend đều hỗ trợ; bỏ trống nếu không có ảnh.
     """
@@ -152,15 +224,36 @@ def score(
         transcription,
         features,
         gating,
+        phoneme_result=phoneme_result,
         has_image=bool(image_b64),
     )
 
-    if config.is_local:
-        return _score_local(
-            config, system_prompt, user_prompt, image_b64, image_media_type
+    # Gọi backend rồi validate; nếu output rác thì retry 1 lần và raise rõ ràng
+    # thay vì âm thầm lưu điểm hỏng. Bắt glitch JSON hiếm (thiếu tiêu chí /
+    # suggestions lẫn tên key / text cụt) mà schema Pydantic không chặn được.
+    max_attempts = 2
+    last_problems: list[str] = []
+    for attempt in range(1, max_attempts + 1):
+        if config.is_local:
+            result = _score_local(
+                config, system_prompt, user_prompt, image_b64, image_media_type
+            )
+        else:
+            result = _score_anthropic(
+                config, system_prompt, user_prompt, image_b64, image_media_type
+            )
+        last_problems = _validate_result(result, qt)
+        if not last_problems:
+            return result
+        logger.warning(
+            "Kết quả chấm không hợp lệ (lần %d/%d): %s",
+            attempt,
+            max_attempts,
+            "; ".join(last_problems),
         )
-    return _score_anthropic(
-        config, system_prompt, user_prompt, image_b64, image_media_type
+    raise RuntimeError(
+        f"LLM trả kết quả hỏng sau {max_attempts} lần (schema hợp lệ nhưng "
+        f"nội dung rác): {'; '.join(last_problems)}"
     )
 
 
@@ -199,13 +292,34 @@ def _score_anthropic(
     else:
         content = user_prompt
 
+    messages = [{"role": "user", "content": content}]
+
+    # Always log the messages being sent (sanitized). Anthropic giữ system prompt
+    # tách riêng nên log kèm để thấy đủ system + user.
+    _log_messages(
+        logger, "anthropic", config.model, messages, system_prompt=system_prompt
+    )
+
+    # Log the full request payload (includes system prompt for Anthropic)
+    if config.log_prompts:
+        _log_api_request(
+            config, "anthropic",
+            model=config.model,
+            base_url=None,
+            messages=messages,
+            max_tokens=config.max_tokens,
+            temperature=0,
+            extra_body=None,
+            system_prompt=system_prompt,
+        )
+
     t0 = time.monotonic()
     response = client.messages.parse(
         model=config.model,
         max_tokens=config.max_tokens,
         thinking={"type": "adaptive"},
         system=system_prompt,
-        messages=[{"role": "user", "content": content}],
+        messages=messages,
         output_format=SpeakingResult,
     )
     latency = time.monotonic() - t0
@@ -221,6 +335,11 @@ def _score_anthropic(
     )
 
     result = response.parsed_output
+
+    # Log AI response
+    if config.log_prompts:
+        response_json = result.model_dump_json() if result else "null"
+        _log_response(config, "anthropic", response_json)
     if result is None:
         # stop_reason refusal / max_tokens → parsed_output có thể None
         hint = (
@@ -276,15 +395,34 @@ def _score_local(
         "chat_template_kwargs": {"enable_thinking": config.local_enable_thinking}
     }
 
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content},
+    ]
+
+    # Always log the messages being sent (sanitized: image base64 stripped,
+    # long text truncated) so ta thấy đúng prompt model local nhận được.
+    _log_messages(logger, "local", config.local_model, messages)
+
+    # Log the full request payload being sent to the local API
+    # (system prompt is already embedded in messages[0] for OpenAI-compatible)
+    if config.log_prompts:
+        _log_api_request(
+            config, "local",
+            model=config.local_model,
+            base_url=config.local_base_url,
+            messages=messages,
+            max_tokens=config.max_tokens,
+            temperature=0,
+            extra_body=extra_body,
+        )
+
     t0 = time.monotonic()
     response = client.chat.completions.create(
         model=config.local_model,
         max_tokens=config.max_tokens,
         temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
+        messages=messages,
         response_format={
             "type": "json_schema",
             "json_schema": {
@@ -320,6 +458,11 @@ def _score_local(
         raise RuntimeError(
             f"Model local không trả về nội dung (finish_reason={finish})."
         )
+
+    # Log AI response
+    if config.log_prompts:
+        _log_response(config, "local", content)
+
     try:
         return SpeakingResult.model_validate_json(content)
     except Exception as e:  # noqa: BLE001 - bọc lỗi parse cho rõ
@@ -327,3 +470,144 @@ def _score_local(
             f"Model local trả JSON không đúng schema SpeakingResult: {e}\n"
             f"Nội dung: {content[:500]}"
         ) from e
+
+
+# ---- Prompt logging helpers -------------------------------------------------
+
+# Độ dài tối đa của mỗi đoạn text khi log ra console (tránh ngập log).
+_LOG_TEXT_PREVIEW = 4000
+
+
+def _preview_content(content: object) -> object:
+    """Rút gọn content của 1 message để log: bỏ base64 ảnh, cắt text dài."""
+    if isinstance(content, str):
+        if len(content) > _LOG_TEXT_PREVIEW:
+            return content[:_LOG_TEXT_PREVIEW] + f"... [+{len(content) - _LOG_TEXT_PREVIEW} chars]"
+        return content
+    if isinstance(content, list):
+        parts: list[object] = []
+        for part in content:
+            if isinstance(part, dict):
+                ptype = part.get("type", "")
+                if ptype in ("image_url", "image"):
+                    parts.append({"type": ptype, "data": "[IMAGE REDACTED]"})
+                elif ptype == "text":
+                    parts.append({"type": "text", "text": _preview_content(part.get("text", ""))})
+                else:
+                    parts.append(part)
+            else:
+                parts.append(part)
+        return parts
+    return content
+
+
+def _log_messages(
+    log: logging.Logger,
+    backend: str,
+    model: str,
+    messages: list[dict],
+    *,
+    system_prompt: str | None = None,
+) -> None:
+    """Log nội dung messages gửi lên LLM (sanitize ảnh + cắt text dài).
+
+    Luôn chạy (không phụ thuộc config.log_prompts) để debug nhanh prompt thực tế
+    model nhận. Ảnh base64 bị thay bằng [IMAGE REDACTED]; text > _LOG_TEXT_PREVIEW
+    ký tự bị cắt.
+    """
+    preview = [
+        {"role": m.get("role"), "content": _preview_content(m.get("content"))}
+        for m in messages
+    ]
+    if system_prompt is not None:
+        # Anthropic truyền system tách khỏi messages → log riêng cho đủ ngữ cảnh.
+        preview.insert(0, {"role": "system", "content": _preview_content(system_prompt)})
+    log.info(
+        "LLM request | backend=%s | model=%s | messages=%s",
+        backend,
+        model,
+        json.dumps(preview, ensure_ascii=False, indent=2),
+    )
+
+
+def _log_api_request(
+    config: Config,
+    backend: str,
+    *,
+    model: str,
+    base_url: str | None,
+    messages: list[dict],
+    max_tokens: int,
+    temperature: float,
+    extra_body: dict | None,
+    system_prompt: str | None = None,
+) -> None:
+    """Log the full API request payload (messages, params) to outputs/prompt_logs/."""
+    _PROMPT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    
+    # Sanitize messages: strip image base64 data, keep structure
+    sanitized_messages = []
+    for msg in messages:
+        sanitized_msg = dict(msg)
+        content = sanitized_msg.get("content")
+        if isinstance(content, list):
+            # Vision message: strip image data
+            sanitized_content = []
+            for part in content:
+                if isinstance(part, dict):
+                    ptype = part.get("type", "")
+                    if ptype in ("image_url", "image"):
+                        sanitized_content.append({"type": ptype, "[...]": "[IMAGE REDACTED]"})
+                    elif ptype == "text":
+                        text = part.get("text", "")
+                        if len(text) > 5000:
+                            text = text[:5000] + "... [truncated]"
+                        sanitized_content.append({"type": "text", "text": text})
+                    else:
+                        sanitized_content.append(part)
+                else:
+                    sanitized_content.append(part)
+            sanitized_msg["content"] = sanitized_content
+        elif isinstance(content, str) and len(content) > 5000:
+            sanitized_msg["content"] = content[:5000] + "... [truncated]"
+        sanitized_messages.append(sanitized_msg)
+
+    # Build a single payload for the request
+    # Use a combined hash for the stem to avoid collisions
+    content_hash = hash(json.dumps(messages, ensure_ascii=False)[:1000]) % 100000
+    stem = f"{ts}_{backend}_req_{content_hash:05d}"
+    log_file = _PROMPT_LOG_DIR / f"{stem}.json"
+    
+    payload = {
+        "backend": backend,
+        "model": model,
+        "base_url": base_url,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "extra_body": extra_body,
+    }
+    # Include system prompt (Anthropic passes it as a separate parameter)
+    if system_prompt:
+        payload["system_prompt"] = system_prompt[:5000]
+    payload["messages"] = sanitized_messages
+    
+    log_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("API request logged to %s", log_file)
+
+
+def _log_response(config: Config, backend: str, response_json: str) -> None:
+    """Log AI response JSON to outputs/prompt_logs/."""
+    _PROMPT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y%m%d_%H%M%S")
+    stem = f"{ts}_{backend}_resp_{hash(response_json) % 100000:05d}"
+    log_file = _PROMPT_LOG_DIR / f"{stem}.json"
+
+    try:
+        pretty = json.loads(response_json)
+        content = json.dumps(pretty, ensure_ascii=False, indent=2)
+    except json.JSONDecodeError:
+        content = response_json
+
+    log_file.write_text(content, encoding="utf-8")
+    logger.info("Response logged to %s", log_file)

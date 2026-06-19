@@ -14,6 +14,7 @@ from typing import Any
 
 from . import asr, features as features_mod, gating, report, scoring
 from .config import Config
+from .phoneme.analyzer import HybridPhonemeAnalyzer
 from .rubrics.toeic import QuestionType
 
 logger = logging.getLogger("toeic.core")
@@ -91,6 +92,39 @@ def grade_response(
         feats.pause_count,
     )
 
+    # [2b] Phoneme analysis (optional — Phase 1: wav2vec)
+    phoneme_result = None
+    if config.phoneme_analysis_enabled and transcription.text.strip():
+        step_started = time.perf_counter()
+        phoneme_analyzer = HybridPhonemeAnalyzer(
+            wav2vec_model=config.phoneme_wav2vec_model,
+            device=config.phoneme_device,
+        )
+        phoneme_result = phoneme_analyzer.analyze(
+            audio_path,
+            reference_text=reference_script,
+        )
+        step_timings_ms["phoneme"] = int((time.perf_counter() - step_started) * 1000)
+        if phoneme_result.score:
+            logger.info(
+                "Phoneme | question=%s | accuracy=%.2f | substitutions=%d | deletions=%d | insertions=%d",
+                question_id,
+                phoneme_result.score.overall_accuracy,
+                phoneme_result.score.substitution_count,
+                phoneme_result.score.deletion_count,
+                phoneme_result.score.insertion_count,
+            )
+        else:
+            logger.info(
+                "Phoneme | question=%s | skipped (%s)",
+                question_id,
+                phoneme_result.warning or "no reference",
+            )
+    else:
+        step_timings_ms["phoneme"] = 0
+        if not config.phoneme_analysis_enabled:
+            logger.info("Phoneme | question=%s | disabled by config", question_id)
+
     # [3] Gating
     step_started = time.perf_counter()
     gate = gating.evaluate(
@@ -127,6 +161,7 @@ def grade_response(
             transcription=transcription,
             features=feats,
             gating=gate,
+            phoneme_result=phoneme_result,
             image_b64=image_b64,
             image_media_type=image_media_type,
         )
@@ -187,11 +222,12 @@ def grade_response(
     output["telemetry"]["step_timings_ms"] = step_timings_ms
     output["telemetry"]["pipeline_total_ms"] = total_ms
     logger.info(
-        "Timing | question=%s | total_ms=%d | asr=%d | features=%d | gating=%d | scoring=%d | report_build=%d | report_save=%d",
+        "Timing | question=%s | total_ms=%d | asr=%d | features=%d | phoneme=%d | gating=%d | scoring=%d | report_build=%d | report_save=%d",
         question_id,
         total_ms,
         step_timings_ms["asr"],
         step_timings_ms["features"],
+        step_timings_ms.get("phoneme", 0),
         step_timings_ms["gating"],
         step_timings_ms["scoring"],
         step_timings_ms["report_build"],

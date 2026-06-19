@@ -30,19 +30,18 @@ ENV WHISPER_MODEL=base \
     WHISPER_DEVICE=cuda
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base')"
 
-# ── Phoneme analysis (wav2vec 2.0 — optional, Phase 1) ──────────────────────
+COPY src ./src
+
+# ── Phoneme analysis (wav2vec 2.0 — Phase 1) ────────────────────────────────
 # Model wav2vec cache tự động qua volume `whisper-cache` → /root/.cache/huggingface
 # (kể cả docker compose up --build, volume giữ nguyên → không tải lại ~900MB model).
-# Prefetch model wav2vec vào image (optional — comment nếu muốn image nhẹ hơn).
+#
+# QUAN TRỌNG: wav2vec chạy trên CPU (không phải CUDA) để tránh GPU OOM.
+# Whisper large-v3-turbo (~2GB VRAM) + wav2vec (~1.5GB VRAM) = OOM trên GPU nhỏ.
+# CPU có đủ RAM cho wav2vec (~700MB), và tốc độ vẫn chấp nhận được (~1-2s/audio).
 ENV PHONEME_WAV2VEC_MODEL=facebook/wav2vec2-lg-960h \
-    TOEIC_PHONEME_ANALYSIS_ENABLED=false \
-    TOEIC_WAV2VEC_DEVICE=cuda
-# Prefetch: chỉ chạy nếu torch/transformers đã cài (sẽ fail nếu không — nên để
-# sau COPY src && RUN pip install phoneme deps; hiện tại bỏ comment khi cần).
-# RUN python -c "from src.phoneme.wav2vec_backend import Wav2VecPhonemePredictor; \
-#     p = Wav2VecPhonemePredictor(); p._load_model()" 2>/dev/null || true
-
-COPY src ./src
+    TOEIC_PHONEME_ANALYSIS_ENABLED=true \
+    TOEIC_PHONEME_DEVICE=cpu
 
 # Whisper KHÔNG an toàn đa luồng → 1 worker/process; scale bằng nhiều replica.
 ENV PORT=8000
