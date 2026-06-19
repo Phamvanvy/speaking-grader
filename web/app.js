@@ -60,6 +60,31 @@ function updateModeNote() {
 modeSelect.addEventListener('change', updateModeNote);
 updateModeNote();
 
+// ── Dark mode ─────────────────────────────────────────────────────────
+// Lựa chọn của user được lưu localStorage; lần đầu thì theo cài đặt hệ điều hành.
+const THEME_KEY = 'toeic-grader-theme';
+const themeToggle = document.getElementById('theme-toggle');
+
+function applyTheme(theme) {
+    const dark = theme === 'dark';
+    document.body.classList.toggle('dark', dark);
+    themeToggle.textContent = dark ? '☀️' : '🌙';
+}
+
+function currentTheme() {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'dark' || saved === 'light') return saved;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function toggleTheme() {
+    const next = document.body.classList.contains('dark') ? 'light' : 'dark';
+    localStorage.setItem(THEME_KEY, next);
+    applyTheme(next);
+}
+
+applyTheme(currentTheme());
+
 function renderFileList() {
     const files = Array.from(fileInput.files);
     if (files.length === 0) {

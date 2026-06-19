@@ -7,11 +7,13 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
     <div class="container">
         <h1>🎤 TOEIC Speaking Grader</h1>
 
-        <!-- API Configuration -->
-        <div class="card">
+        <!-- API Configuration — ẩn khỏi người dùng (input vẫn ở trong DOM để
+             app.js tự lấy origin của trang). Bỏ class "hidden" để hiện lại khi cần. -->
+        <div class="card hidden">
             <h2>⚙️ API Configuration</h2>
             <div class="form-group">
                 <label for="api-url">API Base URL</label>
