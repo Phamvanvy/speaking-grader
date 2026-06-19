@@ -44,7 +44,7 @@ COPY web ./web
 # CPU có đủ RAM cho wav2vec (~700MB), và tốc độ vẫn chấp nhận được (~1-2s/audio).
 ENV PHONEME_WAV2VEC_MODEL=facebook/wav2vec2-lg-960h \
     TOEIC_PHONEME_ANALYSIS_ENABLED=true \
-    TOEIC_PHONEME_DEVICE=cpu
+    TOEIC_PHONEME_DEVICE=cuda
 
 # Whisper KHÔNG an toàn đa luồng → 1 worker/process; scale bằng nhiều replica.
 ENV PORT=8000

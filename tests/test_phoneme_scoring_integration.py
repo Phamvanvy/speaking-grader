@@ -129,9 +129,14 @@ class TestPhonemeInUserPrompt:
         assert payload["phoneme_data"]["backend_used"] == "wav2vec"
         assert payload["phoneme_data"]["backend_available"] is True
         assert payload["phoneme_data"]["score"]["overall_accuracy"] == 0.85
-        assert len(payload["phoneme_data"]["segments"]) == 4
         assert payload["phoneme_data"]["score"]["substitution_count"] == 1
         assert payload["phoneme_data"]["score"]["deletion_count"] == 1
+        # Bản gọn cho prompt: KHÔNG kèm segments thô / reference_phonemes /
+        # audio_path — đây là phần chiếm ~95% kích thước nhưng vô dụng với model
+        # text. Chốt lại để không vô tình nhồi segments trở lại vào prompt.
+        assert "segments" not in payload["phoneme_data"]
+        assert "reference_phonemes" not in payload["phoneme_data"]
+        assert "audio_path" not in payload["phoneme_data"]
 
     def test_phoneme_data_absent_when_none(self):
         """phoneme_data key NOT in payload when phoneme_result is None."""

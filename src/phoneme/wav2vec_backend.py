@@ -423,9 +423,15 @@ class Wav2VecPhonemePredictor:
             inputs = feature_extractor(waveform, sampling_rate=WAV2VEC_SAMPLE_RATE, return_tensors="pt")
             input_values = inputs.input_values
 
-            # Move input to device
+            # Move input to device and cast precision to match model
             if self.device == "cuda" and torch.cuda.is_available():
                 input_values = input_values.to("cuda")
+                
+            # --- ĐOẠN THÊM VÀO ĐỂ FIX LỖI ---
+            # Kiểm tra xem tham số của model đang dùng kiểu dữ liệu nào (float16 hay float32)
+            model_dtype = next(model.parameters()).dtype
+            input_values = input_values.to(dtype=model_dtype)
+            # --------------------------------
 
             # Forward pass (no grad)
             with torch.no_grad():

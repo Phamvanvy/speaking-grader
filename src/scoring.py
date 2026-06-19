@@ -202,6 +202,31 @@ enum values for task_completion / content_relevance (very_low/low/medium/high) \
 stay as-is. Only the explanatory prose is translated."""
 
 
+def _compact_phoneme_data(phoneme_result: PhonemeResult) -> dict:
+    """Bản gọn của phoneme_result để nhúng vào prompt LLM.
+
+    Vì sao: PhonemeResult.to_dict() kèm `segments` thô (164–259 frame, mỗi frame
+    {phoneme,start,end,confidence,backend}) + danh sách `reference_phonemes` đầy
+    đủ + `audio_path`. Khối này chiếm ~95% kích thước phoneme_data trong prompt
+    (~40k ký tự) nhưng VÔ DỤNG với model text: timestamp/khung thời gian không
+    giúp chấm phát âm. Chỉ giữ bằng chứng model thực sự dùng — điểm tổng hợp +
+    top lỗi (score.to_dict() đã cap errors ở 20) + metadata backend. Cắt phần này
+    giảm prompt mạnh → prefill nhanh hơn hẳn, và tăng tỉ trọng system prompt
+    (được prefix-cache) trong tổng prompt.
+
+    Lưu ý: chỉ ảnh hưởng prompt chấm điểm. to_dict() đầy đủ (gồm segments) vẫn
+    được dùng nguyên vẹn cho report/JSON output ở core.py.
+    """
+    return {
+        "backend_used": phoneme_result.backend_used,
+        "backend_available": phoneme_result.backend_available,
+        "warning": phoneme_result.warning,
+        # score.to_dict() đã gồm overall_accuracy, *_count, reference_count,
+        # predicted_count, avg_confidence và errors[:20] (đã sort theo severity).
+        "score": phoneme_result.score.to_dict() if phoneme_result.score else None,
+    }
+
+
 def _build_user_prompt(
     qt: QuestionType,
     prompt_text: str,
@@ -230,9 +255,10 @@ def _build_user_prompt(
     if qt.uses_provided_info and provided_info:
         payload["provided_info"] = provided_info
 
-    # Include phoneme data if available
+    # Include phoneme data if available — bản GỌN (không kèm segments thô) để
+    # prompt nhẹ hơn; xem _compact_phoneme_data.
     if phoneme_result is not None:
-        payload["phoneme_data"] = phoneme_result.to_dict()
+        payload["phoneme_data"] = _compact_phoneme_data(phoneme_result)
         logger.info(
             "Phoneme data included in scoring payload: "
             "backend=%s | available=%s | segments=%d",
@@ -525,6 +551,22 @@ def _score_local(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_content},
     ]
+
+    # Quan sát được prefix caching: system prompt (rubric) là phần ổn định, đứng
+    # đầu messages → server (llama.cpp) tái dùng KV-cache của nó giữa các bài cùng
+    # đề. Log để xác nhận cache đang bật + tỉ trọng phần ổn định so với tổng prompt
+    # (càng cao càng tiết kiệm prefill — sau khi cắt segments, phần này tăng mạnh).
+    if config.local_prefix_cache:
+        user_chars = (
+            len(user_content)
+            if isinstance(user_content, str)
+            else sum(len(p.get("text", "")) for p in user_content if isinstance(p, dict))
+        )
+        logger.info(
+            "Prefix cache ON (cache_prompt=true) | system_chars=%d | user_chars=%d",
+            len(system_prompt),
+            user_chars,
+        )
 
     # Always log the messages being sent (sanitized: image base64 stripped,
     # long text truncated) so ta thấy đúng prompt model local nhận được.
