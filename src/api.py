@@ -37,6 +37,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.staticfiles import StaticFiles
 import subprocess
 
 from .config import Config, load_config
@@ -78,6 +79,12 @@ _VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi"}
 # Trần số file trong 1 batch (chặn lạm dụng; 1 lớp thực tế ~40 em).
 _MAX_BATCH = 100
 _ALLOWED_MODES = {"default", "fast", "review", "auto"}
+
+# Frontend tĩnh: thư mục web/ (index.html + styles.css + app.js) ở repo root
+# (src/ là con của root). Mount ở "/" cùng origin với API → không cần CORS, và ô
+# "API Base URL" tự điền đúng domain. Xem mount ở CUỐI file (phải đăng ký SAU mọi
+# route API để /grade, /health, /docs... được ưu tiên; static chỉ là fallback).
+_WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
 def _resolve_config(feedback_lang: str | None) -> Config:
@@ -241,7 +248,9 @@ def _grade_bytes(
         review_reasons: list[str] = []
         started = perf_counter()
 
-        def _run_once(asr_backend: str) -> dict:
+        def _run_once(asr_backend: str, phoneme: bool | None = None) -> dict:
+            # phoneme: gắn wav2vec theo mode — review=True (bật), fast=False (ưu
+            # tiên tốc độ), default/auto=None (theo config.phoneme_analysis_enabled).
             return grade_response(
                 tmp.name,
                 config,
@@ -254,6 +263,7 @@ def _grade_bytes(
                 provided_info=provided_info,
                 asr_backend=asr_backend,
                 no_ai=no_ai,
+                phoneme_analysis=phoneme,
                 question_id=qt.key,
                 save=False,
             )
@@ -265,25 +275,28 @@ def _grade_bytes(
         fallback_reason: str | None = None
 
         if requested_mode == "review":
-            output = _run_once(config.asr_backend_review)
+            # review = chấm kỹ → bật wav2vec để có bằng chứng phát âm cấp âm vị.
+            output = _run_once(config.asr_backend_review, phoneme=True)
             review_triggered = True
         elif requested_mode == "fast":
+            # fast = ưu tiên throughput → tắt wav2vec (nặng) bất kể config.
             if not config.fast_backend_enabled:
                 used_mode = "default"
                 fallback_reason = "fast_backend_unavailable"
                 review_reasons.append("fast backend disabled by config")
-                output = _run_once(config.asr_backend_default)
+                output = _run_once(config.asr_backend_default, phoneme=False)
             else:
                 try:
-                    output = _run_once(config.asr_backend_fast)
+                    output = _run_once(config.asr_backend_fast, phoneme=False)
                 except Exception as fast_err:  # noqa: BLE001 - fallback đúng theo quyết định kiến trúc
                     used_mode = "default"
                     fallback_reason = "fast_backend_failed"
                     review_reasons.append(
                         f"fast_fallback_default: {type(fast_err).__name__}: {fast_err}"
                     )
-                    output = _run_once(config.asr_backend_default)
+                    output = _run_once(config.asr_backend_default, phoneme=False)
         elif requested_mode == "auto":
+            # auto bắt đầu ở default (theo config); chỉ bật wav2vec nếu leo lên review.
             output = _run_once(config.asr_backend_default)
             confidence, silence_ratio, coverage = _extract_telemetry_signals(output)
             if confidence < config.auto_confidence_threshold:
@@ -306,7 +319,7 @@ def _grade_bytes(
                     (output.get("scores") or {}).get("estimated_toeic_score")
                 )
                 try:
-                    output = _run_once(config.asr_backend_review)
+                    output = _run_once(config.asr_backend_review, phoneme=True)
                     review_triggered = True
                     used_mode = "review"
                     score_after_review = (
@@ -545,3 +558,14 @@ async def grade_batch(
         "concurrency": concurrency,
         "results": results,
     }
+
+
+# Mount frontend tĩnh ở "/" — PHẢI đặt sau mọi route API ở trên. Starlette so khớp
+# route theo thứ tự đăng ký, nên /grade, /health, /docs... (đăng ký trước) được ưu
+# tiên; StaticFiles chỉ bắt phần còn lại (GET / → index.html, /styles.css, /app.js).
+# html=True → "/" trả index.html. check_dir=False để app vẫn khởi động được nếu
+# thiếu web/ (vd chạy chỉ-API trong test); request tới "/" khi đó trả 404 gọn.
+if _WEB_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="web")
+else:  # pragma: no cover - chỉ xảy ra khi deploy thiếu thư mục web/
+    logger.warning("Không thấy thư mục web/ (%s) — frontend tĩnh bị tắt.", _WEB_DIR)

@@ -31,6 +31,9 @@ ENV WHISPER_MODEL=base \
 RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base')"
 
 COPY src ./src
+# Frontend tĩnh (index.html + styles.css + app.js) do API mount tại "/"
+# (cùng origin → không cần CORS).
+COPY web ./web
 
 # ── Phoneme analysis (wav2vec 2.0 — Phase 1) ────────────────────────────────
 # Model wav2vec cache tự động qua volume `whisper-cache` → /root/.cache/huggingface

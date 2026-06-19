@@ -296,10 +296,13 @@ docker compose up --build
 | `TOEIC_AUTO_SILENCE_RATIO_THRESHOLD` | `0.35` | Ngưỡng auto review theo silence ratio |
 | `TOEIC_AUTO_COVERAGE_THRESHOLD` | `0.80` | Ngưỡng auto review theo coverage (Read Aloud) |
 | `TOEIC_MAX_TOKENS` | `30000` | Trần token LLM sinh ra. Nhận xét tiếng Việt dài dễ vượt 4096 → JSON bị cắt; để rộng (cả 2 backend dừng sớm khi xong nên không tốn thêm). |
+| `TOEIC_PHONEME_ANALYSIS_ENABLED` | `false` | Bật phoneme analysis (wav2vec) cho `mode=default`/`auto`. `mode=review` luôn bật, `mode=fast` luôn tắt — bất kể cờ này. Cần cài `torch`/`transformers`/`librosa`/`g2p-en`. |
+| `TOEIC_PHONEME_DEVICE` | `cpu` | `cpu` hoặc `cuda` cho model wav2vec. |
 
 ## Lưu ý thiết kế
 
 - **Whisper confidence KHÔNG phải điểm phát âm** — chỉ là tín hiệu phụ; bị nhiễu bởi mic/giọng/tạp âm. Phát âm do Claude chấm dựa trên transcript + nhịp điệu.
+- **Phoneme analysis (wav2vec) gắn theo mode**: `mode=review` luôn **bật** wav2vec (bằng chứng phát âm cấp âm vị IPA cho Claude); `mode=fast` luôn **tắt** (ưu tiên throughput); `mode=default`/`auto` theo `TOEIC_PHONEME_ANALYSIS_ENABLED`. `auto` chỉ bật wav2vec khi leo lên review. Có reference script (Read Aloud) thì điểm phoneme mới được tính; còn lại chỉ predict.
 - **`task_completion`** là tiêu chí hạng nhất: trả lời quá ngắn/lạc đề bị điểm thấp dù ngữ pháp tốt.
 - **Rubric dạng config** (`src/rubrics/toeic.py`) → thêm IELTS sau chỉ cần tạo `rubrics/ielts.py`.
 

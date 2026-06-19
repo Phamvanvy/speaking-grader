@@ -33,6 +33,7 @@ def grade_response(
     provided_info: str | None = None,
     asr_backend: str = "faster_whisper",
     no_ai: bool = False,
+    phoneme_analysis: bool | None = None,
     question_id: str = "adhoc",
     save: bool = True,
 ) -> dict[str, Any]:
@@ -45,8 +46,17 @@ def grade_response(
       có uses_provided_info.
     - expected_duration_sec: optional, vào features (reading_pace) + gating.
     - no_ai: chỉ chạy ASR + features, bỏ qua LLM.
+    - phoneme_analysis: ép bật/tắt phoneme analysis (wav2vec) cho lần chấm này,
+      bất kể config. None = theo config.phoneme_analysis_enabled. API dùng cờ này
+      để gắn wav2vec theo mode: fast → False (ưu tiên tốc độ), review → True,
+      default/auto → None (theo config).
     - save: ghi JSON ra outputs/ (CLI cần; API có thể tắt).
     """
+    phoneme_enabled = (
+        config.phoneme_analysis_enabled
+        if phoneme_analysis is None
+        else phoneme_analysis
+    )
     active_model = config.local_model if config.is_local else config.model
     logger.info(
         "Chấm | audio=%s | question=%s | type=%s | backend=%s | model=%s | no_ai=%s",
@@ -97,7 +107,7 @@ def grade_response(
 
     # [2b] Phoneme analysis (optional — Phase 1: wav2vec)
     phoneme_result = None
-    if config.phoneme_analysis_enabled and transcription.text.strip():
+    if phoneme_enabled and transcription.text.strip():
         step_started = time.perf_counter()
         phoneme_analyzer = HybridPhonemeAnalyzer(
             wav2vec_model=config.phoneme_wav2vec_model,
@@ -125,8 +135,8 @@ def grade_response(
             )
     else:
         step_timings_ms["phoneme"] = 0
-        if not config.phoneme_analysis_enabled:
-            logger.info("Phoneme | question=%s | disabled by config", question_id)
+        if not phoneme_enabled:
+            logger.info("Phoneme | question=%s | disabled (mode/config)", question_id)
 
     # [3] Gating
     step_started = time.perf_counter()

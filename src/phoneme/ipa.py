@@ -60,80 +60,86 @@ IPA_TO_ARPABET: Final[dict[str, str]] = {v: k for k, v in ARPABET_TO_IPA.items()
 # Simple English word → ARPAbet → IPA  (built-in fallback dictionary)
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Mini dictionary của các từ phổ biến trong TOEIC Speaking
-# Format: word_lowercase → [ARPAbet phonemes]
+# Mini dictionary của các từ phổ biến trong TOEIC Speaking.
+# Format: word_lowercase → [ARPAbet phonemes] (CMUdict, đã bỏ stress digit).
+# QUY TẮC: mỗi phần tử phải là MỘT ký hiệu ARPAbet hợp lệ có trong ARPABET_TO_IPA
+# (vd "N","D" — KHÔNG ghép "ND"; "S","T" — KHÔNG ghép "ST"). Token ghép sẽ không
+# map được sang IPA và lọt vào chuỗi tham chiếu thành "phoneme" rác → báo lỗi oan.
+# Built-in path còn lọc lại theo ARPABET_TO_IPA nên token lạ bị bỏ, nhưng giữ dict
+# đúng ngay từ đầu để reference không bị thiếu âm.
 _COMMON_WORD_PRONUNCIATIONS: Final[dict[str, list[str]]] = {
     # Articles, pronouns
-    "the": ["DH", "AH"], "a": "EY".split()[0:1] or ["EH"], "an": ["AE", "N"],
-    "i": ["AH"], "me": ["M", "IY"], "my": ["M", "AY"],
+    "the": ["DH", "AH"], "a": ["AH"], "an": ["AE", "N"],
+    "i": ["AY"], "me": ["M", "IY"], "my": ["M", "AY"],
     "he": ["HH", "IY"], "him": ["HH", "IH", "M"], "his": ["HH", "IH", "Z"],
     "she": ["SH", "IY"], "her": ["HH", "ER"],
-    "we": ["W", "IY"], "us": ["AH", "S"], "our": ["AH", "R"],
-    "you": ["Y", "UW"], "your": ["Y", "ER"],
+    "we": ["W", "IY"], "us": ["AH", "S"], "our": ["AW", "ER"],
+    "you": ["Y", "UW"], "your": ["Y", "AO", "R"],
     "it": ["IH", "T"], "its": ["IH", "T", "S"],
-    "they": ["DH", "EY"], "them": ["DH", "EH", "M"], "their": ["DH", "ER"],
-    "what": ["W", "AH", "T"], "where": ["W", "ER"], "when": ["W", "EH", "N"],
-    "which": ["W", "CH", "IH"], "who": ["HH", "UW"], "why": ["W", "AY"],
+    "they": ["DH", "EY"], "them": ["DH", "EH", "M"], "their": ["DH", "EH", "R"],
+    "what": ["W", "AH", "T"], "where": ["W", "EH", "R"], "when": ["W", "EH", "N"],
+    "which": ["W", "IH", "CH"], "who": ["HH", "UW"], "why": ["W", "AY"],
     "how": ["HH", "AW"],
     # Common verbs
-    "is": ["IH", "Z"], "are": ["AH", "R"], "was": ["W", "AH", "Z"],
+    "is": ["IH", "Z"], "are": ["AA", "R"], "was": ["W", "AH", "Z"],
     "were": ["W", "ER"], "be": ["B", "IY"], "been": ["B", "IH", "N"],
-    "being": ["B", "IH", "NG"], "do": ["D", "UW"], "does": ["D", "AH", "Z"],
+    "being": ["B", "IY", "IH", "NG"], "do": ["D", "UW"], "does": ["D", "AH", "Z"],
     "did": ["D", "IH", "D"], "have": ["HH", "AE", "V"], "has": ["HH", "AE", "Z"],
-    "had": ["HH", "AE", "D"], "will": ["W", "IH", "L"], "would": ["W", "UH", "L"],
-    "could": ["K", "UH", "L"], "should": ["SH", "UH", "L"],
+    "had": ["HH", "AE", "D"], "will": ["W", "IH", "L"], "would": ["W", "UH", "D"],
+    "could": ["K", "UH", "D"], "should": ["SH", "UH", "D"],
     "can": ["K", "AE", "N"], "may": ["M", "EY"], "might": ["M", "AY", "T"],
-    "must": ["M", "AH", "ST"], "shall": ["SH", "AE", "L"],
+    "must": ["M", "AH", "S", "T"], "shall": ["SH", "AE", "L"],
     "say": ["S", "EY"], "said": ["S", "EH", "D"],
-    "go": ["G", "UW"], "went": ["W", "EH", "NT"], "gone": ["G", "AO", "N"],
+    "go": ["G", "OW"], "went": ["W", "EH", "N", "T"], "gone": ["G", "AO", "N"],
     "come": ["K", "AH", "M"], "came": ["K", "EY", "M"],
-    "get": ["G", "EH", "T"], "got": ["G", "AH", "T"],
+    "get": ["G", "EH", "T"], "got": ["G", "AA", "T"],
     "make": ["M", "EY", "K"], "made": ["M", "EY", "D"],
     "take": ["T", "EY", "K"], "took": ["T", "UH", "K"],
-    "give": ["G", "IH", "V"], "gave": ["G", "AE", "V"],
-    "know": ["N", "UW"], "knew": ["N", "UW"],
-    "think": ["TH", "IH", "K"], "thought": ["TH", "AO", "T"],
+    "give": ["G", "IH", "V"], "gave": ["G", "EY", "V"],
+    "know": ["N", "OW"], "knew": ["N", "UW"],
+    "think": ["TH", "IH", "NG", "K"], "thought": ["TH", "AO", "T"],
     "see": ["S", "IY"], "saw": ["S", "AO"],
     "look": ["L", "UH", "K"], "like": ["L", "AY", "K"],
-    "find": ["F", "AY", "ND"], "feel": ["F", "IY", "L"],
-    "want": ["W", "AH", "NT"], "need": ["N", "IY", "D"],
+    "find": ["F", "AY", "N", "D"], "feel": ["F", "IY", "L"],
+    "want": ["W", "AA", "N", "T"], "need": ["N", "IY", "D"],
     "use": ["Y", "UW", "Z"], "used": ["Y", "UW", "Z", "D"],
     "work": ["W", "ER", "K"],
-    "try": ["T", "R", "AY"], "show": ["SH", "UW"],
-    "tell": ["T", "EH", "L"], "ask": ["AE", "SK"],
-    "tell": ["T", "EH", "L"],
+    "try": ["T", "R", "AY"], "show": ["SH", "OW"],
+    "tell": ["T", "EH", "L"], "ask": ["AE", "S", "K"],
     "move": ["M", "UW", "V"], "live": ["L", "IH", "V"],
     "run": ["R", "AH", "N"], "help": ["HH", "EH", "L", "P"],
-    "talk": ["T", "AO", "L", "K"], "start": ["ST", "AH", "R", "T"],
-    "play": ["P", "LE", "Y"],
+    "talk": ["T", "AO", "K"], "start": ["S", "T", "AA", "R", "T"],
+    "play": ["P", "L", "EY"],
     "pay": ["P", "EY"],
     # Common nouns (TOEIC context)
-    "time": ["T", "AY", "M"], "day": ["D", "EY"], "year": ["Y", "ER"],
-    "way": ["W", "AY"], "thing": ["TH", "IH", "NG"],
+    "time": ["T", "AY", "M"], "day": ["D", "EY"], "year": ["Y", "IH", "R"],
+    "way": ["W", "EY"], "thing": ["TH", "IH", "NG"],
     "man": ["M", "AE", "N"], "men": ["M", "EH", "N"],
-    "woman": ["W", "AH", "M", "AE", "N"], "people": ["P", "IH", "P", "AH", "L"],
+    "woman": ["W", "UH", "M", "AH", "N"], "people": ["P", "IY", "P", "AH", "L"],
     "world": ["W", "ER", "L", "D"], "life": ["L", "AY", "F"],
-    "hand": ["HH", "AE", "ND"], "part": ["P", "AH", "R", "T"],
-    "child": ["CH", "AY", "L", "D"], "children": ["CH", "IH", "L", "D", "R", "EH", "N"],
-    "eye": ["AY"], "place": ["P", "LE", "S"], "work": ["W", "ER", "K"],
-    "week": ["W", "IH", "K"], "company": ["K", "AH", "M", "P", "AH", "N", "IY"],
-    "number": ["N", "AH", "M", "B", "ER"], "state": ["S", "EY", "T"],
-    "family": ["F", "AE", "M", "IY"], "student": ["ST", "UW", "DH", "EH", "N", "T"],
-    "group": ["G", "R", "UH", "P"], "country": ["K", "AH", "N", "T", "R", "IY"],
+    "hand": ["HH", "AE", "N", "D"], "part": ["P", "AA", "R", "T"],
+    "child": ["CH", "AY", "L", "D"], "children": ["CH", "IH", "L", "D", "R", "AH", "N"],
+    "eye": ["AY"], "place": ["P", "L", "EY", "S"],
+    "week": ["W", "IY", "K"], "company": ["K", "AH", "M", "P", "AH", "N", "IY"],
+    "number": ["N", "AH", "M", "B", "ER"], "state": ["S", "T", "EY", "T"],
+    "family": ["F", "AE", "M", "AH", "L", "IY"],
+    "student": ["S", "T", "UW", "D", "AH", "N", "T"],
+    "group": ["G", "R", "UW", "P"], "country": ["K", "AH", "N", "T", "R", "IY"],
     # Common adjectives
-    "good": ["G", "UH", "D"], "new": ["N", "UW"], "first": ["F", "ER", "ST"],
-    "last": ["L", "AE", "ST"], "long": ["L", "AH", "NG"], "great": ["G", "RE", "T"],
+    "good": ["G", "UH", "D"], "new": ["N", "UW"], "first": ["F", "ER", "S", "T"],
+    "last": ["L", "AE", "S", "T"], "long": ["L", "AO", "NG"],
+    "great": ["G", "R", "EY", "T"],
     "little": ["L", "IH", "T", "AH", "L"], "own": ["OW", "N"],
-    "other": ["AH", "TH", "ER"], "old": ["OW", "L", "D"], "right": ["R", "AY", "T"],
-    "big": ["B", "IH", "G"], "high": ["HH", "AY"], "small": ["SM", "AO", "L"],
-    "different": ["D", "IH", "F", "EH", "R", "EH", "NT"],
-    "important": ["IH", "M", "P", "AO", "R", "EH", "NT"],
+    "other": ["AH", "DH", "ER"], "old": ["OW", "L", "D"], "right": ["R", "AY", "T"],
+    "big": ["B", "IH", "G"], "high": ["HH", "AY"], "small": ["S", "M", "AO", "L"],
+    "different": ["D", "IH", "F", "R", "AH", "N", "T"],
+    "important": ["IH", "M", "P", "AO", "R", "T", "AH", "N", "T"],
     # Prepositions
-    "in": ["IH", "N"], "on": ["AH", "N"], "at": ["AE", "T"],
-    "to": ["T", "UW"], "of": ["AH", "F"], "for": ["F", "ER"],
-    "with": ["W", "IH", "TH"], "about": ["AE", "B", "AH", "T"],
-    "between": ["B", "IH", "T", "W", "IH", "N"], "after": ["AE", "F", "ER"],
-    "before": ["B", "IH", "F", "ER"], "under": ["AH", "ND", "ER"],
+    "in": ["IH", "N"], "on": ["AA", "N"], "at": ["AE", "T"],
+    "to": ["T", "UW"], "of": ["AH", "V"], "for": ["F", "ER"],
+    "with": ["W", "IH", "DH"], "about": ["AH", "B", "AW", "T"],
+    "between": ["B", "IH", "T", "W", "IY", "N"], "after": ["AE", "F", "T", "ER"],
+    "before": ["B", "IH", "F", "AO", "R"], "under": ["AH", "N", "D", "ER"],
     "over": ["OW", "V", "ER"], "through": ["TH", "R", "UW"],
 }
 
@@ -291,10 +297,11 @@ def word_to_ipa(word: str) -> list[str]:
     if not key:
         return []
 
-    # Built-in dictionary first
+    # Built-in dictionary first. Lọc theo ARPABET_TO_IPA (giống nhánh g2p) để
+    # token không hợp lệ không lọt vào chuỗi IPA tham chiếu thành "phoneme" rác.
     if key in _COMMON_WORD_PRONUNCIATIONS:
         arpabet = _COMMON_WORD_PRONUNCIATIONS[key]
-        return [ARPABET_TO_IPA.get(a, a) for a in arpabet]
+        return [ARPABET_TO_IPA[a] for a in arpabet if a in ARPABET_TO_IPA]
 
     # Try g2p if available (cached instance — KHÔNG khởi tạo lại mỗi từ)
     transcriber = _get_g2p()

@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOEIC Speaking Grader</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 TOEIC Speaking Grader</h1>
+
+        <!-- API Configuration -->
+        <div class="card">
+            <h2>⚙️ API Configuration</h2>
+            <div class="form-group">
+                <label for="api-url">API Base URL</label>
+                <div class="api-config">
+                    <input type="text" id="api-url" value="http://localhost:8000" placeholder="http://localhost:8000">
+                    <button class="btn btn-secondary" onclick="checkHealth()">Check</button>
+                </div>
+            </div>
+            <div id="health-status"></div>
+        </div>
+
+        <!-- Grading (single or batch) -->
+        <div class="card">
+            <h2>📝 Grading <span style="font-weight:400;font-size:0.85rem;color:#888;">— 1 file = single · 2+ files = batch</span></h2>
+
+            <div class="form-group">
+                <label class="file-upload" id="single-file-label">
+                    <input type="file" id="audio-file" multiple accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4,.mov,.mkv,.avi">
+                    <div class="file-upload-text">
+                        <span class="icon">📁</span>
+                        <span>Click to select audio file(s) — pick several to grade a whole batch</span>
+                    </div>
+                </label>
+                <div id="single-file-name" class="file-list"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="reference-text">Reference Script (optional - for Read Aloud)</label>
+                <textarea id="reference-text" placeholder="Enter the reference transcript here..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="prompt-text">Prompt (optional)</label>
+                <textarea id="prompt-text" placeholder="Enter the prompt shown to the test-taker..."></textarea>
+            </div>
+
+            <div class="row">
+                <div class="form-group">
+                    <label for="question-type">Question Type</label>
+                    <select id="question-type">
+                        <option value="">Auto-detect</option>
+                        <option value="read_aloud">Read Aloud</option>
+                        <option value="describe_picture">Describe Picture</option>
+                        <option value="respond_questions">Respond to Questions</option>
+                        <option value="respond_with_info">Respond with Info</option>
+                        <option value="express_opinion">Express Opinion</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="mode">Grading Mode</label>
+                    <select id="mode">
+                        <option value="auto">Auto (recommended)</option>
+                        <option value="default">Default</option>
+                        <option value="fast">Fast</option>
+                        <option value="review">Review</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="form-group">
+                    <label for="feedback-lang">Feedback Language</label>
+                    <select id="feedback-lang">
+                        <option value="">Default</option>
+                        <option value="vi">Vietnamese</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="expected-duration">Expected Duration (sec)</label>
+                    <input type="number" id="expected-duration" placeholder="e.g. 60" min="1">
+                </div>
+            </div>
+
+            <div class="checkbox-group" style="margin-bottom: 1.5rem;">
+                <input type="checkbox" id="no-ai">
+                <label for="no-ai">ASR only (skip AI scoring)</label>
+            </div>
+
+            <button class="btn btn-primary" id="grade-btn" onclick="grade()">Grade Now</button>
+        </div>
+
+        <!-- Single Result -->
+        <div class="result" id="result">
+            <div class="card">
+                <div class="result-header">
+                    <h2>📊 Results</h2>
+                    <button class="btn btn-secondary" onclick="closeResult()" style="width: auto; padding: 0.5rem 1rem;">Close</button>
+                </div>
+
+                <div class="score-display" id="score-display">
+                    <div class="label">Estimated TOEIC Speaking Score</div>
+                    <div class="score" id="toeic-score">--</div>
+                </div>
+
+                <div class="result-section">
+                    <h3>📝 Transcript</h3>
+                    <p id="transcript"></p>
+                </div>
+
+                <div class="result-section">
+                    <h3>📈 Features</h3>
+                    <div class="features-grid" id="features-grid"></div>
+                </div>
+
+                <div class="result-section">
+                    <h3>📋 Scores Breakdown</h3>
+                    <div id="scores-breakdown"></div>
+                </div>
+
+                <div class="result-section">
+                    <h3>💬 Feedback</h3>
+                    <p id="feedback"></p>
+                </div>
+
+                <div class="result-section">
+                    <h3>🔍 Telemetry</h3>
+                    <div id="telemetry"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Batch Results -->
+        <div class="result" id="batch-result">
+            <div class="card">
+                <div class="result-header">
+                    <h2>📊 Batch Results</h2>
+                    <div class="actions">
+                        <button class="btn btn-primary" onclick="exportBatchCsv()" style="width: auto; padding: 0.5rem 1rem;">⬇ Export CSV</button>
+                        <button class="btn btn-secondary" onclick="closeBatchResult()" style="width: auto; padding: 0.5rem 1rem;">Close</button>
+                    </div>
+                </div>
+                <div id="batch-summary"></div>
+                <div id="batch-results-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+# Reverse proxy + HTTPS tự động (Let's Encrypt) cho TOEIC Speaking Grader.
+#
+# Dùng khi host public trên VPS:
+#   1. Trỏ DNS A record của your-domain.com về IP của VPS.
+#   2. Đổi "your-domain.com" bên dưới thành domain thật.
+#   3. Chạy API: `docker compose up --build -d`  (lắng nghe localhost:8000).
+#   4. Chạy Caddy: `caddy run` (hoặc cài như service: `caddy start`).
+#
+# Caddy tự xin + gia hạn chứng chỉ TLS → trang chạy HTTPS, không cần cấu hình thêm.
+# Cả index.html lẫn API đều qua cùng domain này (cùng origin → không CORS).
+
+your-domain.com {
+	reverse_proxy localhost:8000
+}
