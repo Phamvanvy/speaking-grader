@@ -89,6 +89,12 @@ class Config:
     auto_confidence_threshold: float = 0.75
     auto_silence_ratio_threshold: float = 0.35
     auto_coverage_threshold: float = 0.80
+    # Phoneme analysis (wav2vec 2.0 backend — Phase 1, hybrid-ready for MFA Phase 2)
+    phoneme_analysis_enabled: bool = False
+    phoneme_wav2vec_model: str = "facebook/wav2vec2-lg-960h"
+    phoneme_device: str = "cpu"
+    phoneme_confidence_threshold: float = 0.1
+    phoneme_min_duration_sec: float = 0.1
 
     @property
     def has_api_key(self) -> bool:
@@ -141,5 +147,23 @@ def load_config() -> Config:
         ),
         auto_coverage_threshold=float(
             os.getenv("TOEIC_AUTO_COVERAGE_THRESHOLD", "0.80")
+        ),
+        # Phoneme analysis config
+        phoneme_analysis_enabled=(
+            os.getenv("TOEIC_PHONEME_ANALYSIS_ENABLED", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_wav2vec_model=(
+            os.getenv(
+                "TOEIC_PHONEME_WAV2VEC_MODEL",
+                "facebook/wav2vec2-lg-960h",
+            )
+            or "facebook/wav2vec2-lg-960h"
+        ),
+        phoneme_device=os.getenv("TOEIC_PHONEME_DEVICE", "cpu") or "cpu",
+        phoneme_confidence_threshold=float(
+            os.getenv("TOEIC_PHONEME_CONFIDENCE_THRESHOLD", "0.1")
+        ),
+        phoneme_min_duration_sec=float(
+            os.getenv("TOEIC_PHONEME_MIN_DURATION_SEC", "0.1")
         ),
     )

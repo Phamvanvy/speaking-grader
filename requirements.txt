@@ -15,3 +15,13 @@ rich>=13.0.0
 fastapi>=0.110.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.9
+# Phoneme analysis (wav2vec 2.0 backend — optional, Phase 1).
+# Chỉ cần khi bật TOEIC_PHONEME_ANALYSIS_ENABLED=true.
+# torch: deep learning runtime (CPU build ~800MB, CUDA ~2GB+).
+# transformers: AutoModelForCTC + AutoFeatureExtractor cho wav2vec.
+# librosa: audio loading + resampling (fallback: torchaudio/soundfile).
+# g2p-en: grapheme-to-phoneme fallback khi word không có trong built-in dict.
+torch>=2.0.0
+transformers>=4.35.0
+librosa>=0.10.0
+g2p-en>=2.1.0
