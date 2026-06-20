@@ -1,0 +1,40 @@
+[
+  {
+    "id": "ielts_p1_work",
+    "type": "part1_interview",
+    "prompt": "Let's talk about your work or studies. What do you do? Do you enjoy it? Why or why not?",
+    "expected_duration_sec": 40
+  },
+  {
+    "id": "ielts_p1_hometown",
+    "type": "part1_interview",
+    "prompt": "Now let's talk about your hometown. Where is it, and what is it like to live there?",
+    "expected_duration_sec": 40
+  },
+  {
+    "id": "ielts_p2_memorable_trip",
+    "type": "part2_long_turn",
+    "prompt": "Describe a memorable trip you have taken. You will have to talk about the topic for one to two minutes.",
+    "provided_info": "Describe a memorable trip you have taken.\nYou should say:\n- where you went\n- who you went with\n- what you did there\nand explain why this trip was memorable for you.",
+    "expected_duration_sec": 120
+  },
+  {
+    "id": "ielts_p2_useful_skill",
+    "type": "part2_long_turn",
+    "prompt": "Describe a useful skill you learned. You will have to talk about the topic for one to two minutes.",
+    "provided_info": "Describe a useful skill you learned (for example cooking, driving, or a language).\nYou should say:\n- what the skill is\n- when and how you learned it\n- how difficult it was to learn\nand explain why this skill is useful to you.",
+    "expected_duration_sec": 120
+  },
+  {
+    "id": "ielts_p3_travel_tourism",
+    "type": "part3_discussion",
+    "prompt": "We've been talking about travel. Why do you think people enjoy travelling to other countries? Do you think tourism can have negative effects on a place?",
+    "expected_duration_sec": 60
+  },
+  {
+    "id": "ielts_p3_learning_skills",
+    "type": "part3_discussion",
+    "prompt": "Let's consider learning new skills. Do you think it is better to learn a skill from a teacher or by yourself? How has technology changed the way people learn skills?",
+    "expected_duration_sec": 60
+  }
+]

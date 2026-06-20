@@ -15,7 +15,7 @@ from typing import Any
 from . import asr, features as features_mod, gating, report, scoring
 from .config import Config
 from .phoneme.analyzer import HybridPhonemeAnalyzer
-from .rubrics.toeic import QuestionType
+from .rubrics.base import QuestionType
 
 logger = logging.getLogger("toeic.core")
 
@@ -182,11 +182,17 @@ def grade_response(
         step_timings_ms["scoring"] = int((time.perf_counter() - step_started) * 1000)
         scores_dict = result.model_dump(mode="json")
         scoring_status = "completed"
+        _score_field = (
+            "estimated_ielts_band"
+            if qt.exam == "ielts"
+            else "estimated_toeic_score"
+        )
         logger.info(
-            "Timing | question=%s | step=scoring | duration_ms=%d | score=%s",
+            "Timing | question=%s | step=scoring | duration_ms=%d | exam=%s | score=%s",
             question_id,
             step_timings_ms["scoring"],
-            scores_dict.get("estimated_toeic_score"),
+            qt.exam,
+            scores_dict.get(_score_field),
         )
 
     if scoring_status != "completed":
@@ -203,6 +209,7 @@ def grade_response(
         audio_path=audio_path,
         question_id=question_id,
         question_type=qt.key,
+        exam=qt.exam,
         transcript=transcription.text,
         features=feats.to_dict(),
         scores=scores_dict,

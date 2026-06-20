@@ -9,29 +9,7 @@ khung để mở rộng dần.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-
-
-@dataclass(frozen=True)
-class Criterion:
-    key: str
-    label: str
-    description: str
-
-
-@dataclass(frozen=True)
-class QuestionType:
-    key: str
-    label: str
-    criteria: list[Criterion]
-    scale_description: str
-    # Hướng dẫn riêng cho dạng câu này (đưa vào system prompt)
-    guidance: str = ""
-    uses_reference_script: bool = False
-    # Dạng câu có tài liệu cho sẵn (Q8-10): thí sinh phải trả lời dựa trên
-    # provided_info (text) và/hoặc ảnh đính kèm.
-    uses_provided_info: bool = False
-
+from .base import Criterion, QuestionType
 
 # --- Các tiêu chí dùng chung -------------------------------------------------
 

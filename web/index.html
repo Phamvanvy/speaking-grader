@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TOEIC Speaking Grader</title>
+    <title>Speaking Grader</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
     <div class="container">
-        <h1>🎤 TOEIC Speaking Grader</h1>
+        <h1>🎤 Speaking Grader</h1>
 
         <!-- API Configuration — ẩn khỏi người dùng (input vẫn ở trong DOM để
              app.js tự lấy origin của trang). Bỏ class "hidden" để hiện lại khi cần. -->
@@ -52,17 +52,21 @@
 
             <div class="row">
                 <div class="form-group">
-                    <label for="question-type">Question Type</label>
-                    <select id="question-type">
-                        <option value="">Auto-detect</option>
-                        <option value="read_aloud">Read Aloud</option>
-                        <option value="describe_picture">Describe Picture</option>
-                        <option value="respond_questions">Respond to Questions</option>
-                        <option value="respond_with_info">Respond with Info</option>
-                        <option value="express_opinion">Express Opinion</option>
+                    <label for="exam">Exam</label>
+                    <select id="exam">
+                        <option value="toeic">TOEIC</option>
+                        <option value="ielts">IELTS</option>
                     </select>
                 </div>
 
+                <div class="form-group">
+                    <label for="question-type">Question Type</label>
+                    <!-- Options populated by app.js theo exam đã chọn -->
+                    <select id="question-type"></select>
+                </div>
+            </div>
+
+            <div class="row">
                 <div class="form-group">
                     <label for="mode">Grading Mode</label>
                     <select id="mode">
@@ -108,8 +112,8 @@
                 </div>
 
                 <div class="score-display" id="score-display">
-                    <div class="label">Estimated TOEIC Speaking Score</div>
-                    <div class="score" id="toeic-score">--</div>
+                    <div class="label" id="score-label">Estimated TOEIC Speaking Score</div>
+                    <div class="score" id="overall-score">--</div>
                 </div>
 
                 <div class="result-section">

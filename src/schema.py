@@ -21,7 +21,9 @@ class CriterionScore(BaseModel):
     criterion: str = Field(
         description="Tên tiêu chí, vd 'pronunciation', 'intonation_stress'"
     )
-    score: float = Field(description="Điểm theo thang TOEIC cho tiêu chí (0-3)")
+    score: float = Field(
+        description="Điểm tiêu chí: thang 0-3 cho TOEIC, band 0-9 cho IELTS"
+    )
     justification: str = Field(description="Lý do chấm, dựa trên số liệu + transcript")
     suggestions: list[str] = Field(
         default_factory=list, description="Gợi ý cải thiện cụ thể"
@@ -34,19 +36,31 @@ class SpeakingResult(BaseModel):
     task_completion: CompletionLevel
     content_relevance: CompletionLevel
     criteria: list[CriterionScore]
-    # TOEIC Speaking dùng thang 0-200, KHÔNG dùng Band như IELTS.
-    # QUAN TRỌNG: trường này KHÔNG do LLM sinh nữa — nó được TÍNH TỰ ĐỘNG trong
-    # code (scoring._compute_toeic_score) từ điểm tiêu chí 0-3 + task_completion
-    # + content_relevance, để cùng một bộ điểm tiêu chí luôn ra cùng một số (loại
-    # bỏ dao động do model tự "bốc" số). Có default=0 nên không bắt buộc trong
-    # schema gửi cho model; giá trị model trả (nếu có) sẽ bị ghi đè.
-    estimated_toeic_score: int = Field(
-        default=0,
+    # Điểm tổng theo từng thang đo — KHÔNG do LLM sinh, được TÍNH TỰ ĐỘNG trong
+    # scoring.py từ điểm tiêu chí + task_completion + content_relevance, để cùng
+    # một bộ điểm luôn ra cùng một số (loại bỏ dao động do model tự "bốc" số).
+    # Chỉ MỘT field được set tuỳ kỳ thi (qt.exam); field còn lại để None. Cả hai
+    # optional (default None) nên không bắt buộc trong schema gửi cho model; giá
+    # trị model trả (nếu có) sẽ bị ghi đè.
+    #
+    # TOEIC Speaking: thang 0-200 (báo theo bước 10).
+    estimated_toeic_score: int | None = Field(
+        default=None,
         ge=0,
         le=200,
         description=(
             "Điểm TOEIC Speaking (0-200) — TÍNH TỰ ĐỘNG từ điểm tiêu chí, model "
-            "KHÔNG cần điền."
+            "KHÔNG cần điền. None nếu kỳ thi không phải TOEIC."
+        ),
+    )
+    # IELTS Speaking: band 0-9 (bước 0.5) — trung bình 4 tiêu chí làm tròn 0.5.
+    estimated_ielts_band: float | None = Field(
+        default=None,
+        ge=0,
+        le=9,
+        description=(
+            "Band IELTS Speaking (0-9, bước 0.5) — TÍNH TỰ ĐỘNG từ band từng "
+            "tiêu chí, model KHÔNG cần điền. None nếu kỳ thi không phải IELTS."
         ),
     )
     # Giải thích logic chấm: tiêu chí nào mạnh/yếu và mức độ hoàn thành tổng thể.

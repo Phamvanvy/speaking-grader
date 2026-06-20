@@ -43,7 +43,8 @@ import subprocess
 from .config import Config, load_config
 from .core import grade_response
 from .logging_setup import setup_logging
-from .rubrics.toeic import QuestionType, get_question_type
+from .rubrics import EXAM_REGISTRIES, resolve_question_type
+from .rubrics.base import QuestionType
 
 logger = logging.getLogger("toeic.api")
 
@@ -94,15 +95,62 @@ def _resolve_config(feedback_lang: str | None) -> Config:
     return _BASE_CONFIG
 
 
+def _validate_exam(exam: str) -> str:
+    """Chuẩn hoá + kiểm tra mã kỳ thi (sai → HTTP 400)."""
+    value = (exam or "").strip().lower()
+    if value not in EXAM_REGISTRIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Kỳ thi không hợp lệ: '{exam}'. Hợp lệ: {sorted(EXAM_REGISTRIES)}",
+        )
+    return value
+
+
+def _has_provided_info(provided_info: str | None) -> bool:
+    """True nếu provided_info thực sự có nội dung.
+
+    Frontend có thể gửi '' hoặc 'null' khi để trống → KHÔNG dùng bool() thô (sẽ
+    nhận nhầm mọi bài thành Part 2).
+    """
+    if not provided_info:
+        return False
+    s = provided_info.strip()
+    return bool(s) and s.lower() != "null"
+
+
+def _resolve(key: str, exam: str) -> QuestionType:
+    try:
+        return resolve_question_type(key, exam=exam)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 def _pick_question_type(
-    text: str | None, has_image: bool, question_type: str | None
+    text: str | None,
+    has_image: bool,
+    provided_info: str | None,
+    question_type: str | None,
+    exam: str,
 ) -> QuestionType:
-    """Chọn dạng câu: ưu tiên override; không thì text→read_aloud, image→describe_picture."""
+    """Chọn dạng câu theo kỳ thi: ưu tiên override 'question_type', không thì auto-detect."""
     if question_type:
-        try:
-            return get_question_type(question_type)
-        except KeyError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+        return _resolve(question_type, exam)
+
+    if exam == "ielts":
+        # IELTS: provided_info → Part 2 (cue card). KHÔNG đoán Part 1 vs Part 3
+        # (đều Q&A text-only, không phân biệt được) → bắt client nêu rõ.
+        if _has_provided_info(provided_info):
+            return _resolve("part2_long_turn", exam)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "IELTS: không tự suy ra được dạng câu. Hãy truyền 'question_type' "
+                "rõ ràng (part1_interview / part2_long_turn / part3_discussion), "
+                "hoặc 'provided_info' (cue card) cho Part 2."
+            ),
+        )
+
+    # TOEIC: text → read_aloud, image → describe_picture.
     if text is not None and has_image:
         raise HTTPException(
             status_code=400,
@@ -110,9 +158,9 @@ def _pick_question_type(
             "(hoặc chỉ định 'question_type' rõ ràng).",
         )
     if text is not None:
-        return get_question_type("read_aloud")
+        return _resolve("read_aloud", exam)
     if has_image:
-        return get_question_type("describe_picture")
+        return _resolve("describe_picture", exam)
     raise HTTPException(
         status_code=400,
         detail=(
@@ -147,6 +195,18 @@ def _normalize_mode(mode: str | None) -> str:
             ),
         )
     return value
+
+
+def _overall_score(scores: dict | None, exam: str) -> float | None:
+    """Điểm tổng theo kỳ thi, trả về float thống nhất (TOEIC 0-200 / IELTS 0-9).
+
+    Tránh để downstream (scoreBeforeReview/After) phải xử lý union int|float.
+    """
+    if not scores:
+        return None
+    field = "estimated_ielts_band" if exam == "ielts" else "estimated_toeic_score"
+    value = scores.get(field)
+    return float(value) if value is not None else None
 
 
 def _extract_telemetry_signals(output: dict) -> tuple[float, float, float]:
@@ -315,16 +375,12 @@ def _grade_bytes(
                 review_reasons.append("user_requested_review")
 
             if review_reasons:
-                score_before_review = (
-                    (output.get("scores") or {}).get("estimated_toeic_score")
-                )
+                score_before_review = _overall_score(output.get("scores"), qt.exam)
                 try:
                     output = _run_once(config.asr_backend_review, phoneme=True)
                     review_triggered = True
                     used_mode = "review"
-                    score_after_review = (
-                        (output.get("scores") or {}).get("estimated_toeic_score")
-                    )
+                    score_after_review = _overall_score(output.get("scores"), qt.exam)
                 except Exception as review_err:  # noqa: BLE001
                     review_reasons.append(
                         f"review_failed_kept_default: {type(review_err).__name__}: {review_err}"
@@ -403,11 +459,13 @@ async def grade(
     text: str | None = Form(None, description="Script tham chiếu (Read Aloud)"),
     image: UploadFile | None = File(None, description="Ảnh đề bài (Describe Picture)"),
     expected_duration_sec: float | None = Form(None),
+    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts"),
     question_type: str | None = Form(None),
     feedback_lang: str | None = Form(None),
     prompt: str = Form("", description="Đề bài hiển thị cho thí sinh (optional)"),
     provided_info: str | None = Form(
-        None, description="Tài liệu cho sẵn dạng text (Respond with info, Q8-10)"
+        None,
+        description="Tài liệu cho sẵn dạng text (TOEIC Q8-10 / IELTS Part 2 cue card)",
     ),
     no_ai: bool = Form(False),
     mode: str = Form("auto", description="default | fast | review | auto"),
@@ -417,7 +475,8 @@ async def grade(
 ) -> dict:
     """Chấm 1 bài nói. Trả về JSON {transcript, features, scores}."""
     has_image = image is not None
-    qt = _pick_question_type(text, has_image, question_type)
+    exam = _validate_exam(exam)
+    qt = _pick_question_type(text, has_image, provided_info, question_type, exam)
     image_b64, image_media_type = await _read_image(image)
 
     suffix = _audio_suffix(audio.filename)
@@ -456,11 +515,13 @@ async def grade_batch(
     text: str | None = Form(None, description="Script tham chiếu (Read Aloud)"),
     image: UploadFile | None = File(None, description="Ảnh đề bài (Describe Picture)"),
     expected_duration_sec: float | None = Form(None),
+    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts"),
     question_type: str | None = Form(None),
     feedback_lang: str | None = Form(None),
     prompt: str = Form("", description="Đề bài hiển thị cho thí sinh (optional)"),
     provided_info: str | None = Form(
-        None, description="Tài liệu cho sẵn dạng text (Respond with info, Q8-10)"
+        None,
+        description="Tài liệu cho sẵn dạng text (TOEIC Q8-10 / IELTS Part 2 cue card)",
     ),
     no_ai: bool = Form(False),
     mode: str = Form("auto", description="default | fast | review | auto"),
@@ -490,7 +551,8 @@ async def grade_batch(
         )
 
     has_image = image is not None
-    qt = _pick_question_type(text, has_image, question_type)
+    exam = _validate_exam(exam)
+    qt = _pick_question_type(text, has_image, provided_info, question_type, exam)
     requested_mode = _normalize_mode(mode)
     image_b64, image_media_type = await _read_image(image)
     config = _resolve_config(feedback_lang)
@@ -555,6 +617,7 @@ async def grade_batch(
     )
     succeeded = sum(1 for r in results if "result" in r)
     return {
+        "exam": exam,
         "question_type": qt.key,
         "mode_requested": requested_mode,
         "count": len(results),

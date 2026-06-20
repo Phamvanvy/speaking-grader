@@ -14,7 +14,7 @@ from .asr import Transcription
 from .features import Features
 
 if TYPE_CHECKING:
-    from .rubrics.toeic import QuestionType
+    from .rubrics.base import QuestionType
 
 # Ngưỡng coi là "không hoàn thành": thời lượng nói tối thiểu & số từ tối thiểu.
 MIN_DURATION_SEC = 5.0

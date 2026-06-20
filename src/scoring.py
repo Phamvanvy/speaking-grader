@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from pathlib import Path
 
@@ -21,7 +22,7 @@ from .config import Config, resolve_language_name
 from .features import Features
 from .gating import GatingResult
 from .phoneme.models import PhonemeResult
-from .rubrics.toeic import QuestionType
+from .rubrics.base import Exam, QuestionType
 from .schema import CompletionLevel, SpeakingResult
 
 logger = logging.getLogger("toeic.scoring")
@@ -97,6 +98,51 @@ def _compute_toeic_score(result: SpeakingResult) -> int:
     raw = base * penalty
     return max(0, min(200, int(round(raw / 10.0) * 10)))
 
+
+# --- Quy đổi điểm tiêu chí (band 0-9) → overall band IELTS (0-9) ---------------
+# IELTS Speaking: LLM chấm mỗi tiêu chí trên band 0-9; overall = TRUNG BÌNH 4 tiêu
+# chí, làm tròn về 0.5 gần nhất (đúng cách giám khảo IELTS tổng hợp). Tính trong
+# code (không để LLM bốc) nên cùng bộ band tiêu chí luôn ra cùng một overall.
+
+# Trần overall band khi task_completion / content_relevance thấp — GUARDRAIL NỘI
+# BỘ (không phải công thức IELTS official) chống "nói mượt nhưng lạc đề/quá ngắn".
+# Đặt nới tay: chỉ thực sự cắn khi completion very_low/low; medium ~6.5 để bài
+# tốt nhưng hơi ngắn không bị tụt quá đáng.
+_IELTS_LEVEL_CAP: dict[CompletionLevel, float] = {
+    CompletionLevel.very_low: 3.0,
+    CompletionLevel.low: 4.5,
+    CompletionLevel.medium: 6.5,
+    CompletionLevel.high: 9.0,
+}
+
+
+def _round_half(x: float) -> float:
+    """Làm tròn về bội 0.5 theo quy tắc IELTS (round-half-UP).
+
+    KHÔNG dùng round() built-in (banker's rounding: round(6.25*2)/2 = 6.0 — sai).
+    Làm sạch sai số nhị phân (round(x, 4)) TRƯỚC khi floor để tránh 6.75 lưu thành
+    13.4999… → floor lệch về 6.5. Cận: 6.124→6.0, 6.25→6.5, 6.74→6.5, 6.75→7.0.
+    """
+    clean = round(x, 4)
+    return math.floor(clean * 2 + 0.5) / 2
+
+
+def _compute_ielts_band(result: SpeakingResult) -> float:
+    """Tính estimated_ielts_band (0-9, bước 0.5) TẤT ĐỊNH từ band tiêu chí.
+
+    overall = trung bình band 4 tiêu chí, áp trần theo completion (guardrail), rồi
+    làm tròn 0.5 và kẹp [0, 9].
+    """
+    if not result.criteria:
+        return 0.0
+    mean = sum(c.score for c in result.criteria) / len(result.criteria)
+    cap = min(
+        _IELTS_LEVEL_CAP.get(result.task_completion, 9.0),
+        _IELTS_LEVEL_CAP.get(result.content_relevance, 9.0),
+    )
+    capped = min(mean, cap)
+    return max(0.0, min(9.0, _round_half(capped)))
+
 # Directory to store prompt logs for debugging / model comparison.
 # Enable by setting env var TOEIC_LOG_PROMPTS=1 or Config.log_prompts=True.
 _PROMPT_LOG_DIR = Path("outputs/prompt_logs")
@@ -130,7 +176,42 @@ def _build_system_prompt(qt: QuestionType, feedback_lang: str) -> str:
         f"- {c.key} ({c.label}): {c.description}" for c in qt.criteria
     )
     language_name = resolve_language_name(feedback_lang)
-    return f"""You are an experienced TOEIC Speaking examiner. Score one spoken \
+
+    # Khác biệt theo kỳ thi: văn phong giám khảo + thang điểm + khối "FINAL SCORE".
+    # Phần còn lại của prompt (evidence rules, task completion, ngôn ngữ) dùng chung.
+    is_ielts = qt.exam == Exam.IELTS.value
+    exam_label = "IELTS" if is_ielts else "TOEIC"
+    if is_ielts:
+        scale_label = "band 0-9 (steps of 0.5)"
+        final_score_block = (
+            "FINAL SCORE (important):\n"
+            "- Do NOT compute or output the overall band (estimated_ielts_band). "
+            "It is derived AUTOMATICALLY by the system as the average of your four "
+            "per-criterion band scores, rounded to the nearest 0.5 (and capped if "
+            "task_completion / content_relevance is low). Your job is ONLY to score "
+            "each of the four criteria on the 0-9 band scale accurately and "
+            "consistently.\n"
+            "- Be calibrated on the 0-9 band scale: anchor every criterion to the "
+            "SCORING SCALE above and to the objective evidence, since the overall "
+            "band depends entirely on these per-criterion bands."
+        )
+        rationale_total = "overall band"
+    else:
+        scale_label = "0-3"
+        final_score_block = (
+            "FINAL SCORE (important):\n"
+            "- Do NOT compute or output the 0-200 estimated_toeic_score. It is "
+            "derived AUTOMATICALLY by the system from your per-criterion 0-3 scores "
+            "plus task_completion / content_relevance. Your job is ONLY to score "
+            "each criterion 0-3 accurately and consistently (TOEIC does NOT use "
+            "IELTS bands).\n"
+            "- Be calibrated on the 0-3 scale: anchor every criterion to the "
+            "SCORING SCALE above and to the objective evidence, since the final "
+            "number depends entirely on these per-criterion scores."
+        )
+        rationale_total = "0-200 number"
+
+    return f"""You are an experienced {exam_label} Speaking examiner. Score one spoken \
 response for the task type: {qt.label}.
 
 TASK GUIDANCE:
@@ -174,24 +255,17 @@ short or off-topic answer must get a LOW task_completion.
 - If a completion floor is provided by upstream rule-based checks, do not score \
 task_completion higher than that floor.
 
-FINAL SCORE (important):
-- Do NOT compute or output the 0-200 estimated_toeic_score. It is derived \
-AUTOMATICALLY by the system from your per-criterion 0-3 scores plus \
-task_completion / content_relevance. Your job is ONLY to score each criterion \
-0-3 accurately and consistently (TOEIC does NOT use IELTS bands).
-- Be calibrated on the 0-3 scale: anchor every criterion to the SCORING SCALE \
-above and to the objective evidence, since the final number depends entirely on \
-these per-criterion scores.
+{final_score_block}
 Give concrete, actionable suggestions for each criterion.
 
 EXPLAIN YOUR REASONING (important):
 - Each criterion's `justification` must be a clear, logical chain: cite the \
 specific objective metric or transcript evidence, say what it implies, then why \
-that lands the criterion at this 0-3 score and not one higher or lower.
+that lands the criterion at this {scale_label} score and not one higher or lower.
 - `score_rationale` must explain which criteria are strong vs weak, how \
 task_completion / content_relevance and any gating floor affect the overall \
-quality, and what level the response is at. Do NOT state a specific 0-200 \
-number — that total is computed automatically from your per-criterion scores.
+quality, and what level the response is at. Do NOT state a specific {rationale_total} \
+— that total is computed automatically from your per-criterion scores.
 
 OUTPUT LANGUAGE (important):
 - Write ALL human-readable text — every `justification`, every entry in \
@@ -287,9 +361,10 @@ def _build_user_prompt(
             "actions, setting). A description that does not match the picture must "
             "lower content_relevance / relevance.\n\n"
         )
+    exam_label = "IELTS" if qt.exam == Exam.IELTS.value else "TOEIC"
     return (
-        "Score the following TOEIC Speaking response. All numeric metrics are "
-        "pre-computed and objective.\n\n"
+        f"Score the following {exam_label} Speaking response. All numeric metrics "
+        "are pre-computed and objective.\n\n"
         + image_note
         + json.dumps(payload, ensure_ascii=False, indent=2)
     )
@@ -391,7 +466,13 @@ def score(
         if not last_problems:
             # Ghi đè điểm tổng bằng giá trị TÍNH TẤT ĐỊNH từ điểm tiêu chí —
             # bỏ qua số (nếu có) mà LLM trả về để đảm bảo nhất quán giữa các lần.
-            result.estimated_toeic_score = _compute_toeic_score(result)
+            # Chỉ set field của đúng kỳ thi; field còn lại để None.
+            if qt.exam == Exam.IELTS.value:
+                result.estimated_ielts_band = _compute_ielts_band(result)
+                result.estimated_toeic_score = None
+            else:
+                result.estimated_toeic_score = _compute_toeic_score(result)
+                result.estimated_ielts_band = None
             return result
         logger.warning(
             "Kết quả chấm không hợp lệ (lần %d/%d): %s",

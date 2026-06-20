@@ -1,10 +1,11 @@
-"""CLI: chấm 1 file audio TOEIC Speaking.
+"""CLI: chấm 1 file audio Speaking (TOEIC mặc định, hoặc IELTS qua --exam).
 
 Ví dụ:
     python -m src.main --audio data/audio/sample.wav --question q1_read_aloud
     python -m src.main --audio data/audio/sample.wav --question q1_read_aloud --no-ai
     python -m src.main --audio data/audio/answer.wav --question q3_describe_picture
     python -m src.main --audio data/audio/answer.wav --question q3_describe_picture --image data/images/q3_sample.jpg
+    python -m src.main --exam ielts --audio data/audio/answer.wav --question ielts_p2_memorable_trip
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from .config import load_config
 from .core import grade_response
 from .logging_setup import setup_logging
 from .questions import get_question
-from .rubrics.toeic import get_question_type
+from .rubrics import resolve_question_type
 
 _IMAGE_MEDIA_TYPES: dict[str, str] = {
     ".jpg": "image/jpeg",
@@ -54,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--audio", required=True, help="Đường dẫn file audio (.wav/.mp3)")
     parser.add_argument("--question", required=True, help="ID câu hỏi trong ngân hàng")
     parser.add_argument(
+        "--exam",
+        default=None,
+        help="Kỳ thi: toeic | ielts (mặc định theo config.default_exam).",
+    )
+    parser.add_argument(
         "--image",
         help="Đường dẫn file ảnh đề bài (ghi đè image_path trong ngân hàng câu hỏi).",
     )
@@ -72,9 +78,10 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Không tìm thấy file audio: %s", audio_path)
         return 2
 
+    exam = (args.exam or config.default_exam).strip().lower()
     try:
-        question = get_question(args.question)
-        qt = get_question_type(question.type)
+        question = get_question(args.question, exam=exam)
+        qt = resolve_question_type(question.type, exam=exam)
     except (KeyError, FileNotFoundError) as e:
         logger.error("%s", e)
         return 2

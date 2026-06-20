@@ -2,6 +2,44 @@
 
 const API_URL_KEY = 'toeic-grader-api-url';
 
+// ── Exam config ───────────────────────────────────────────────────────
+// Mọi khác biệt theo kỳ thi gom về một chỗ (tránh if/else rải rác). Dùng SỐ
+// (overallMax/criterionMax) thay vì chuỗi '/200' để dễ thêm TOEFL/VSTEP sau này.
+const EXAM_CONFIG = {
+    toeic: {
+        label: 'TOEIC',
+        scoreField: 'estimated_toeic_score',
+        overallLabel: 'Estimated TOEIC Speaking Score',
+        overallMax: 200,
+        criterionMax: 3,
+        questionTypes: [
+            { value: '', label: 'Auto-detect' },
+            { value: 'read_aloud', label: 'Read Aloud' },
+            { value: 'describe_picture', label: 'Describe Picture' },
+            { value: 'respond_questions', label: 'Respond to Questions' },
+            { value: 'respond_with_info', label: 'Respond with Info' },
+            { value: 'express_opinion', label: 'Express Opinion' },
+        ],
+    },
+    ielts: {
+        label: 'IELTS',
+        scoreField: 'estimated_ielts_band',
+        overallLabel: 'Estimated IELTS Band',
+        overallMax: 9,
+        criterionMax: 9,
+        // Không có "Auto-detect": Part 1 vs Part 3 không phân biệt được → luôn gửi rõ.
+        questionTypes: [
+            { value: 'part1_interview', label: 'Part 1 — Interview' },
+            { value: 'part2_long_turn', label: 'Part 2 — Long turn (cue card)' },
+            { value: 'part3_discussion', label: 'Part 3 — Discussion' },
+        ],
+    },
+};
+
+function examConfig(exam) {
+    return EXAM_CONFIG[exam] || EXAM_CONFIG.toeic;
+}
+
 // Holds the most recent /grade-batch response so "Export CSV" can rebuild it.
 let lastBatchData = null;
 
@@ -59,6 +97,23 @@ function updateModeNote() {
 
 modeSelect.addEventListener('change', updateModeNote);
 updateModeNote();
+
+// ── Exam selector ─────────────────────────────────────────────────────
+// Đổi exam → nạp lại danh sách Question Type và reset về option đầu (tránh giữ
+// giá trị của exam cũ, vd 'read_aloud', gây 400 khi submit IELTS).
+const examSelect = document.getElementById('exam');
+const questionTypeSelect = document.getElementById('question-type');
+
+function populateQuestionTypes() {
+    const cfg = examConfig(examSelect.value);
+    questionTypeSelect.innerHTML = cfg.questionTypes
+        .map(qt => `<option value="${qt.value}">${escapeHtml(qt.label)}</option>`)
+        .join('');
+    questionTypeSelect.selectedIndex = 0;  // reset về option đầu của exam mới
+}
+
+examSelect.addEventListener('change', populateQuestionTypes);
+populateQuestionTypes();
 
 // ── Dark mode ─────────────────────────────────────────────────────────
 // Lựa chọn của user được lưu localStorage; lần đầu thì theo cài đặt hệ điều hành.
@@ -156,7 +211,9 @@ function appendCommonFields(formData) {
     const promptText = document.getElementById('prompt-text').value;
     if (promptText) formData.append('prompt', promptText);
 
-    const questionType = document.getElementById('question-type').value;
+    formData.append('exam', examSelect.value);
+
+    const questionType = questionTypeSelect.value;
     if (questionType) formData.append('question_type', questionType);
 
     formData.append('mode', document.getElementById('mode').value);
@@ -257,10 +314,12 @@ function featureGridHtml(features) {
     `).join('');
 }
 
-function scoresBreakdownHtml(scores) {
+function scoresBreakdownHtml(scores, exam) {
     if (!scores) {
         return '<p style="color:#666;">No AI scoring (ASR-only or skipped by gating).</p>';
     }
+    const cfg = examConfig(exam);
+    const overall = scores[cfg.scoreField];
     const row = (label, val) => `
         <div style="display:flex;justify-content:space-between;padding:0.5rem 0;border-bottom:1px solid #e5e7eb;">
             <span style="color:#555;">${label}</span>
@@ -268,8 +327,8 @@ function scoresBreakdownHtml(scores) {
         </div>`;
     let html = row('Task Completion', scores.task_completion)
              + row('Content Relevance', scores.content_relevance)
-             + row('Estimated TOEIC Score',
-                   scores.estimated_toeic_score != null ? scores.estimated_toeic_score + '/200' : '--');
+             + row(cfg.overallLabel,
+                   overall != null ? overall + '/' + cfg.overallMax : '--');
 
     const criteria = Array.isArray(scores.criteria) ? scores.criteria : [];
     if (criteria.length) {
@@ -279,7 +338,7 @@ function scoresBreakdownHtml(scores) {
                 <div style="background:#f9fafb;border-radius:8px;padding:0.85rem;margin-bottom:0.6rem;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
                         <span style="font-weight:600;color:#333;">${escapeHtml(c.criterion)}</span>
-                        <span style="background:#4f46e5;color:#fff;border-radius:6px;padding:0.1rem 0.55rem;font-weight:600;font-size:0.85rem;">${escapeHtml(c.score)}/3</span>
+                        <span style="background:#4f46e5;color:#fff;border-radius:6px;padding:0.1rem 0.55rem;font-weight:600;font-size:0.85rem;">${escapeHtml(c.score)}/${cfg.criterionMax}</span>
                     </div>
                     <div style="color:#555;line-height:1.5;font-size:0.92rem;">${escapeHtml(c.justification)}</div>
                     ${suggestions ? `<ul style="margin:0.5rem 0 0 1.1rem;color:#4338ca;font-size:0.9rem;">${suggestions}</ul>` : ''}
@@ -314,10 +373,12 @@ function telemetryHtml(telemetry) {
 // ── Single result ─────────────────────────────────────────────────────
 function showSingleResult(data) {
     const resultDiv = document.getElementById('result');
-    document.getElementById('toeic-score').textContent = data.scores?.estimated_toeic_score ?? '--';
+    const cfg = examConfig(data.exam);
+    document.getElementById('score-label').textContent = cfg.overallLabel;
+    document.getElementById('overall-score').textContent = data.scores?.[cfg.scoreField] ?? '--';
     document.getElementById('transcript').textContent = data.transcript || 'No transcript available';
     document.getElementById('features-grid').innerHTML = featureGridHtml(data.features || {});
-    document.getElementById('scores-breakdown').innerHTML = scoresBreakdownHtml(data.scores);
+    document.getElementById('scores-breakdown').innerHTML = scoresBreakdownHtml(data.scores, data.exam);
     document.getElementById('feedback').textContent = data.scores?.summary_feedback || 'No feedback available';
     document.getElementById('telemetry').innerHTML = telemetryHtml(data.telemetry);
     resultDiv.classList.add('visible');
@@ -327,10 +388,11 @@ function showSingleResult(data) {
 // ── Batch result ──────────────────────────────────────────────────────
 function showBatchResult(data) {
     lastBatchData = data;
+    const cfg = examConfig(data.exam);
     const wrap = document.getElementById('batch-result');
     document.getElementById('batch-summary').innerHTML = `
         <div class="status-bar ${data.failed ? 'info' : 'success'}" style="justify-content:center;">
-            <span>${data.succeeded}/${data.count} graded${data.failed ? ` · ${data.failed} failed` : ''} · type: ${escapeHtml(data.question_type)} · mode: ${escapeHtml(data.mode_requested)}</span>
+            <span>${data.succeeded}/${data.count} graded${data.failed ? ` · ${data.failed} failed` : ''} · exam: ${escapeHtml(cfg.label)} · type: ${escapeHtml(data.question_type)} · mode: ${escapeHtml(data.mode_requested)}</span>
         </div>`;
 
     const results = (data.results || []).slice().sort((a, b) => a.index - b.index);
@@ -342,7 +404,7 @@ function showBatchResult(data) {
             </div>`;
         }
         const r = item.result || {};
-        const score = r.scores?.estimated_toeic_score ?? '--';
+        const score = r.scores?.[cfg.scoreField] ?? '--';
         const feedback = r.scores?.summary_feedback;
         return `<details class="batch-result">
             <summary style="cursor:pointer;display:flex;align-items:center;gap:0.75rem;list-style:none;">
@@ -354,7 +416,7 @@ function showBatchResult(data) {
                 <div style="font-weight:600;color:#333;margin-bottom:0.3rem;">Transcript</div>
                 <p style="color:#555;line-height:1.5;white-space:pre-wrap;">${escapeHtml(r.transcript || '(empty)')}</p>
                 <div class="features-grid" style="margin-top:0.85rem;">${featureGridHtml(r.features || {})}</div>
-                <div style="margin-top:0.85rem;">${scoresBreakdownHtml(r.scores)}</div>
+                <div style="margin-top:0.85rem;">${scoresBreakdownHtml(r.scores, r.exam ?? data.exam)}</div>
                 ${feedback ? `<div style="font-weight:600;color:#333;margin:0.85rem 0 0.3rem;">Feedback</div><p style="color:#555;line-height:1.6;white-space:pre-wrap;">${escapeHtml(feedback)}</p>` : ''}
             </div>
         </details>`;
@@ -386,8 +448,10 @@ function exportBatchCsv() {
         return;
     }
 
+    const cfg = examConfig(lastBatchData.exam);
     const columns = [
-        'index', 'filename', 'status', 'estimated_toeic_score',
+        'index', 'filename', 'status', 'exam',
+        'estimated_toeic_score', 'estimated_ielts_band',
         'task_completion', 'content_relevance', 'wpm', 'words',
         'duration_sec', 'asr_confidence', 'coverage', 'word_accuracy',
         'transcript', 'summary_feedback', 'error',
@@ -413,7 +477,9 @@ function exportBatchCsv() {
                 index: item.index,
                 filename: item.audio_filename,
                 status: 'ok',
+                exam: r.exam ?? lastBatchData.exam ?? '',
                 estimated_toeic_score: s.estimated_toeic_score ?? '',
+                estimated_ielts_band: s.estimated_ielts_band ?? '',
                 task_completion: s.task_completion ?? '',
                 content_relevance: s.content_relevance ?? '',
                 wpm: f.speech_rate_wpm != null ? Math.round(f.speech_rate_wpm) : '',
@@ -440,7 +506,7 @@ function exportBatchCsv() {
     const link = document.createElement('a');
     const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
     link.href = objectUrl;
-    link.download = `toeic-batch-${rows.length}-${stamp}.csv`;
+    link.download = `${cfg.label.toLowerCase()}-batch-${rows.length}-${stamp}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

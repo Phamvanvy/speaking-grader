@@ -1,4 +1,4 @@
-"""Nạp ngân hàng câu hỏi từ data/questions/toeic.json."""
+"""Nạp ngân hàng câu hỏi từ data/questions/{exam}.json (toeic / ielts)."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-_DATA_FILE = (
-    Path(__file__).resolve().parent.parent / "data" / "questions" / "toeic.json"
-)
+from .rubrics.base import Exam
+
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "questions"
 
 
 @dataclass(frozen=True)
@@ -20,13 +20,20 @@ class Question:
     expected_duration_sec: float | None = None
     # Đường dẫn ảnh đề bài (tương đối từ project root) — dùng cho Describe Picture.
     image_path: str | None = None
-    # Tài liệu cho sẵn (text) — dùng cho Respond with info (Q8-10).
+    # Tài liệu cho sẵn (text) — dùng cho Respond with info (Q8-10) / IELTS Part 2 cue card.
     provided_info: str | None = None
 
 
-def _load_all(path: Path = _DATA_FILE) -> dict[str, Question]:
+def _data_file(exam: str) -> Path:
+    return _DATA_DIR / f"{exam}.json"
+
+
+def _load_all(exam: str = Exam.TOEIC.value) -> dict[str, Question]:
+    path = _data_file(exam)
     if not path.exists():
-        raise FileNotFoundError(f"Không tìm thấy ngân hàng câu hỏi: {path}")
+        raise FileNotFoundError(
+            f"Không tìm thấy ngân hàng câu hỏi cho kỳ thi '{exam}': {path}"
+        )
     raw = json.loads(path.read_text(encoding="utf-8"))
     questions: dict[str, Question] = {}
     for item in raw:
@@ -43,11 +50,11 @@ def _load_all(path: Path = _DATA_FILE) -> dict[str, Question]:
     return questions
 
 
-def get_question(question_id: str) -> Question:
-    questions = _load_all()
+def get_question(question_id: str, exam: str = Exam.TOEIC.value) -> Question:
+    questions = _load_all(exam)
     if question_id not in questions:
         raise KeyError(
-            f"Không tìm thấy câu hỏi '{question_id}'. "
+            f"Không tìm thấy câu hỏi '{question_id}' trong kỳ thi '{exam}'. "
             f"Có sẵn: {sorted(questions)}"
         )
     return questions[question_id]

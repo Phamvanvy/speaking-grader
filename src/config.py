@@ -17,6 +17,9 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from .rubrics import EXAM_REGISTRIES
+from .rubrics.base import Exam
+
 load_dotenv()  # nạp .env nếu có
 
 # Version của cách tính features — đổi khi thay đổi logic trong features.py
@@ -56,6 +59,9 @@ class Config:
     whisper_device: str
     # "anthropic" (Claude) hoặc "local" (model local, OpenAI-compatible)
     backend: str = "anthropic"
+    # Kỳ thi mặc định khi request/CLI không nêu rõ ("toeic" | "ielts"). Validate
+    # trong load_config() theo EXAM_REGISTRIES.
+    default_exam: str = Exam.TOEIC.value
     # Cấu hình backend local (vd llama.cpp server)
     local_base_url: str = "http://localhost:8080/v1"
     local_model: str = "qwen3"
@@ -120,6 +126,18 @@ class Config:
 
 def load_config() -> Config:
     fast_enabled_raw = (os.getenv("TOEIC_FAST_BACKEND_ENABLED", "true") or "true").strip().lower()
+    # Kỳ thi mặc định: tên env mới (đúng nghĩa multi-exam) → fallback tên cũ → "toeic".
+    default_exam = (
+        os.getenv("SPEAKING_GRADER_DEFAULT_EXAM")
+        or os.getenv("TOEIC_DEFAULT_EXAM")
+        or Exam.TOEIC.value
+    ).strip().lower()
+    if default_exam not in EXAM_REGISTRIES:
+        raise ValueError(
+            f"default_exam không hợp lệ: '{default_exam}'. "
+            f"Hợp lệ: {sorted(EXAM_REGISTRIES)} "
+            f"(đặt qua SPEAKING_GRADER_DEFAULT_EXAM)."
+        )
     return Config(
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         model=os.getenv("TOEIC_MODEL", "claude-sonnet-4-6"),
@@ -127,6 +145,7 @@ def load_config() -> Config:
         # auto: ưu tiên CUDA khi môi trường torch hỗ trợ, fallback CPU.
         whisper_device=os.getenv("WHISPER_DEVICE", "auto"),
         backend=(os.getenv("TOEIC_BACKEND", "anthropic") or "anthropic").lower(),
+        default_exam=default_exam,
         local_base_url=os.getenv("TOEIC_LOCAL_BASE_URL", "http://localhost:8080/v1"),
         local_model=os.getenv("TOEIC_LOCAL_MODEL", "qwen3"),
         local_api_key=os.getenv("TOEIC_LOCAL_API_KEY", "no-key"),

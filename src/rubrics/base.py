@@ -1,0 +1,46 @@
+"""Kiểu dữ liệu rubric dùng chung cho mọi kỳ thi (exam-agnostic).
+
+Tách khỏi `toeic.py` để các rubric khác (ielts.py, và sau này TOEFL/VSTEP) cùng
+import từ một nguồn trung lập, thay vì phụ thuộc ngược vào module của một kỳ thi.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+
+class Exam(str, Enum):
+    """Mã kỳ thi — nguồn hằng + validate duy nhất (diệt typo chuỗi).
+
+    Kế thừa `str` nên giá trị enum vẫn là chuỗi: domain model giữ `exam: str`
+    (xem QuestionType.exam), chỉ dùng `Exam.X.value` làm hằng số/khoá registry.
+    """
+
+    TOEIC = "toeic"
+    IELTS = "ielts"
+
+
+@dataclass(frozen=True)
+class Criterion:
+    key: str
+    label: str
+    description: str
+
+
+@dataclass(frozen=True)
+class QuestionType:
+    key: str
+    label: str
+    criteria: list[Criterion]
+    scale_description: str
+    # Hướng dẫn riêng cho dạng câu này (đưa vào system prompt)
+    guidance: str = ""
+    uses_reference_script: bool = False
+    # Dạng câu có tài liệu cho sẵn (Q8-10 / IELTS Part 2 cue card): thí sinh phải
+    # trả lời dựa trên provided_info (text) và/hoặc ảnh đính kèm.
+    uses_provided_info: bool = False
+    # Kỳ thi mà dạng câu này thuộc về (quyết định công thức tính điểm tổng +
+    # văn phong system prompt). Giữ kiểu str (= Exam.X.value) cho đồng nhất với
+    # các field chuỗi khác và để serialize JSON không cần xử lý enum.
+    exam: str = Exam.TOEIC.value

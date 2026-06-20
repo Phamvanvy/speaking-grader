@@ -19,18 +19,33 @@ def build_output(
     features: dict,
     scores: dict | None,
     telemetry: dict | None = None,
+    exam: str = "toeic",
 ) -> dict[str, Any]:
     """Gom toàn bộ kết quả thành 1 dict để lưu JSON (đầy đủ để debug sau)."""
     return {
         "audio_path": audio_path,
         "question_id": question_id,
         "question_type": question_type,
+        "exam": exam,
         "features_version": FEATURES_VERSION,
         "transcript": transcript,
         "features": features,
         "scores": scores,
         "telemetry": telemetry or {},
     }
+
+
+def _score_display(output: dict[str, Any], scores: dict[str, Any]) -> tuple[str, str]:
+    """Trả về (criterion_suffix, overall_line) theo kỳ thi của output.
+
+    TOEIC: ('/3', 'ĐIỂM TOEIC ƯỚC TÍNH: 120/200'); IELTS: ('/9', 'IELTS BAND
+    ƯỚC TÍNH: 6.5/9'). Dùng chung cho cả bản plain lẫn rich.
+    """
+    if output.get("exam") == "ielts":
+        band = scores.get("estimated_ielts_band")
+        return "/9", f"IELTS BAND ƯỚC TÍNH: {band if band is not None else '--'}/9"
+    toeic = scores.get("estimated_toeic_score")
+    return "/3", f"ĐIỂM TOEIC ƯỚC TÍNH: {toeic if toeic is not None else '--'}/200"
 
 
 def save_json(output: dict[str, Any], stem: str) -> Path:
@@ -98,15 +113,16 @@ def _print_plain(output: dict[str, Any]) -> None:
         print("=" * 60 + "\n")
         return
 
+    crit_suffix, overall_line = _score_display(output, scores)
     print("-" * 60)
     print(f"TASK COMPLETION : {scores['task_completion']}")
     print(f"CONTENT RELEVANCE: {scores['content_relevance']}")
     print("\nĐIỂM TỪNG TIÊU CHÍ:")
     for c in scores["criteria"]:
-        print(f"  [{c['score']}/3] {c['criterion']}: {c['justification']}")
+        print(f"  [{c['score']}{crit_suffix}] {c['criterion']}: {c['justification']}")
         for s in c.get("suggestions", []):
             print(f"        → {s}")
-    print(f"\nĐIỂM TOEIC ƯỚC TÍNH: {scores['estimated_toeic_score']}/200")
+    print(f"\n{overall_line}")
     rationale = scores.get("score_rationale")
     if rationale:
         print("\nLÝ DO RA ĐIỂM:")
@@ -122,11 +138,12 @@ def _print_rich(output: dict[str, Any]) -> None:
     from rich.table import Table
 
     console = Console()
+    exam_title = "IELTS Speaking" if output.get("exam") == "ielts" else "TOEIC Speaking"
     console.print(
         Panel.fit(
             f"[bold]{output['question_id']}[/bold] "
             f"([cyan]{output['question_type']}[/cyan])\n{output['audio_path']}",
-            title="TOEIC Speaking",
+            title=exam_title,
         )
     )
 
@@ -158,6 +175,7 @@ def _print_rich(output: dict[str, Any]) -> None:
         f"[bold]Relevance:[/bold] {scores['content_relevance']}"
     )
 
+    crit_suffix, overall_line = _score_display(output, scores)
     crit_table = Table(title="Điểm từng tiêu chí", show_header=True)
     crit_table.add_column("Tiêu chí")
     crit_table.add_column("Điểm", justify="center")
@@ -167,7 +185,7 @@ def _print_rich(output: dict[str, Any]) -> None:
         body = c["justification"]
         if suggestions:
             body += f"\n[dim]{suggestions}[/dim]"
-        crit_table.add_row(c["criterion"], f"{c['score']}/3", body)
+        crit_table.add_row(c["criterion"], f"{c['score']}{crit_suffix}", body)
     console.print(crit_table)
 
     rationale = scores.get("score_rationale")
@@ -177,6 +195,6 @@ def _print_rich(output: dict[str, Any]) -> None:
     console.print(
         Panel(
             scores["summary_feedback"],
-            title=f"Điểm TOEIC ước tính: {scores['estimated_toeic_score']}/200",
+            title=overall_line,
         )
     )
