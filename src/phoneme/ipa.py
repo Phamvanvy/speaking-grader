@@ -13,6 +13,8 @@ import logging
 import re
 from typing import Final
 
+from .models import WordSpan
+
 logger = logging.getLogger("toeic.phoneme.ipa")
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -323,24 +325,39 @@ def word_to_ipa(word: str) -> list[str]:
     return []
 
 
-def text_to_ipa_sequence(text: str) -> list[str]:
-    """Chuyển đoạn text thành danh sách phonemes tham chiếu.
+def text_to_ipa_sequence_with_spans(
+    text: str,
+) -> tuple[list[str], list[WordSpan]]:
+    """Chuyển text → (danh sách phonemes tham chiếu, danh sách WordSpan).
 
-    Input: "The quick brown fox"
-    Output: ["DH", "AH", "K", "W", "IH", "K", ...] → IPA
+    Input:  "The quick brown fox"
+    Output: (["ð", "ə", "k", "w", "ɪ", "k", ...],
+             [WordSpan("The", 0, 2), WordSpan("quick", 2, 6), ...])
+
+    Phonemes và spans được build trong CÙNG vòng lặp tokenize/word_to_ipa, nên
+    luôn khớp 1-1 theo index: từ nào không tra được IPA (dropped) sẽ KHÔNG sinh
+    span và KHÔNG đẩy phoneme nào → index của các từ sau không bị lệch.
+
+    Span dùng để map ngược lỗi phoneme (theo position trong reference sequence)
+    về đúng từ. `word` giữ nguyên dạng token (re.findall đã loại dấu câu) và giữ
+    nguyên hoa/thường để hiển thị; word_to_ipa tự lower() khi tra từ điển.
     """
     if not text:
-        return []
+        return [], []
 
     words = re.findall(r"[a-zA-Z'-]+", text)
     phonemes: list[str] = []
+    spans: list[WordSpan] = []
     dropped: list[str] = []
     for word in words:
         word_phones = word_to_ipa(word)
         if word_phones:
+            start = len(phonemes)
             phonemes.extend(word_phones)
+            spans.append(WordSpan(word, start, len(phonemes)))
         else:
             # Word không tra được IPA (không có trong dict & g2p) — bỏ qua, ghi log.
+            # Không thêm span → indices của các từ sau vẫn khớp với phoneme list.
             dropped.append(word)
 
     if dropped:
@@ -353,4 +370,17 @@ def text_to_ipa_sequence(text: str) -> list[str]:
             " ..." if len(dropped) > 10 else "",
         )
 
+    return phonemes, spans
+
+
+def text_to_ipa_sequence(text: str) -> list[str]:
+    """Chuyển đoạn text thành danh sách phonemes tham chiếu.
+
+    Input: "The quick brown fox"
+    Output: ["DH", "AH", "K", "W", "IH", "K", ...] → IPA
+
+    Thin wrapper của text_to_ipa_sequence_with_spans() — giữ chữ ký cũ cho các
+    caller chỉ cần phoneme list (không cần word mapping).
+    """
+    phonemes, _spans = text_to_ipa_sequence_with_spans(text)
     return phonemes

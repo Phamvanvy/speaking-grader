@@ -247,6 +247,12 @@ Pay special attention to substitution errors where similar-sounding phonemes are
 confused (e.g. /θ/ → /s/, /æ/ → /ɛ/) — these are common ESL mistakes. Low \
 severity errors may be acceptable regional variants. If phoneme_data is null or \
 disabled, rely on word-level evidence only.
+- Each phoneme error may include a `word` field — the exact reference word that \
+contains the mispronounced phoneme. ONLY mention a word if it appears in the \
+phoneme error data. Do NOT infer or guess spoken words from phoneme \
+substitutions. When you cite a phoneme error, name that exact `word` (e.g. "âm \
+/d/ trong từ 'floods' bị phát âm thành /aɪ/"); if `word` is null, describe the \
+phoneme generically without naming any word.
 
 TASK COMPLETION:
 - task_completion reflects whether the response actually fulfils the prompt \
@@ -257,6 +263,15 @@ task_completion higher than that floor.
 
 {final_score_block}
 Give concrete, actionable suggestions for each criterion.
+
+VOCABULARY CORRECTIONS (lexical_resource / vocabulary criterion):
+- For the lexical_resource (IELTS) / vocabulary (TOEIC) criterion, populate its \
+`corrections` list with one entry per wrong, unnatural, or imprecise word choice \
+you find: `said` = the candidate's phrase, `suggested` = the correct word/phrase, \
+`reason` = a short why, `example` = one natural sentence using the suggested word.
+### CRITICAL — the `said` field MUST be an exact substring of the candidate's \
+transcript. Do not paraphrase, normalize, translate, or correct the candidate's \
+mistake inside `said`. Leave `corrections` empty for every other criterion.
 
 EXPLAIN YOUR REASONING (important):
 - Each criterion's `justification` must be a clear, logical chain: cite the \
@@ -380,6 +395,36 @@ def _is_truncated(text: str) -> bool:
     return not s or s.endswith(_DANGLING_OPEN)
 
 
+def _norm_for_match(s: str) -> str:
+    """Chuẩn hoá để so khớp substring khoan dung: lower + gộp khoảng trắng."""
+    return " ".join(s.lower().split())
+
+
+def _drop_invalid_corrections(result: SpeakingResult, transcript: str) -> None:
+    """Bỏ các LexicalCorrection mà `said` không có trong transcript (mutate result).
+
+    LLM vẫn có thể paraphrase `said` dù prompt cấm → mọi correction phải truy
+    ngược được về điều thí sinh thực sự nói. So khớp khoan dung (case-insensitive,
+    gộp khoảng trắng) để tránh loại nhầm vì khác hoa/thường hay spacing.
+    """
+    haystack = _norm_for_match(transcript)
+    dropped = 0
+    for c in result.criteria:
+        if not c.corrections:
+            continue
+        kept = [
+            corr for corr in c.corrections
+            if corr.said and _norm_for_match(corr.said) in haystack
+        ]
+        dropped += len(c.corrections) - len(kept)
+        c.corrections = kept
+    if dropped:
+        logger.info(
+            "Đã loại %d correction có `said` không khớp transcript (LLM paraphrase).",
+            dropped,
+        )
+
+
 def _validate_result(result: SpeakingResult, qt: QuestionType) -> list[str]:
     """Bắt output 'hợp lệ schema nhưng rác' mà Pydantic không chặn được.
 
@@ -464,6 +509,11 @@ def score(
             )
         last_problems = _validate_result(result, qt)
         if not last_problems:
+            # Loại các correction mà `said` không thực sự có trong transcript
+            # (LLM vẫn có thể paraphrase dù prompt đã cấm). Chạy NGAY sau parse,
+            # trước khi result rời score() → JSON/report/UI không bao giờ thấy
+            # correction bịa.
+            _drop_invalid_corrections(result, transcription.text)
             # Ghi đè điểm tổng bằng giá trị TÍNH TẤT ĐỊNH từ điểm tiêu chí —
             # bỏ qua số (nếu có) mà LLM trả về để đảm bảo nhất quán giữa các lần.
             # Chỉ set field của đúng kỳ thi; field còn lại để None.

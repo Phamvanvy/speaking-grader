@@ -99,6 +99,88 @@ class TestTextToIpaSequence:
         assert len(result) > 0  # at least "the" contributes
 
 
+class TestTextToIpaSequenceWithSpans:
+    """Word-span tracking: phonemes + spans stay index-aligned 1-to-1."""
+
+    def test_spans_cover_phonemes_contiguously(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        phonemes, spans = text_to_ipa_sequence_with_spans("the brown fox")
+        assert spans  # at least some words mapped
+        # First span starts at 0; each span continues from the previous end.
+        assert spans[0].start_idx == 0
+        for prev, cur in zip(spans, spans[1:]):
+            assert cur.start_idx == prev.end_idx
+        # Last span ends exactly at the phoneme count (no gaps when all mapped).
+        assert spans[-1].end_idx == len(phonemes)
+
+    def test_wrapper_returns_same_phonemes(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        phonemes, _ = text_to_ipa_sequence_with_spans("the brown fox")
+        assert text_to_ipa_sequence("the brown fox") == phonemes
+
+    def test_dropped_word_keeps_alignment(self, monkeypatch):
+        import src.phoneme.ipa as ipa_mod
+
+        # Force the middle word to be unmappable (word_to_ipa → []). g2p_en maps
+        # almost any token, so the drop path must be triggered deterministically.
+        real = ipa_mod.word_to_ipa
+
+        def fake_word_to_ipa(word):
+            return [] if word.lower() == "drop" else real(word)
+
+        monkeypatch.setattr(ipa_mod, "word_to_ipa", fake_word_to_ipa)
+
+        phonemes, spans = ipa_mod.text_to_ipa_sequence_with_spans("the drop fox")
+        words = [s.word for s in spans]
+        assert "drop" not in words  # dropped word contributes no span
+        assert words == ["the", "fox"]
+        # Surviving spans stay contiguous and slice real phonemes (no index shift).
+        assert spans[0].start_idx == 0
+        assert spans[1].start_idx == spans[0].end_idx
+        assert spans[-1].end_idx == len(phonemes)
+        for s in spans:
+            assert phonemes[s.start_idx:s.end_idx]  # non-empty slice
+
+
+class TestWordAt:
+    """_word_at binary-search boundary behavior ([start, end) half-open)."""
+
+    def _spans(self):
+        from src.phoneme.models import WordSpan
+
+        return [WordSpan("a", 0, 2), WordSpan("b", 2, 5), WordSpan("c", 7, 9)]
+
+    def test_inside_spans(self):
+        from src.phoneme.scoring import _word_at
+
+        spans = self._spans()
+        starts = [s.start_idx for s in spans]
+        assert _word_at(0, spans, starts) == "a"
+        assert _word_at(1, spans, starts) == "a"
+        assert _word_at(2, spans, starts) == "b"
+        assert _word_at(4, spans, starts) == "b"
+        assert _word_at(8, spans, starts) == "c"
+
+    def test_end_idx_is_exclusive(self):
+        from src.phoneme.scoring import _word_at
+
+        spans = self._spans()
+        starts = [s.start_idx for s in spans]
+        # position == end_idx of "b" must NOT borrow "b"; index 5 is a gap → None.
+        assert _word_at(5, spans, starts) is None
+
+    def test_gap_and_past_end_return_none(self):
+        from src.phoneme.scoring import _word_at
+
+        spans = self._spans()
+        starts = [s.start_idx for s in spans]
+        assert _word_at(6, spans, starts) is None   # gap between b(.. 5) and c(7..)
+        assert _word_at(9, spans, starts) is None    # == last end_idx (exclusive)
+        assert _word_at(999, spans, starts) is None  # far past end
+
+
 class TestPhonemeSimilarity:
     """Phoneme similarity scoring."""
 
@@ -220,6 +302,151 @@ class TestComputePhonemeScore:
         assert "insertion_count" in d
         assert "errors" in d
         assert "avg_confidence" in d
+
+    def test_no_spans_leaves_words_none(self):
+        # Backward compat: without reference_spans every error keeps word=None.
+        ref = ["p", "ə", "t"]
+        segs = self._make_segments(["b", "ə", "t"])  # p → b
+        score = compute_phoneme_score(segs, ref)
+        assert score.substitution_count >= 1
+        assert all(e.word is None for e in score.errors)
+
+    def test_substitution_gets_word_from_spans(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the brown fox")
+        pred = list(ref)
+        pred[-1] = "x"  # corrupt last phoneme (in "fox") → substitution there
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans)
+        subs = [e for e in score.errors if e.error_type == PhonemeErrorType.SUBSTITUTION]
+        assert subs
+        # The corrupted phoneme lives in the last word "fox".
+        assert any(e.word == "fox" for e in subs)
+
+    def test_insertion_word_is_none_even_with_spans(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        pred = [ref[0]] + ["x"] + ref[1:]  # extra "x" → insertion (position=pred idx)
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans)
+        for e in score.errors:
+            if e.error_type == PhonemeErrorType.INSERTION:
+                assert e.word is None
+
+    def test_word_propagates_to_dict(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        pred = list(ref)
+        pred[-1] = "x"
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans)
+        assert all("word" in e for e in score.to_dict()["errors"])
+
+
+class TestWordDetails:
+    """Per-word IPA detail (score.words) for ELSA-style display."""
+
+    def _make_segments(self, phonemes: list[str]) -> list[PhonemeSegment]:
+        return [
+            PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+            for i, p in enumerate(phonemes)
+        ]
+
+    def test_all_correct_word_is_ok(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        segs = self._make_segments(list(ref))
+        score = compute_phoneme_score(segs, ref, spans)
+        assert score.words
+        assert score.words_total == len(spans)
+        assert score.words_truncated is False
+        for w in score.words:
+            assert w.accuracy == 1.0
+            assert all(p.status == "ok" for p in w.phonemes)
+            assert all(p.severity is None and p.heard is None for p in w.phonemes)
+
+    def test_ipa_reconstructs_reference_span_without_slashes(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        segs = self._make_segments(list(ref))
+        score = compute_phoneme_score(segs, ref, spans)
+        for w, span in zip(score.words, spans):
+            assert w.ipa == "".join(ref[span.start_idx:span.end_idx])
+            assert "/" not in w.ipa  # backend stores IPA without delimiters
+
+    def test_substitution_point_has_heard_and_severity(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        pred = list(ref)
+        pred[-1] = "x"  # corrupt last phoneme (in "fox") → substitution
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans)
+        fox = next(w for w in score.words if w.word == "fox")
+        subs = [p for p in fox.phonemes if p.status == "sub"]
+        assert subs
+        assert all(p.heard is not None and p.severity is not None for p in subs)
+        assert fox.accuracy < 1.0
+
+    def test_deletion_point_marked_high(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        pred = list(ref)[:-1]  # drop last reference phoneme → deletion
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans)
+        dels = [p for w in score.words for p in w.phonemes if p.status == "del"]
+        assert dels
+        assert all(p.severity == "high" and p.heard is None for p in dels)
+
+    def test_no_prediction_all_deletions(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        score = compute_phoneme_score([], ref, spans)
+        assert score.overall_accuracy == 0.0
+        assert score.words
+        for w in score.words:
+            assert w.accuracy == 0.0
+            assert all(p.status == "del" and p.severity == "high" for p in w.phonemes)
+
+    def test_insertion_adjacent_keeps_one_point_per_ref_index(self):
+        # Regression for the one-status-per-reference-index invariant: an extra
+        # predicted phoneme must not add/drop per-word points or shift indices.
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        pred = [ref[0]] + ["x"] + ref[1:]  # extra "x" insertion after first phoneme
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans)
+        for w, span in zip(score.words, spans):
+            assert len(w.phonemes) == span.end_idx - span.start_idx
+        assert sum(len(w.phonemes) for w in score.words) == len(ref)
+
+    def test_no_spans_yields_no_words(self):
+        ref = ["p", "ə", "t"]
+        segs = self._make_segments(ref)
+        score = compute_phoneme_score(segs, ref)  # no spans
+        assert score.words == []
+        assert score.words_total == 0
+
+    def test_words_serialize_in_to_dict(self):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        segs = self._make_segments(list(ref))
+        d = compute_phoneme_score(segs, ref, spans).to_dict()
+        assert "words" in d and "words_truncated" in d and "words_total" in d
+        assert d["words"]
+        assert set(d["words"][0]) == {"word", "ipa", "phonemes", "accuracy"}
+        assert set(d["words"][0]["phonemes"][0]) == {
+            "symbol", "status", "heard", "severity"
+        }
 
 
 class TestWeightedAccuracy:

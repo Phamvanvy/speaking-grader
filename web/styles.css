@@ -598,3 +598,136 @@ body.dark .preview-img {
 body.dark .file-item-audio audio {
     filter: invert(0.9) hue-rotate(180deg);
 }
+
+/* ── Pronunciation detail (phoneme) — ELSA-style ───────────────────────── */
+.phoneme-detail {
+    margin-top: 1rem;
+    background: #fff7ed;
+    border-radius: 8px;
+    padding: 0.85rem;
+}
+
+.phoneme-detail__title {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 0.3rem;
+}
+
+.phoneme-legend {
+    color: #888;
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+}
+
+.phoneme-words {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.phoneme-word {
+    background: #fff;
+    border: 1px solid #fed7aa;
+    border-radius: 8px;
+    padding: 0.4rem 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.phoneme-word--err {
+    border-color: #fdba74;
+    background: #fffbeb;
+}
+
+.phoneme-word__text {
+    font-weight: 600;
+    color: #333;
+    font-size: 0.9rem;
+}
+
+/* IPA string; inline-flex + gap keeps adjacent glyphs from colliding. */
+.phoneme-ipa {
+    color: #444;
+    font-size: 0.95rem;
+}
+
+.phoneme-sym {
+    letter-spacing: 0.03em;
+}
+
+.phoneme-sym--bad {
+    color: #b91c1c;
+    font-weight: 700;
+}
+
+.phoneme-sym--missing {
+    color: #b91c1c;
+    font-weight: 700;
+    text-decoration: line-through;
+}
+
+.phoneme-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin-top: 0.3rem;
+}
+
+.phoneme-table th,
+.phoneme-table td {
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid #fed7aa;
+    vertical-align: top;
+}
+
+.phoneme-table th {
+    color: #92400e;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.phoneme-table__word {
+    font-weight: 600;
+    color: #333;
+}
+
+body.dark .phoneme-detail {
+    background: #1c1917;
+}
+
+body.dark .phoneme-detail__title,
+body.dark .phoneme-table__word,
+body.dark .phoneme-word__text {
+    color: #f1f5f9;
+}
+
+body.dark .phoneme-word {
+    background: #0f172a;
+    border-color: #44403c;
+}
+
+body.dark .phoneme-word--err {
+    background: #1c1917;
+    border-color: #78350f;
+}
+
+body.dark .phoneme-ipa {
+    color: #cbd5e1;
+}
+
+body.dark .phoneme-sym--bad,
+body.dark .phoneme-sym--missing {
+    color: #f87171;
+}
+
+body.dark .phoneme-table th {
+    color: #fdba74;
+}
+
+body.dark .phoneme-table th,
+body.dark .phoneme-table td {
+    border-bottom-color: #44403c;
+}

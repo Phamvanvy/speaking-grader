@@ -15,9 +15,33 @@ from typing import Any
 from . import asr, features as features_mod, gating, report, scoring
 from .config import Config
 from .phoneme.analyzer import HybridPhonemeAnalyzer
+from .phoneme.models import PhonemeResult
 from .rubrics.base import QuestionType
 
 logger = logging.getLogger("toeic.core")
+
+
+def _compact_phoneme_output(phoneme_result: PhonemeResult | None) -> dict | None:
+    """Bản gọn của phoneme analysis cho JSON output + UI.
+
+    Chỉ giữ headline + lỗi đã gắn từ (KHÔNG kèm segments thô / reference_phonemes
+    đầy đủ). Shape nested theo `score` để khớp model backend và frontend reader
+    (`data.phoneme.score.errors`). None nếu không có score.
+    """
+    if phoneme_result is None or phoneme_result.score is None:
+        return None
+    score = phoneme_result.score.to_dict()
+    return {
+        "backend_used": phoneme_result.backend_used,
+        "warning": phoneme_result.warning,
+        "score": {
+            "overall_accuracy": score["overall_accuracy"],
+            "errors": score["errors"],
+            "words": score["words"],
+            "words_truncated": score["words_truncated"],
+            "words_total": score["words_total"],
+        },
+    }
 
 
 def grade_response(
@@ -213,6 +237,7 @@ def grade_response(
         transcript=transcription.text,
         features=feats.to_dict(),
         scores=scores_dict,
+        phoneme=_compact_phoneme_output(phoneme_result),
         telemetry={
             "asr_backend_used": asr_run.backend_used,
             "transcription_time_ms": asr_run.elapsed_ms,

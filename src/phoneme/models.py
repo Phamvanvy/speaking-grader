@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, NamedTuple
 
 
 class PhonemeErrorType(str, Enum):
@@ -16,6 +16,23 @@ class PhonemeErrorType(str, Enum):
     SUBSTITUTION = "substitution"   # phoneme được thay bằng phoneme khác
     DELETION = "deletion"           # phoneme trong reference bị bỏ qua
     INSERTION = "insertion"         # phoneme thừa so với reference
+
+
+class WordSpan(NamedTuple):
+    """Một từ trong reference text + khoảng index của nó trong reference phoneme list.
+
+    Dùng để map ngược 1 lỗi phoneme (theo position trong reference sequence) về
+    đúng từ đã sinh ra phoneme đó. Đặt ở models.py (leaf module, không import gì
+    trong package) để cả ipa.py lẫn scoring.py dùng chung mà không tạo vòng import.
+
+    Attributes:
+        word: từ như xuất hiện trong text (giữ nguyên hoa/thường để hiển thị)
+        start_idx: index bắt đầu (inclusive) trong reference phoneme list
+        end_idx: index kết thúc (exclusive)
+    """
+    word: str
+    start_idx: int
+    end_idx: int
 
 
 @dataclass(frozen=True)
@@ -55,12 +72,15 @@ class PhonemeError:
         predicted: phoneme từ audio (None nếu deletion)
         position: chỉ số trong reference sequence
         severity: "high" | "medium" | "low" — dựa trên phoneme similarity
+        word: từ chứa phoneme này (None nếu không map được — vd insertion, hoặc
+            không có reference spans). Substitution/deletion mới có word.
     """
     error_type: PhonemeErrorType
     expected: str | None
     predicted: str | None
     position: int
     severity: str = "medium"
+    word: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +89,57 @@ class PhonemeError:
             "predicted": self.predicted,
             "position": self.position,
             "severity": self.severity,
+            "word": self.word,
+        }
+
+
+@dataclass(frozen=True)
+class PhonemePoint:
+    """Một phoneme trong reference của 1 từ + trạng thái phát âm của nó.
+
+    Dùng để hiển thị IPA full-từ kiểu ELSA: từng âm 1, highlight âm đọc sai.
+
+    Attributes:
+        symbol: ký hiệu IPA tham chiếu (KHÔNG kèm dấu / / — frontend tự bọc)
+        status: "ok" (đúng) | "sub" (đọc sai thành âm khác) | "del" (thiếu âm)
+        heard: âm nghe được (chỉ có với "sub"; None với "ok"/"del")
+        severity: "high" | "medium" | "low" cho sub/del; None với "ok"
+    """
+    symbol: str
+    status: str
+    heard: str | None = None
+    severity: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "symbol": self.symbol,
+            "status": self.status,
+            "heard": self.heard,
+            "severity": self.severity,
+        }
+
+
+@dataclass(frozen=True)
+class WordPronunciation:
+    """Phát âm chi tiết của 1 từ trong reference (IPA full + từng âm).
+
+    Attributes:
+        word: từ như xuất hiện trong text (giữ nguyên hoa/thường)
+        ipa: phiên âm IPA đầy đủ của từ (ghép các symbol, KHÔNG kèm / /)
+        phonemes: danh sách PhonemePoint theo thứ tự reference
+        accuracy: tỉ lệ âm đúng trong từ (ok_count / len(phonemes))
+    """
+    word: str
+    ipa: str
+    phonemes: list[PhonemePoint] = field(default_factory=list)
+    accuracy: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "word": self.word,
+            "ipa": self.ipa,
+            "phonemes": [p.to_dict() for p in self.phonemes],
+            "accuracy": round(self.accuracy, 4),
         }
 
 
@@ -85,6 +156,9 @@ class PhonemeScore:
         predicted_count: số phonemes từ audio
         avg_confidence: độ tin cậy trung bình của predicted phonemes
         errors: chi tiết từng lỗi (top-N)
+        words: phát âm chi tiết từng từ (IPA full + từng âm, cho UI kiểu ELSA)
+        words_truncated: True nếu danh sách words bị cắt bớt do quá dài
+        words_total: tổng số từ trong reference (luôn set, kể cả khi không cắt)
     """
     overall_accuracy: float
     substitution_count: int
@@ -94,6 +168,9 @@ class PhonemeScore:
     predicted_count: int
     avg_confidence: float
     errors: list[PhonemeError] = field(default_factory=list)
+    words: list[WordPronunciation] = field(default_factory=list)
+    words_truncated: bool = False
+    words_total: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -105,6 +182,9 @@ class PhonemeScore:
             "predicted_count": self.predicted_count,
             "avg_confidence": round(self.avg_confidence, 4),
             "errors": [e.to_dict() for e in self.errors[:20]],
+            "words": [w.to_dict() for w in self.words],
+            "words_truncated": self.words_truncated,
+            "words_total": self.words_total,
         }
 
 

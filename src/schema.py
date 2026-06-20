@@ -17,6 +17,24 @@ class CompletionLevel(str, Enum):
     high = "high"
 
 
+class LexicalCorrection(BaseModel):
+    """Một lỗi dùng từ cụ thể + cách sửa, cho tiêu chí lexical_resource/vocabulary.
+
+    `said` PHẢI là chuỗi con xuất hiện đúng trong transcript (được validate lại
+    sau khi model trả lời — xem _drop_invalid_corrections trong scoring.py).
+    """
+    said: str = Field(
+        description="Cụm từ thí sinh đã nói (trích NGUYÊN VĂN từ transcript)"
+    )
+    suggested: str = Field(description="Từ/cụm từ đúng nên dùng thay thế")
+    reason: str | None = Field(
+        default=None, description="Lý do ngắn gọn vì sao nên sửa"
+    )
+    example: str = Field(
+        description="Một câu ví dụ tự nhiên dùng từ/cụm từ được đề xuất"
+    )
+
+
 class CriterionScore(BaseModel):
     criterion: str = Field(
         description="Tên tiêu chí, vd 'pronunciation', 'intonation_stress'"
@@ -27,6 +45,14 @@ class CriterionScore(BaseModel):
     justification: str = Field(description="Lý do chấm, dựa trên số liệu + transcript")
     suggestions: list[str] = Field(
         default_factory=list, description="Gợi ý cải thiện cụ thể"
+    )
+    corrections: list[LexicalCorrection] = Field(
+        default_factory=list,
+        description=(
+            "Sửa lỗi dùng từ cụ thể (said → suggested + example). Chỉ điền cho "
+            "tiêu chí lexical_resource (IELTS) / vocabulary (TOEIC); để rỗng cho "
+            "các tiêu chí khác."
+        ),
     )
 
 

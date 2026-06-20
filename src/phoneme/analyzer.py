@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from .ipa import text_to_ipa_sequence
+from .ipa import text_to_ipa_sequence_with_spans
 from .models import PhonemeResult
 from .scoring import compute_phoneme_score
 from .wav2vec_backend import (
@@ -127,10 +127,13 @@ class HybridPhonemeAnalyzer:
                 warning=f"Audio file không tồn tại: {audio_path}",
             )
 
-        # Build reference phoneme sequence
-        reference_phonemes = (
-            text_to_ipa_sequence(reference_text) if reference_text else []
-        )
+        # Build reference phoneme sequence + word spans (để map lỗi → từ)
+        if reference_text:
+            reference_phonemes, reference_spans = text_to_ipa_sequence_with_spans(
+                reference_text
+            )
+        else:
+            reference_phonemes, reference_spans = [], []
 
         # ── Phase 1: wav2vec only ─────────────────────────────────────────
         segments, warning = self._wav2vec.predict(audio_path)
@@ -158,7 +161,9 @@ class HybridPhonemeAnalyzer:
         # ── Scoring ────────────────────────────────────────────────────────
         score = None
         if reference_phonemes and segments:
-            score = compute_phoneme_score(segments, reference_phonemes)
+            score = compute_phoneme_score(
+                segments, reference_phonemes, reference_spans
+            )
 
         logger.info(
             "Phoneme analysis complete: %s | backend=%s | segments=%d | ref=%d | score=%s",

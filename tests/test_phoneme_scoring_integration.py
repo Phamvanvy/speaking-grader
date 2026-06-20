@@ -17,8 +17,17 @@ from src.phoneme.models import (
     PhonemeScore,
     PhonemeSegment,
 )
-from src.scoring import _build_system_prompt, _build_user_prompt, score
-from src.schema import CriterionScore, SpeakingResult
+from src.scoring import (
+    _build_system_prompt,
+    _build_user_prompt,
+    _drop_invalid_corrections,
+    score,
+)
+from src.schema import (
+    CriterionScore,
+    LexicalCorrection,
+    SpeakingResult,
+)
 
 
 class TestPhonemeInUserPrompt:
@@ -287,3 +296,118 @@ class TestScoreFunctionAcceptsPhonemeResult:
             payload_str = user_content[user_content.index("{"):]
             payload = json.loads(payload_str)
             assert "phoneme_data" in payload
+
+class TestDropInvalidCorrections:
+    """Post-LLM guard: drop corrections whose `said` isn't in the transcript."""
+
+    def _result_with_corrections(self, corrections):
+        return SpeakingResult(
+            question_type="q",
+            task_completion="medium",
+            content_relevance="medium",
+            criteria=[
+                CriterionScore(
+                    criterion="vocabulary",
+                    score=6.5,
+                    justification="x",
+                    corrections=corrections,
+                )
+            ],
+            score_rationale="r",
+            summary_feedback="s",
+        )
+
+    def test_keeps_genuine_substring(self):
+        res = self._result_with_corrections([
+            LexicalCorrection(said="mountain goat", suggested="Mountain God", example="The Mountain God..."),
+        ])
+        _drop_invalid_corrections(res, "he said mountain goat to the village")
+        assert [c.said for c in res.criteria[0].corrections] == ["mountain goat"]
+
+    def test_drops_hallucinated_phrase(self):
+        res = self._result_with_corrections([
+            LexicalCorrection(said="create snowstorm", suggested="cause floods", example="Floods..."),
+        ])
+        _drop_invalid_corrections(res, "he wanted to create blood and chaos")
+        assert res.criteria[0].corrections == []
+
+    def test_match_is_case_and_whitespace_lenient(self):
+        res = self._result_with_corrections([
+            LexicalCorrection(said="Water  Goat", suggested="Water God", example="..."),
+        ])
+        _drop_invalid_corrections(res, "the water goat fought back")
+        assert len(res.criteria[0].corrections) == 1
+
+
+class TestCompactPhonemeOutput:
+    """_compact_phoneme_output surfaces per-word detail for the frontend."""
+
+    def _make_segments(self, phonemes):
+        return [
+            PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+            for i, p in enumerate(phonemes)
+        ]
+
+    def test_words_survive_end_to_end(self):
+        from src.core import _compact_phoneme_output
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+        from src.phoneme.scoring import compute_phoneme_score
+
+        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        pred = list(ref)
+        pred[-1] = "x"  # corrupt the last phoneme in "fox"
+        segs = self._make_segments(pred)
+        result = PhonemeResult(
+            audio_path="t.wav",
+            segments=segs,
+            reference_phonemes=ref,
+            score=compute_phoneme_score(segs, ref, spans),
+            backend_used="wav2vec",
+            backend_available=True,
+        )
+        compact = _compact_phoneme_output(result)
+        assert compact is not None
+        s = compact["score"]
+        assert "words" in s and "words_truncated" in s and "words_total" in s
+        assert s["words"]
+        # Per-word contract the frontend relies on.
+        w0 = s["words"][0]
+        assert set(w0) == {"word", "ipa", "phonemes", "accuracy"}
+        assert "/" not in w0["ipa"]
+        bad = [
+            p for w in s["words"] for p in w["phonemes"]
+            if p["status"] in ("sub", "del")
+        ]
+        assert bad
+
+    def test_none_when_no_score(self):
+        from src.core import _compact_phoneme_output
+
+        result = PhonemeResult(
+            audio_path="t.wav",
+            segments=[],
+            reference_phonemes=[],
+            score=None,
+            backend_used="none",
+            backend_available=False,
+        )
+        assert _compact_phoneme_output(result) is None
+
+    def test_empty_words_when_no_spans(self):
+        # Frontend must tolerate words: [] (documented contract).
+        from src.core import _compact_phoneme_output
+        from src.phoneme.scoring import compute_phoneme_score
+
+        ref = ["p", "ə", "t"]
+        segs = self._make_segments(ref)
+        result = PhonemeResult(
+            audio_path="t.wav",
+            segments=segs,
+            reference_phonemes=ref,
+            score=compute_phoneme_score(segs, ref),  # no spans → words == []
+            backend_used="wav2vec",
+            backend_available=True,
+        )
+        compact = _compact_phoneme_output(result)
+        assert compact["score"]["words"] == []
+        assert compact["score"]["words_total"] == 0

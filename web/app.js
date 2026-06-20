@@ -80,12 +80,10 @@ function revokeAudioUrls() {
     audioObjectUrls.length = 0;
 }
 
-fileLabel.addEventListener('click', (e) => {
-    if (e.target !== fileInput) {
-        fileInput.click();
-    }
-});
-
+// Lưu ý: KHÔNG cần handler click để gọi fileInput.click() ở đây.
+// <input type="file"> đã nằm trong <label>, nên click vào label tự mở
+// hộp thoại chọn file. Nếu thêm fileInput.click() thủ công thì dialog sẽ
+// mở 2 lần (một lần do hành vi mặc định của label, một lần do JS).
 fileInput.addEventListener('change', renderFileList);
 
 // Add files to the audio input WITHOUT discarding what's already there.
@@ -625,9 +623,150 @@ function featureGridHtml(features) {
     `).join('');
 }
 
-function scoresBreakdownHtml(scores, exam) {
+// Vocabulary corrections table (said → suggested + reason + example).
+// Renders nothing when there are no corrections (no empty table shell).
+function correctionsHtml(corrections) {
+    const items = Array.isArray(corrections) ? corrections : [];
+    if (!items.length) return '';
+    const rows = items.map(c => `
+        <div style="border-top:1px solid #eee;padding:0.4rem 0;font-size:0.88rem;">
+            <div><span style="color:#b91c1c;text-decoration:line-through;">${escapeHtml(c.said)}</span>
+                 <span style="color:#888;">→</span>
+                 <span style="color:#047857;font-weight:600;">${escapeHtml(c.suggested)}</span></div>
+            ${c.reason ? `<div style="color:#666;">${escapeHtml(c.reason)}</div>` : ''}
+            ${c.example ? `<div style="color:#555;font-style:italic;">“${escapeHtml(c.example)}”</div>` : ''}
+        </div>`).join('');
+    return `<div style="margin-top:0.5rem;">
+        <div style="font-weight:600;color:#333;font-size:0.85rem;">Word corrections</div>${rows}
+    </div>`;
+}
+
+// Severity helpers shared by phoneme renderers.
+const sevColor = s => (s === 'high' ? '#b91c1c' : s === 'medium' ? '#b45309' : '#6b7280');
+const sevLabel = s => (s === 'high' ? 'cao' : s === 'medium' ? 'trung bình' : s === 'low' ? 'thấp' : '');
+
+// ELSA-style phoneme detail fed by data.phoneme.score.words: every word shows its
+// full reference IPA with mispronounced sounds bolded/red in place, followed by a
+// detail table (Từ / IPA đúng / Bạn đọc / Âm sai / Mức độ) for the words with errors.
+// Falls back to the legacy errors-only table when `words` is absent (older payloads).
+function phonemeErrorsHtml(phoneme) {
+    const score = phoneme?.score;
+    if (!score) return '';
+    const words = Array.isArray(score.words) ? score.words : null;
+    if (!words) return phonemeErrorsLegacyHtml(phoneme);   // older payloads
+    if (!words.length) return '';
+
+    const isBad = p => p.status === 'sub' || p.status === 'del';
+    const symHtml = p => {
+        const cls = p.status === 'del' ? 'phoneme-sym phoneme-sym--missing'
+                  : p.status === 'sub' ? 'phoneme-sym phoneme-sym--bad'
+                  : 'phoneme-sym';
+        return `<span class="${cls}">${escapeHtml(p.symbol)}</span>`;
+    };
+    // Full reference IPA, wrapped in /…/ here (backend stores symbols without slashes).
+    const ipaHtml = w => `<span class="phoneme-ipa">/${(w.phonemes || []).map(symHtml).join('')}/</span>`;
+    // Heard transcription: ok→symbol, sub→heard (bold+red), del→omitted.
+    const heardHtml = w => {
+        const parts = (w.phonemes || []).filter(p => p.status !== 'del').map(p =>
+            p.status === 'sub'
+                ? `<span class="phoneme-sym phoneme-sym--bad">${escapeHtml(p.heard ?? '')}</span>`
+                : `<span class="phoneme-sym">${escapeHtml(p.symbol)}</span>`);
+        return `<span class="phoneme-ipa">/${parts.join('')}/</span>`;
+    };
+
+    // ── Per-word cards (all words) ──
+    const cardHtml = w => {
+        const hasErr = (w.phonemes || []).some(isBad);
+        return `<div class="phoneme-word${hasErr ? ' phoneme-word--err' : ''}">
+            <span class="phoneme-word__text">${escapeHtml(w.word)}</span>
+            ${ipaHtml(w)}
+        </div>`;
+    };
+    const CAP = 12;
+    const head = words.slice(0, CAP).map(cardHtml).join('');
+    const rest = words.slice(CAP);
+    const moreCards = rest.length
+        ? `<details style="margin-top:0.3rem;"><summary style="cursor:pointer;color:#4338ca;font-size:0.85rem;">hiện ${rest.length} từ nữa</summary><div class="phoneme-words">${rest.map(cardHtml).join('')}</div></details>`
+        : '';
+
+    // ── Detail table (only words with at least one error) ──
+    const sevRank = { high: 2, medium: 1, low: 0 };
+    const errWords = words.filter(w => (w.phonemes || []).some(isBad));
+    const tableRows = errWords.map(w => {
+        const bad = (w.phonemes || []).filter(isBad);
+        const pairs = bad.map(p => {
+            const heard = p.status === 'del' ? '∅' : escapeHtml(p.heard ?? '');
+            return `<span style="color:${sevColor(p.severity)};">${escapeHtml(p.symbol)} → ${heard}</span>`;
+        }).join('<br>');
+        const worst = bad.reduce((acc, p) =>
+            (sevRank[p.severity] ?? 0) > (sevRank[acc] ?? -1) ? p.severity : acc, 'low');
+        return `<tr>
+            <td class="phoneme-table__word">${escapeHtml(w.word)}</td>
+            <td>${ipaHtml(w)}</td>
+            <td>${heardHtml(w)}</td>
+            <td>${pairs}</td>
+            <td style="color:${sevColor(worst)};white-space:nowrap;">${sevLabel(worst)}</td>
+        </tr>`;
+    }).join('');
+    const table = errWords.length
+        ? `<table class="phoneme-table">
+            <thead><tr><th>Từ</th><th>IPA đúng</th><th>Bạn đọc</th><th>Âm sai</th><th>Mức độ</th></tr></thead>
+            <tbody>${tableRows}</tbody>
+        </table>`
+        : '<div style="color:#16a34a;font-size:0.88rem;margin-top:0.4rem;">Tất cả các âm đều đúng 🎉</div>';
+
+    const acc = score.overall_accuracy;
+    const accLine = acc != null
+        ? `<span style="color:#666;font-weight:400;font-size:0.85rem;"> · accuracy ${pct(acc)}</span>` : '';
+    const truncLine = score.words_truncated
+        ? `<div style="color:#888;font-size:0.8rem;margin-bottom:0.3rem;">hiển thị ${words.length}/${score.words_total} từ</div>` : '';
+
+    return `<div class="phoneme-detail">
+        <div class="phoneme-detail__title">Pronunciation detail (phoneme)${accLine}</div>
+        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai · <span class="phoneme-sym--missing">gạch</span> = thiếu âm</div>
+        ${truncLine}
+        <div class="phoneme-words">${head}</div>${moreCards}
+        ${table}
+    </div>`;
+}
+
+// Legacy errors-only table — kept for payloads predating per-word `words` detail.
+function phonemeErrorsLegacyHtml(phoneme) {
+    const errors = phoneme?.score?.errors;
+    if (!Array.isArray(errors) || !errors.length) return '';
+    const shown = errors.filter(e => e.severity === 'high' || e.severity === 'medium');
+    if (!shown.length) return '';
+    const CAP = 8;
+    const arrow = e => {
+        const exp = e.expected != null ? `/${escapeHtml(e.expected)}/` : '∅';
+        const pred = e.predicted != null ? `/${escapeHtml(e.predicted)}/` : '∅ (dropped)';
+        return `${exp} <span style="color:#888;">→</span> ${pred}`;
+    };
+    const rowHtml = e => `
+        <div style="display:flex;align-items:center;gap:0.6rem;border-top:1px solid #eee;padding:0.3rem 0;font-size:0.88rem;">
+            <span style="min-width:5rem;font-weight:600;color:#333;">${e.word ? escapeHtml(e.word) : '—'}</span>
+            <span style="flex:1;">${arrow(e)}</span>
+            <span style="color:${sevColor(e.severity)};font-size:0.8rem;">${escapeHtml(e.severity)}</span>
+        </div>`;
+    const head = shown.slice(0, CAP).map(rowHtml).join('');
+    const rest = shown.slice(CAP);
+    const more = rest.length
+        ? `<details style="margin-top:0.2rem;"><summary style="cursor:pointer;color:#4338ca;font-size:0.85rem;">show ${rest.length} more</summary>${rest.map(rowHtml).join('')}</details>`
+        : '';
+    const acc = phoneme.score.overall_accuracy;
+    const accLine = acc != null
+        ? `<span style="color:#666;font-weight:400;font-size:0.85rem;"> · accuracy ${pct(acc)}</span>` : '';
+    return `<div style="margin-top:1rem;background:#fff7ed;border-radius:8px;padding:0.85rem;">
+        <div style="font-weight:600;color:#333;margin-bottom:0.2rem;">Pronunciation detail (phoneme)${accLine}</div>
+        <div style="color:#888;font-size:0.8rem;margin-bottom:0.3rem;">word · expected → heard · severity</div>
+        ${head}${more}
+    </div>`;
+}
+
+function scoresBreakdownHtml(scores, exam, phoneme) {
     if (!scores) {
-        return '<p style="color:#666;">No AI scoring (ASR-only or skipped by gating).</p>';
+        return '<p style="color:#666;">No AI scoring (ASR-only or skipped by gating).</p>'
+             + phonemeErrorsHtml(phoneme);
     }
     const cfg = examConfig(exam);
     const overall = scores[cfg.scoreField];
@@ -653,6 +792,7 @@ function scoresBreakdownHtml(scores, exam) {
                     </div>
                     <div style="color:#555;line-height:1.5;font-size:0.92rem;">${escapeHtml(c.justification)}</div>
                     ${suggestions ? `<ul style="margin:0.5rem 0 0 1.1rem;color:#4338ca;font-size:0.9rem;">${suggestions}</ul>` : ''}
+                    ${correctionsHtml(c.corrections)}
                 </div>`;
         }).join('') + '</div>';
     }
@@ -662,6 +802,7 @@ function scoresBreakdownHtml(scores, exam) {
             <p style="color:#555;line-height:1.6;white-space:pre-wrap;">${escapeHtml(scores.score_rationale)}</p>
         </div>`;
     }
+    html += phonemeErrorsHtml(phoneme);
     return html;
 }
 
@@ -690,7 +831,7 @@ function showSingleResult(data) {
     document.getElementById('overall-score').textContent = data.scores?.[cfg.scoreField] ?? '--';
     document.getElementById('transcript').textContent = data.transcript || 'No transcript available';
     document.getElementById('features-grid').innerHTML = featureGridHtml(data.features || {});
-    document.getElementById('scores-breakdown').innerHTML = scoresBreakdownHtml(data.scores, data.exam);
+    document.getElementById('scores-breakdown').innerHTML = scoresBreakdownHtml(data.scores, data.exam, data.phoneme);
     document.getElementById('feedback').textContent = data.scores?.summary_feedback || 'No feedback available';
     document.getElementById('telemetry').innerHTML = telemetryHtml(data.telemetry);
     resultDiv.classList.add('visible');
@@ -728,7 +869,7 @@ function showBatchResult(data) {
                 <div style="font-weight:600;color:#333;margin-bottom:0.3rem;">Transcript</div>
                 <p style="color:#555;line-height:1.5;white-space:pre-wrap;">${escapeHtml(r.transcript || '(empty)')}</p>
                 <div class="features-grid" style="margin-top:0.85rem;">${featureGridHtml(r.features || {})}</div>
-                <div style="margin-top:0.85rem;">${scoresBreakdownHtml(r.scores, r.exam ?? data.exam)}</div>
+                <div style="margin-top:0.85rem;">${scoresBreakdownHtml(r.scores, r.exam ?? data.exam, r.phoneme)}</div>
                 ${feedback ? `<div style="font-weight:600;color:#333;margin:0.85rem 0 0.3rem;">Feedback</div><p style="color:#555;line-height:1.6;white-space:pre-wrap;">${escapeHtml(feedback)}</p>` : ''}
             </div>
         </details>`;

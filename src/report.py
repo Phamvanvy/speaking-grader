@@ -20,8 +20,13 @@ def build_output(
     scores: dict | None,
     telemetry: dict | None = None,
     exam: str = "toeic",
+    phoneme: dict | None = None,
 ) -> dict[str, Any]:
-    """Gom toàn bộ kết quả thành 1 dict để lưu JSON (đầy đủ để debug sau)."""
+    """Gom toàn bộ kết quả thành 1 dict để lưu JSON (đầy đủ để debug sau).
+
+    phoneme: bản gọn của phoneme analysis cho UI/JSON ({backend_used, warning,
+        score:{overall_accuracy, errors[...]}}); None nếu không có.
+    """
     return {
         "audio_path": audio_path,
         "question_id": question_id,
@@ -31,6 +36,7 @@ def build_output(
         "transcript": transcript,
         "features": features,
         "scores": scores,
+        "phoneme": phoneme,
         "telemetry": telemetry or {},
     }
 

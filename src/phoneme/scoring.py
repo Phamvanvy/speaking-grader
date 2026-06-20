@@ -11,16 +11,39 @@ Architecture:
 
 from __future__ import annotations
 
+import bisect
 import logging
+from dataclasses import replace
 from typing import Final
 
 from .ipa import error_severity, normalize_ipa, phoneme_similarity
-from .models import PhonemeError, PhonemeErrorType, PhonemeSegment, PhonemeScore
+from .models import (
+    PhonemeError,
+    PhonemeErrorType,
+    PhonemePoint,
+    PhonemeScore,
+    PhonemeSegment,
+    WordPronunciation,
+    WordSpan,
+)
+
+# Lỗi mang `position` là index trong reference sequence → map được về từ.
+# Insertion mang `position` là index predicted → KHÔNG map (để word=None).
+_WORD_MAPPABLE: Final = frozenset(
+    {PhonemeErrorType.SUBSTITUTION, PhonemeErrorType.DELETION}
+)
 
 logger = logging.getLogger("toeic.phoneme.scoring")
 
 # Số lỗi tối đa trả về trong results (tránh payload quá lớn)
 MAX_ERRORS_RETURNED: Final[int] = 30
+
+# Số từ tối đa trả về trong word details (cắt theo ranh giới từ, không giữa từ)
+MAX_WORDS_RETURNED: Final[int] = 80
+
+# Xếp hạng để chọn status "tốt hơn" khi 1 reference index bị chạm nhiều lần
+_STATUS_RANK: Final[dict[str, int]] = {"ok": 0, "sub": 1, "del": 2}
+_SEVERITY_RANK: Final[dict[str, int]] = {"low": 0, "medium": 1, "high": 2}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -139,12 +162,151 @@ def _classify_errors(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Word mapping: gắn từ vào lỗi phoneme theo reference position
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _word_at(position: int, spans: list[WordSpan], starts: list[int]) -> str | None:
+    """Tìm từ chứa reference-index `position` bằng binary search.
+
+    `spans` sắp xếp tăng dần, không chồng lấn; `starts` là [s.start_idx] đã tính
+    sẵn (truyền vào để không tạo lại mỗi lần gọi). bisect_right + idx-1 cho span
+    có start_idx lớn nhất mà ≤ position. Chỉ trả word nếu position thực sự nằm
+    trong [start_idx, end_idx); nếu rơi vào gap (từ bị drop) hoặc position ==
+    end_idx của span trước thì trả None (KHÔNG mượn từ liền trước).
+    """
+    idx = bisect.bisect_right(starts, position) - 1
+    if idx < 0:
+        return None
+    span = spans[idx]
+    if span.start_idx <= position < span.end_idx:
+        return span.word
+    return None
+
+
+def _annotate_words(
+    errors: list[PhonemeError],
+    reference_spans: list[WordSpan] | None,
+) -> list[PhonemeError]:
+    """Gắn `word` vào các lỗi substitution/deletion theo reference_spans.
+
+    Insertion giữ word=None (position là predicted index, không map được).
+    PhonemeError là frozen → tạo bản mới bằng dataclasses.replace.
+    """
+    if not reference_spans:
+        return errors
+    starts = [s.start_idx for s in reference_spans]
+    annotated: list[PhonemeError] = []
+    for e in errors:
+        if e.error_type in _WORD_MAPPABLE:
+            annotated.append(
+                replace(e, word=_word_at(e.position, reference_spans, starts))
+            )
+        else:
+            annotated.append(e)
+    return annotated
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Per-word phoneme detail: IPA full từng từ + trạng thái từng âm (UI kiểu ELSA)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _better_point(a: PhonemePoint, b: PhonemePoint) -> PhonemePoint:
+    """Chọn point 'tốt hơn' khi 1 reference index bị chạm nhiều lần trong path.
+
+    Ưu tiên status ok > sub > del; nếu cùng status (vd 2 sub) thì ưu tiên
+    severity nhẹ hơn (similarity cao hơn).
+    """
+    ra, rb = _STATUS_RANK.get(a.status, 9), _STATUS_RANK.get(b.status, 9)
+    if ra != rb:
+        return a if ra < rb else b
+    sa = _SEVERITY_RANK.get(a.severity or "", -1)
+    sb = _SEVERITY_RANK.get(b.severity or "", -1)
+    return a if sa <= sb else b
+
+
+def _build_word_details(
+    path: list[tuple[int, int]],
+    predicted: list[str],
+    reference: list[str],
+    spans: list[WordSpan] | None,
+) -> tuple[list[WordPronunciation], bool, int]:
+    """Từ DTW path + reference_spans → phát âm chi tiết từng từ.
+
+    Mỗi reference index → đúng 1 PhonemePoint (ok/sub/del). KHÔNG giả định path
+    cho đúng 1 status/index: nếu 1 ri bị chạm nhiều lần thì giữ status tốt nhất
+    (_better_point); ri không xuất hiện trong path mặc định "del" severity high.
+    Insertion (ref_idx < 0) bỏ qua (không gắn vào reference position).
+
+    Cắt theo ranh giới từ — giữ nguyên cả WordSpan, không bao giờ cắt giữa từ.
+    Path rỗng (vd nhánh không có predicted) → mọi âm thành "del".
+
+    Returns (words, truncated, total_words).
+    """
+    if not spans:
+        return [], False, 0
+
+    status_by_ref: dict[int, PhonemePoint] = {}
+    for pred_idx, ref_idx in path:
+        if ref_idx < 0:
+            continue
+        ref_ph = reference[ref_idx]
+        if pred_idx >= 0:
+            pred_ph = predicted[pred_idx]
+            if normalize_ipa(pred_ph) == normalize_ipa(ref_ph):
+                point = PhonemePoint(symbol=ref_ph, status="ok")
+            else:
+                sim = phoneme_similarity(pred_ph, ref_ph)
+                point = PhonemePoint(
+                    symbol=ref_ph,
+                    status="sub",
+                    heard=pred_ph,
+                    severity=error_severity(sim),
+                )
+        else:
+            point = PhonemePoint(symbol=ref_ph, status="del", severity="high")
+
+        existing = status_by_ref.get(ref_idx)
+        status_by_ref[ref_idx] = (
+            point if existing is None else _better_point(existing, point)
+        )
+
+    total = len(spans)
+    kept = spans[:MAX_WORDS_RETURNED]
+    truncated = total > len(kept)
+
+    words: list[WordPronunciation] = []
+    for span in kept:
+        points = [
+            status_by_ref.get(
+                i, PhonemePoint(symbol=reference[i], status="del", severity="high")
+            )
+            for i in range(span.start_idx, span.end_idx)
+        ]
+        if not points:
+            continue
+        ok = sum(1 for p in points if p.status == "ok")
+        words.append(WordPronunciation(
+            word=span.word,
+            ipa="".join(p.symbol for p in points),
+            phonemes=points,
+            accuracy=ok / len(points),
+        ))
+
+    if truncated:
+        logger.info(
+            "Word details truncated: kept %d / %d words", len(words), total
+        )
+    return words, truncated, total
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Main scoring function
 # ──────────────────────────────────────────────────────────────────────────────
 
 def compute_phoneme_score(
     segments: list[PhonemeSegment],
     reference_phonemes: list[str],
+    reference_spans: list[WordSpan] | None = None,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -152,7 +314,13 @@ def compute_phoneme_score(
       1. Trích predicted phoneme list từ segments
       2. DTW alignment với reference
       3. Classification: match / substitution / deletion / insertion
-      4. Tính accuracy = matches / reference_count
+      4. Gắn `word` cho substitution/deletion nếu có reference_spans
+      5. Tính accuracy = matches / reference_count
+
+    Args:
+        reference_spans: optional — map từ reference index → từ (xem WordSpan).
+            Có thì mỗi lỗi substitution/deletion được gắn `word`; None thì các
+            lỗi giữ word=None (giữ tương thích ngược).
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -178,6 +346,11 @@ def compute_phoneme_score(
             )
             for i, ref_ph in enumerate(reference_phonemes)
         ]
+        errors = _annotate_words(errors, reference_spans)
+        # Path rỗng → _build_word_details gán mọi âm thành "del"
+        words, words_truncated, words_total = _build_word_details(
+            [], [], reference_phonemes, reference_spans
+        )
         return PhonemeScore(
             overall_accuracy=0.0,
             substitution_count=0,
@@ -187,6 +360,9 @@ def compute_phoneme_score(
             predicted_count=0,
             avg_confidence=avg_confidence,
             errors=errors[:MAX_ERRORS_RETURNED],
+            words=words,
+            words_truncated=words_truncated,
+            words_total=words_total,
         )
 
     # DTW alignment
@@ -194,6 +370,14 @@ def compute_phoneme_score(
 
     # Classify errors
     errors = _classify_errors(path, predicted_phonemes, reference_phonemes)
+
+    # Gắn từ cho substitution/deletion (nếu có spans) — trước khi sort/cap.
+    errors = _annotate_words(errors, reference_spans)
+
+    # Phát âm chi tiết từng từ (IPA full + từng âm) cho UI kiểu ELSA.
+    words, words_truncated, words_total = _build_word_details(
+        path, predicted_phonemes, reference_phonemes, reference_spans
+    )
 
     # Count by type
     substitutions = sum(1 for e in errors if e.error_type == PhonemeErrorType.SUBSTITUTION)
@@ -229,6 +413,9 @@ def compute_phoneme_score(
         predicted_count=len(predicted_phonemes),
         avg_confidence=round(avg_confidence, 4),
         errors=errors[:MAX_ERRORS_RETURNED],
+        words=words,
+        words_truncated=words_truncated,
+        words_total=words_total,
     )
 
 
