@@ -37,12 +37,31 @@
                         <span>Click to select audio file(s) — pick several to grade a whole batch</span>
                     </div>
                 </label>
+                <!-- Ghi âm trực tiếp từ micro → thêm vào danh sách file ở trên VÀ
+                     lưu vào thiết bị (IndexedDB) để dùng lại sau khi tải lại trang. -->
+                <div class="recorder">
+                    <button type="button" class="btn btn-secondary" id="record-btn" onclick="toggleRecording()">🎙️ Record audio</button>
+                    <span class="record-timer" id="record-timer"></span>
+                </div>
                 <div id="single-file-name" class="file-list"></div>
             </div>
 
             <div class="form-group">
                 <label for="reference-text">Reference Script (optional - for Read Aloud)</label>
                 <textarea id="reference-text" placeholder="Enter the reference transcript here..."></textarea>
+            </div>
+
+            <!-- Ảnh đề bài (Describe Picture). API field: image. TOEIC: đừng nhập
+                 đồng thời Reference Script. Áp dụng cho cả batch. -->
+            <div class="form-group">
+                <label class="file-upload" id="image-file-label">
+                    <input type="file" id="image-file" accept="image/*">
+                    <div class="file-upload-text">
+                        <span class="icon">🖼️</span>
+                        <span>Click to upload a picture (optional — for Describe Picture)</span>
+                    </div>
+                </label>
+                <div id="image-preview" class="image-preview"></div>
             </div>
 
             <div class="form-group">
@@ -103,12 +122,26 @@
             <button class="btn btn-primary" id="grade-btn" onclick="grade()">Grade Now</button>
         </div>
 
+        <!-- Saved recordings — bản ghi lưu trên thiết bị (IndexedDB). Tồn tại sau
+             khi tải lại trang; user có thể nghe lại, thêm vào để chấm, hoặc xóa. -->
+        <div class="card hidden" id="saved-recordings-card">
+            <div class="result-header">
+                <h2>💾 Saved Recordings <span style="font-weight:400;font-size:0.85rem;color:#888;">— stored on this device</span></h2>
+                <button class="btn btn-secondary" id="clear-recordings-btn" onclick="deleteAllRecordings()" style="width:auto;padding:0.5rem 1rem;">Delete all</button>
+            </div>
+            <div id="saved-recordings-list" class="file-list"></div>
+        </div>
+
         <!-- Single Result -->
         <div class="result" id="result">
             <div class="card">
                 <div class="result-header">
                     <h2>📊 Results</h2>
-                    <button class="btn btn-secondary" onclick="closeResult()" style="width: auto; padding: 0.5rem 1rem;">Close</button>
+                    <div class="actions">
+                        <button class="btn btn-primary" onclick="exportSingleCsv()" style="width: auto; padding: 0.5rem 1rem;">⬇ Export CSV</button>
+                        <button class="btn btn-secondary" onclick="printSingleReport()" style="width: auto; padding: 0.5rem 1rem;">🖨 Print / PDF</button>
+                        <button class="btn btn-secondary" onclick="closeResult()" style="width: auto; padding: 0.5rem 1rem;">Close</button>
+                    </div>
                 </div>
 
                 <div class="score-display" id="score-display">

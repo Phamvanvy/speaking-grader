@@ -149,6 +149,92 @@ textarea {
     padding: 0 0.5rem;
 }
 
+/* Audio row stacks the filename above its inline player. */
+.file-item-audio {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+}
+
+.file-item-audio audio {
+    width: 100%;
+    height: 36px;
+}
+
+/* ── Mic recorder ────────────────────────────────────────────────────── */
+.recorder {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.recorder .btn {
+    width: auto;
+}
+
+#record-btn.recording {
+    background: #dc2626;
+    color: #fff;
+    animation: pulse 1.2s ease-in-out infinite;
+}
+
+#record-btn.recording:hover:not(:disabled) {
+    background: #b91c1c;
+}
+
+@keyframes pulse {
+    50% { opacity: 0.6; }
+}
+
+.record-timer {
+    color: #dc2626;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Saved recordings (IndexedDB) ────────────────────────────────────── */
+.saved-rec-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.saved-rec-meta {
+    color: #888;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.saved-rec-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.saved-rec-actions .remove-btn {
+    color: #dc2626;
+}
+
+/* ── Image preview (Describe Picture) ────────────────────────────────── */
+.image-preview {
+    margin-top: 1rem;
+    text-align: center;
+}
+
+.image-preview:empty {
+    margin-top: 0;
+}
+
+.preview-img {
+    display: block;
+    max-width: 100%;
+    max-height: 320px;
+    margin: 0 auto 0.75rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+
 .checkbox-group {
     display: flex;
     align-items: center;
@@ -502,4 +588,13 @@ body.dark .status-bar.error {
 body.dark .theme-toggle {
     background: #1e293b;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+body.dark .preview-img {
+    border-color: #334155;
+}
+
+/* Brighten the native audio controls on dark cards so they're legible. */
+body.dark .file-item-audio audio {
+    filter: invert(0.9) hue-rotate(180deg);
 }
