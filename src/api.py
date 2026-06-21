@@ -79,7 +79,16 @@ _VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".avi"}
 
 # Trần số file trong 1 batch (chặn lạm dụng; 1 lớp thực tế ~40 em).
 _MAX_BATCH = 100
-_ALLOWED_MODES = {"default", "fast", "review", "auto"}
+# User-facing modes. Engine/model là implementation detail (xem config.py),
+# tách rời khỏi business mode ở đây.
+_ALLOWED_MODES = {"practice", "mock_test"}
+# Map giá trị cũ (client/bản ghi cũ) → mode mới, không fail request.
+_LEGACY_MODE_ALIASES = {
+    "auto": "practice",
+    "default": "practice",
+    "fast": "practice",
+    "review": "mock_test",
+}
 
 # Frontend tĩnh: thư mục web/ (index.html + styles.css + app.js) ở repo root
 # (src/ là con của root). Mount ở "/" cùng origin với API → không cần CORS, và ô
@@ -186,14 +195,16 @@ def _audio_suffix(filename: str | None) -> str:
 
 
 def _normalize_mode(mode: str | None) -> str:
-    value = (mode or "auto").strip().lower()
+    """Chuẩn hoá mode về {practice, mock_test}.
+
+    Nhận chuỗi bẩn (hoa/thường, thừa khoảng trắng), map alias cũ
+    (auto/default/fast → practice, review → mock_test). Giá trị rỗng/lạ → practice
+    (mặc định an toàn) thay vì 400 để client/bản ghi cũ không bị chặn.
+    """
+    value = (mode or "").strip().lower()
+    value = _LEGACY_MODE_ALIASES.get(value, value)
     if value not in _ALLOWED_MODES:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"mode không hợp lệ: '{mode}'. Hợp lệ: {sorted(_ALLOWED_MODES)}"
-            ),
-        )
+        return "practice"
     return value
 
 
@@ -308,9 +319,11 @@ def _grade_bytes(
         review_reasons: list[str] = []
         started = perf_counter()
 
-        def _run_once(asr_backend: str, phoneme: bool | None = None) -> dict:
-            # phoneme: gắn wav2vec theo mode — review=True (bật), fast=False (ưu
-            # tiên tốc độ), default/auto=None (theo config.phoneme_analysis_enabled).
+        def _run_once(
+            asr_backend: str, asr_model: str | None = None, phoneme: bool | None = None
+        ) -> dict:
+            # phoneme: gắn wav2vec theo mode — mock_test=True (bật), practice=None
+            # (theo config.phoneme_analysis_enabled), True khi practice leo lên mock_test.
             return grade_response(
                 tmp.name,
                 config,
@@ -322,6 +335,7 @@ def _grade_bytes(
                 image_media_type=image_media_type,
                 provided_info=provided_info,
                 asr_backend=asr_backend,
+                asr_model=asr_model,
                 no_ai=no_ai,
                 phoneme_analysis=phoneme,
                 question_id=qt.key,
@@ -334,30 +348,17 @@ def _grade_bytes(
         review_triggered = False
         fallback_reason: str | None = None
 
-        if requested_mode == "review":
-            # review = chấm kỹ → bật wav2vec để có bằng chứng phát âm cấp âm vị.
-            output = _run_once(config.asr_backend_review, phoneme=True)
-            review_triggered = True
-        elif requested_mode == "fast":
-            # fast = ưu tiên throughput → tắt wav2vec (nặng) bất kể config.
-            if not config.fast_backend_enabled:
-                used_mode = "default"
-                fallback_reason = "fast_backend_unavailable"
-                review_reasons.append("fast backend disabled by config")
-                output = _run_once(config.asr_backend_default, phoneme=False)
-            else:
-                try:
-                    output = _run_once(config.asr_backend_fast, phoneme=False)
-                except Exception as fast_err:  # noqa: BLE001 - fallback đúng theo quyết định kiến trúc
-                    used_mode = "default"
-                    fallback_reason = "fast_backend_failed"
-                    review_reasons.append(
-                        f"fast_fallback_default: {type(fast_err).__name__}: {fast_err}"
-                    )
-                    output = _run_once(config.asr_backend_default, phoneme=False)
-        elif requested_mode == "auto":
-            # auto bắt đầu ở default (theo config); chỉ bật wav2vec nếu leo lên review.
-            output = _run_once(config.asr_backend_default)
+        if requested_mode == "mock_test":
+            # mock_test = thí sinh chủ động chọn chấm kỹ → engine tốt nhất + wav2vec.
+            # KHÔNG phải auto-escalation nên review_triggered vẫn False.
+            output = _run_once(
+                config.asr_engine_mock_test, config.asr_model_mock_test, phoneme=True
+            )
+            used_mode = "mock_test"
+        else:
+            # practice: chạy lane nhanh trước (phoneme theo config); chỉ bật wav2vec
+            # nếu tự leo lên pipeline mock_test do tín hiệu kém.
+            output = _run_once(config.asr_engine_practice, config.asr_model_practice)
             confidence, silence_ratio, coverage = _extract_telemetry_signals(output)
             if confidence < config.auto_confidence_threshold:
                 review_reasons.append(
@@ -377,20 +378,21 @@ def _grade_bytes(
             if review_reasons:
                 score_before_review = _overall_score(output.get("scores"), qt.exam)
                 try:
-                    output = _run_once(config.asr_backend_review, phoneme=True)
+                    output = _run_once(
+                        config.asr_engine_mock_test,
+                        config.asr_model_mock_test,
+                        phoneme=True,
+                    )
                     review_triggered = True
-                    used_mode = "review"
+                    used_mode = "mock_test"
                     score_after_review = _overall_score(output.get("scores"), qt.exam)
                 except Exception as review_err:  # noqa: BLE001
                     review_reasons.append(
-                        f"review_failed_kept_default: {type(review_err).__name__}: {review_err}"
+                        f"mock_test_failed_kept_practice: {type(review_err).__name__}: {review_err}"
                     )
-                    used_mode = "default"
+                    used_mode = "practice"
             else:
-                used_mode = "default"
-        else:
-            output = _run_once(config.asr_backend_default)
-            used_mode = "default"
+                used_mode = "practice"
 
         confidence, silence_ratio, _ = _extract_telemetry_signals(output)
         total_ms = int((perf_counter() - started) * 1000)
@@ -408,6 +410,8 @@ def _grade_bytes(
                 "wpm": float((output.get("features") or {}).get("speech_rate_wpm") or 0.0),
                 "reviewTriggered": review_triggered,
                 "reviewReason": ", ".join(review_reasons) if review_reasons else "",
+                # reserved for future use — luôn None từ khi bỏ fast lane; giữ key
+                # để payload ổn định cho frontend/CSV cũ.
                 "fallbackReason": fallback_reason,
                 "scoreBeforeReview": score_before_review,
                 "scoreAfterReview": score_after_review,
@@ -468,7 +472,7 @@ async def grade(
         description="Tài liệu cho sẵn dạng text (TOEIC Q8-10 / IELTS Part 2 cue card)",
     ),
     no_ai: bool = Form(False),
-    mode: str = Form("auto", description="default | fast | review | auto"),
+    mode: str = Form("practice", description="practice | mock_test"),
     user_requested_review: bool = Form(
         False, description="Ép review khi mode=auto"
     ),
@@ -524,7 +528,7 @@ async def grade_batch(
         description="Tài liệu cho sẵn dạng text (TOEIC Q8-10 / IELTS Part 2 cue card)",
     ),
     no_ai: bool = Form(False),
-    mode: str = Form("auto", description="default | fast | review | auto"),
+    mode: str = Form("practice", description="practice | mock_test"),
     user_requested_review: bool = Form(
         False, description="Ép review khi mode=auto"
     ),

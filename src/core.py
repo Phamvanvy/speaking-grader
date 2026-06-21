@@ -56,6 +56,7 @@ def grade_response(
     image_media_type: str | None = None,
     provided_info: str | None = None,
     asr_backend: str = "faster_whisper",
+    asr_model: str | None = None,
     no_ai: bool = False,
     phoneme_analysis: bool | None = None,
     question_id: str = "adhoc",
@@ -70,10 +71,12 @@ def grade_response(
       có uses_provided_info.
     - expected_duration_sec: optional, vào features (reading_pace) + gating.
     - no_ai: chỉ chạy ASR + features, bỏ qua LLM.
+    - asr_model: model ASR cho lần chấm này (vd "large-v3-turbo" cho practice,
+      "large-v3" cho mock_test). None = dùng config.whisper_model chung.
     - phoneme_analysis: ép bật/tắt phoneme analysis (wav2vec) cho lần chấm này,
       bất kể config. None = theo config.phoneme_analysis_enabled. API dùng cờ này
-      để gắn wav2vec theo mode: fast → False (ưu tiên tốc độ), review → True,
-      default/auto → None (theo config).
+      để gắn wav2vec theo mode: mock_test → True, practice → None (theo config),
+      và True khi practice tự leo lên mock_test.
     - save: ghi JSON ra outputs/ (CLI cần; API có thể tắt).
     """
     phoneme_enabled = (
@@ -99,7 +102,7 @@ def grade_response(
     asr_run = asr.transcribe_with_backend(
         audio_path,
         backend=asr_backend,
-        model_size=config.whisper_model,
+        model_size=asr_model or config.whisper_model,
         device=config.whisper_device,
     )
     transcription = asr_run.transcription

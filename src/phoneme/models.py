@@ -104,11 +104,14 @@ class PhonemePoint:
         status: "ok" (đúng) | "sub" (đọc sai thành âm khác) | "del" (thiếu âm)
         heard: âm nghe được (chỉ có với "sub"; None với "ok"/"del")
         severity: "high" | "medium" | "low" cho sub/del; None với "ok"
+        stress: "primary" | "secondary" cho nguyên âm được nhấn; None nếu không
+            nhấn hoặc từ đơn âm tiết. CHỈ để hiển thị — không tham gia alignment.
     """
     symbol: str
     status: str
     heard: str | None = None
     severity: str | None = None
+    stress: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -116,6 +119,7 @@ class PhonemePoint:
             "status": self.status,
             "heard": self.heard,
             "severity": self.severity,
+            "stress": self.stress,
         }
 
 

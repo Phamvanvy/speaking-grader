@@ -10,7 +10,7 @@ from src.config import Config
 from src.rubrics.toeic import get_question_type
 
 
-def _make_config(*, fast_enabled: bool = True) -> Config:
+def _make_config() -> Config:
     return Config(
         anthropic_api_key=None,
         model="claude-sonnet-4-6",
@@ -22,10 +22,10 @@ def _make_config(*, fast_enabled: bool = True) -> Config:
         local_api_key="no-key",
         feedback_lang="vi",
         max_tokens=30000,
-        asr_backend_default="faster_whisper",
-        asr_backend_fast="insanely_fast_whisper",
-        asr_backend_review="whisperx",
-        fast_backend_enabled=fast_enabled,
+        asr_engine_practice="faster_whisper",
+        asr_engine_mock_test="whisperx",
+        asr_model_practice="large-v3-turbo",
+        asr_model_mock_test="large-v3",
         insanely_fast_model_id="openai/whisper-small",
         auto_confidence_threshold=0.75,
         auto_silence_ratio_threshold=0.35,
@@ -50,109 +50,135 @@ def _output(*, confidence: float, silence_ratio: float, coverage: float, score: 
     }
 
 
-def test_fast_available_uses_fast_backend(monkeypatch):
-    cfg = _make_config(fast_enabled=True)
+def _grade(cfg, qt, mode, *, user_requested_review=False):
+    return api._grade_bytes(
+        b"audio-bytes",
+        ".wav",
+        cfg,
+        qt,
+        reference_script="hello world",
+        image_b64=None,
+        image_media_type=None,
+        expected_duration_sec=12,
+        prompt="",
+        no_ai=False,
+        mode=mode,
+        user_requested_review=user_requested_review,
+    )
+
+
+def test_normalize_mode_maps_legacy_and_dirty_input():
+    # Legacy aliases (client/bản ghi cũ) map sang mode mới.
+    assert api._normalize_mode("auto") == "practice"
+    assert api._normalize_mode("default") == "practice"
+    assert api._normalize_mode("fast") == "practice"
+    assert api._normalize_mode("review") == "mock_test"
+    # Chuỗi bẩn (hoa/thường, khoảng trắng) vẫn map đúng.
+    assert api._normalize_mode("Fast ") == "practice"
+    assert api._normalize_mode("  Review") == "mock_test"
+    # Mode mới đi thẳng.
+    assert api._normalize_mode("practice") == "practice"
+    assert api._normalize_mode("mock_test") == "mock_test"
+    # Rỗng/None/lạ → practice (mặc định an toàn, không 400).
+    assert api._normalize_mode("") == "practice"
+    assert api._normalize_mode(None) == "practice"
+    assert api._normalize_mode("nonsense") == "practice"
+
+
+def test_practice_happy_path_uses_faster_whisper_no_escalation(monkeypatch):
+    cfg = _make_config()
     qt = get_question_type("read_aloud")
-    calls: list[str] = []
+    calls: list[dict] = []
 
     def _fake_grade_response(*args, **kwargs):
-        calls.append(kwargs["asr_backend"])
+        calls.append(kwargs)
+        # Tín hiệu tốt → không leo thang.
         return _output(confidence=0.9, silence_ratio=0.1, coverage=0.95, score=140)
 
     monkeypatch.setattr(api, "grade_response", _fake_grade_response)
 
-    out = api._grade_bytes(
-        b"audio-bytes",
-        ".wav",
-        cfg,
-        qt,
-        reference_script="hello world",
-        image_b64=None,
-        image_media_type=None,
-        expected_duration_sec=12,
-        prompt="",
-        no_ai=False,
-        mode="fast",
-        user_requested_review=False,
-    )
+    out = _grade(cfg, qt, "practice")
 
-    assert calls == ["insanely_fast_whisper"]
-    assert out["telemetry"]["modeUsed"] == "fast"
+    assert len(calls) == 1
+    assert calls[0]["asr_backend"] == "faster_whisper"
+    assert calls[0]["asr_model"] == "large-v3-turbo"
+    assert out["telemetry"]["modeUsed"] == "practice"
+    assert out["telemetry"]["reviewTriggered"] is False
     assert out["telemetry"]["fallbackReason"] is None
 
 
-def test_fast_failure_fallbacks_to_default(monkeypatch):
-    cfg = _make_config(fast_enabled=True)
+def test_mock_test_uses_whisperx_with_phoneme_no_escalation(monkeypatch):
+    cfg = _make_config()
     qt = get_question_type("read_aloud")
-    calls: list[str] = []
+    calls: list[dict] = []
 
     def _fake_grade_response(*args, **kwargs):
-        backend = kwargs["asr_backend"]
-        calls.append(backend)
-        if backend == "insanely_fast_whisper":
-            raise RuntimeError("fast backend crashed")
-        return _output(confidence=0.88, silence_ratio=0.1, coverage=0.93, score=135)
+        calls.append(kwargs)
+        return _output(confidence=0.85, silence_ratio=0.2, coverage=0.9, score=150)
 
     monkeypatch.setattr(api, "grade_response", _fake_grade_response)
 
-    out = api._grade_bytes(
-        b"audio-bytes",
-        ".wav",
-        cfg,
-        qt,
-        reference_script="hello world",
-        image_b64=None,
-        image_media_type=None,
-        expected_duration_sec=12,
-        prompt="",
-        no_ai=False,
-        mode="fast",
-        user_requested_review=False,
-    )
+    out = _grade(cfg, qt, "mock_test")
 
-    assert calls == ["insanely_fast_whisper", "faster_whisper"]
-    assert out["telemetry"]["modeUsed"] == "default"
-    assert out["telemetry"]["fallbackReason"] == "fast_backend_failed"
+    assert len(calls) == 1
+    assert calls[0]["asr_backend"] == "whisperx"
+    assert calls[0]["asr_model"] == "large-v3"
+    assert calls[0]["phoneme_analysis"] is True
+    assert out["telemetry"]["modeUsed"] == "mock_test"
+    # Chọn mock_test trực tiếp KHÔNG phải auto-escalation.
+    assert out["telemetry"]["reviewTriggered"] is False
 
 
-def test_auto_trigger_review_uses_whisperx(monkeypatch):
-    cfg = _make_config(fast_enabled=True)
+def test_practice_escalates_to_mock_test_pipeline(monkeypatch):
+    cfg = _make_config()
     qt = get_question_type("read_aloud")
-    calls: list[str] = []
+    calls: list[dict] = []
 
     def _fake_grade_response(*args, **kwargs):
-        backend = kwargs["asr_backend"]
-        calls.append(backend)
-        if backend == "faster_whisper":
-            # Trigger auto-review: confidence thấp + silence ratio cao + coverage thấp.
+        calls.append(kwargs)
+        if kwargs["asr_backend"] == "faster_whisper":
+            # Trigger escalation: confidence thấp + silence ratio cao + coverage thấp.
             return _output(confidence=0.60, silence_ratio=0.40, coverage=0.60, score=80)
-        if backend == "whisperx":
+        if kwargs["asr_backend"] == "whisperx":
             return _output(confidence=0.85, silence_ratio=0.20, coverage=0.90, score=95)
-        raise AssertionError(f"Unexpected backend: {backend}")
+        raise AssertionError(f"Unexpected backend: {kwargs['asr_backend']}")
 
     monkeypatch.setattr(api, "grade_response", _fake_grade_response)
 
-    out = api._grade_bytes(
-        b"audio-bytes",
-        ".wav",
-        cfg,
-        qt,
-        reference_script="hello world",
-        image_b64=None,
-        image_media_type=None,
-        expected_duration_sec=12,
-        prompt="",
-        no_ai=False,
-        mode="auto",
-        user_requested_review=False,
-    )
+    out = _grade(cfg, qt, "practice")
 
-    assert calls == ["faster_whisper", "whisperx"]
-    assert out["telemetry"]["modeUsed"] == "review"
+    # Hai lượt gọi theo đúng thứ tự (call_args_list-style): practice → mock_test.
+    assert len(calls) == 2
+    assert calls[0]["asr_backend"] == "faster_whisper"
+    assert calls[0]["asr_model"] == "large-v3-turbo"
+    # Lượt escalation phải đổi CẢ engine LẪN model + bật phoneme.
+    assert calls[1]["asr_backend"] == "whisperx"
+    assert calls[1]["asr_model"] == "large-v3"
+    assert calls[1]["phoneme_analysis"] is True
+
+    assert out["telemetry"]["modeUsed"] == "mock_test"
     assert out["telemetry"]["reviewTriggered"] is True
     assert out["telemetry"]["scoreBeforeReview"] == 80
     assert out["telemetry"]["scoreAfterReview"] == 95
     assert out["telemetry"]["fallbackReason"] is None
+
+
+def test_legacy_review_mode_routes_to_mock_test(monkeypatch):
+    cfg = _make_config()
+    qt = get_question_type("read_aloud")
+    calls: list[dict] = []
+
+    def _fake_grade_response(*args, **kwargs):
+        calls.append(kwargs)
+        return _output(confidence=0.85, silence_ratio=0.2, coverage=0.9, score=150)
+
+    monkeypatch.setattr(api, "grade_response", _fake_grade_response)
+
+    out = _grade(cfg, qt, "review")  # legacy alias
+
+    assert calls[0]["asr_backend"] == "whisperx"
+    assert out["telemetry"]["modeRequested"] == "mock_test"
+    assert out["telemetry"]["modeUsed"] == "mock_test"
 
 
 def test_whisperx_audio_fallback_without_ffmpeg(monkeypatch):

@@ -108,7 +108,8 @@ def main(argv: list[str] | None = None) -> int:
             image_b64=image_b64,
             image_media_type=image_media_type,
             provided_info=question.provided_info,
-            asr_backend=config.asr_backend_default,
+            asr_backend=config.asr_engine_practice,
+            asr_model=config.asr_model_practice,
             no_ai=args.no_ai,
             question_id=question.id,
         )

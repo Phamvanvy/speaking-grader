@@ -613,6 +613,20 @@ body.dark .file-item-audio audio {
     margin-bottom: 0.3rem;
 }
 
+/* Khi khối phoneme lồng dưới tiêu chí Pronunciation: <details> thu gọn. */
+.phoneme-detail-wrapper {
+    margin-top: 0.75rem;
+}
+
+summary.phoneme-detail__title {
+    cursor: pointer;
+    margin-bottom: 0;
+}
+
+details.phoneme-detail[open] > summary.phoneme-detail__title {
+    margin-bottom: 0.3rem;
+}
+
 .phoneme-legend {
     color: #888;
     font-size: 0.8rem;
@@ -655,6 +669,22 @@ body.dark .file-item-audio audio {
 
 .phoneme-sym {
     letter-spacing: 0.03em;
+    /* inline-block để dấu nhấn đứng liền nguyên âm, không rớt xuống dòng lẻ. */
+    display: inline-block;
+}
+
+/* Dấu nhấn âm (ˈ primary / ˌ secondary). Span riêng để dễ đổi màu/tooltip;
+   KHÔNG dùng user-select:none để copy vẫn lấy được IPA đầy đủ kèm dấu nhấn.
+   Arial/sans-serif render tốt ˈ (U+02C8) / ˌ (U+02CC). */
+.phoneme-stress {
+    color: #4338ca;
+    font-weight: 700;
+    font-family: Arial, sans-serif;
+    /* Glyph ˈ/ˌ vốn mảnh & nhỏ → phóng to + nâng lên cho dễ nhìn. */
+    font-size: 1.35em;
+    line-height: 1;
+    vertical-align: 0.05em;
+    margin-right: 0.02em;
 }
 
 .phoneme-sym--bad {
@@ -721,6 +751,10 @@ body.dark .phoneme-ipa {
 body.dark .phoneme-sym--bad,
 body.dark .phoneme-sym--missing {
     color: #f87171;
+}
+
+body.dark .phoneme-stress {
+    color: #a5b4fc;
 }
 
 body.dark .phoneme-table th {

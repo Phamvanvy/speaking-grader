@@ -374,12 +374,9 @@ function clearImage(e) {
 // so scores can legitimately differ across modes (by design). This note under
 // the selector explains why.
 const MODE_NOTES = {
-    auto: 'Starts in Default; auto-escalates to Review (better ASR + phoneme '
-        + 'analysis) when confidence/coverage is low. Recommended.',
-    default: 'Balanced ASR (faster-whisper). Phoneme analysis follows server config.',
-    fast: 'Fastest ASR, phoneme analysis OFF → pronunciation scored more leniently, '
-        + 'so scores may be HIGHER than Review. Quick estimate only.',
-    review: 'Most accurate: best ASR (WhisperX) + phoneme analysis ON. '
+    practice: 'Fast first pass (faster-whisper). Auto-upgrades to the Mock Test '
+        + 'pipeline (better ASR + phoneme analysis) when confidence/coverage is low.',
+    mock_test: 'Most accurate: best ASR (WhisperX) + phoneme analysis ON. '
         + 'Use this as the reference score.',
 };
 
@@ -407,8 +404,21 @@ function populateQuestionTypes() {
     questionTypeSelect.selectedIndex = 0;  // reset về option đầu của exam mới
 }
 
-examSelect.addEventListener('change', populateQuestionTypes);
+// Ẩn các trường chỉ dành cho TOEIC (Reference Script, Image) khi chấm IELTS.
+// KHÔNG xóa giá trị — giữ state để user bấm nhầm TOEIC↔IELTS không mất dữ liệu;
+// việc tránh-gửi-nhầm xử lý ở appendCommonFields theo examSelect.value.
+function syncExamSpecificFields() {
+    const isToeic = examSelect.value === 'toeic';
+    document.getElementById('reference-group').classList.toggle('hidden', !isToeic);
+    document.getElementById('image-group').classList.toggle('hidden', !isToeic);
+}
+
+examSelect.addEventListener('change', () => {
+    populateQuestionTypes();
+    syncExamSpecificFields();
+});
 populateQuestionTypes();
+syncExamSpecificFields();
 
 // ── Dark mode ─────────────────────────────────────────────────────────
 // Lựa chọn của user được lưu localStorage; lần đầu thì theo cài đặt hệ điều hành.
@@ -509,8 +519,12 @@ async function checkHealth() {
 // ── Grading ───────────────────────────────────────────────────────────
 // Append the shared grading options (same form for single & batch).
 function appendCommonFields(formData) {
+    // Reference Script & Image chỉ có nghĩa với TOEIC. Các trường này bị ẩn khi
+    // chấm IELTS nhưng giá trị vẫn còn trong DOM → gate theo exam để không gửi nhầm.
+    const isToeic = examSelect.value === 'toeic';
+
     const referenceText = document.getElementById('reference-text').value;
-    if (referenceText) formData.append('text', referenceText);
+    if (isToeic && referenceText) formData.append('text', referenceText);
 
     const promptText = document.getElementById('prompt-text').value;
     if (promptText) formData.append('prompt', promptText);
@@ -528,9 +542,9 @@ function appendCommonFields(formData) {
     const expectedDuration = document.getElementById('expected-duration').value;
     if (expectedDuration) formData.append('expected_duration_sec', expectedDuration);
 
-    // Ảnh đề bài (Describe Picture) — dùng chung cho cả single & batch.
+    // Ảnh đề bài (Describe Picture) — dùng chung cho cả single & batch; chỉ TOEIC.
     const imageFile = imageInput.files[0];
-    if (imageFile) formData.append('image', imageFile);
+    if (isToeic && imageFile) formData.append('image', imageFile);
 
     formData.append('no_ai', document.getElementById('no-ai').checked);
 }
@@ -649,7 +663,7 @@ const sevLabel = s => (s === 'high' ? 'cao' : s === 'medium' ? 'trung bình' : s
 // full reference IPA with mispronounced sounds bolded/red in place, followed by a
 // detail table (Từ / IPA đúng / Bạn đọc / Âm sai / Mức độ) for the words with errors.
 // Falls back to the legacy errors-only table when `words` is absent (older payloads).
-function phonemeErrorsHtml(phoneme) {
+function phonemeErrorsHtml(phoneme, opts = {}) {
     const score = phoneme?.score;
     if (!score) return '';
     const words = Array.isArray(score.words) ? score.words : null;
@@ -657,11 +671,18 @@ function phonemeErrorsHtml(phoneme) {
     if (!words.length) return '';
 
     const isBad = p => p.status === 'sub' || p.status === 'del';
+    // Dấu nhấn âm (nhấn âm) — span riêng, render trước nguyên âm. Backend đã
+    // suppress nhấn cho từ đơn âm tiết nên UI chỉ cần đọc p.stress (có thể vắng
+    // ở payload cũ → bỏ qua).
+    const stressMark = p =>
+        p.stress === 'primary' ? '<span class="phoneme-stress">ˈ</span>'
+      : p.stress === 'secondary' ? '<span class="phoneme-stress">ˌ</span>'
+      : '';
     const symHtml = p => {
         const cls = p.status === 'del' ? 'phoneme-sym phoneme-sym--missing'
                   : p.status === 'sub' ? 'phoneme-sym phoneme-sym--bad'
                   : 'phoneme-sym';
-        return `<span class="${cls}">${escapeHtml(p.symbol)}</span>`;
+        return `${stressMark(p)}<span class="${cls}">${escapeHtml(p.symbol)}</span>`;
     };
     // Full reference IPA, wrapped in /…/ here (backend stores symbols without slashes).
     const ipaHtml = w => `<span class="phoneme-ipa">/${(w.phonemes || []).map(symHtml).join('')}/</span>`;
@@ -721,12 +742,24 @@ function phonemeErrorsHtml(phoneme) {
     const truncLine = score.words_truncated
         ? `<div style="color:#888;font-size:0.8rem;margin-bottom:0.3rem;">hiển thị ${words.length}/${score.words_total} từ</div>` : '';
 
-    return `<div class="phoneme-detail">
-        <div class="phoneme-detail__title">Pronunciation detail (phoneme)${accLine}</div>
-        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai · <span class="phoneme-sym--missing">gạch</span> = thiếu âm</div>
+    const titleText = `Pronunciation detail (phoneme)${accLine}`;
+    const body = `
+        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm</div>
+        <div class="phoneme-legend">Từ lặp lại là từ xuất hiện nhiều lần trong câu (câu có ý nghĩa) — không phải lỗi trùng lặp.</div>
         ${truncLine}
         <div class="phoneme-words">${head}</div>${moreCards}
-        ${table}
+        ${table}`;
+    // Collapsible: lồng dưới tiêu chí Pronunciation — dùng <summary> làm tiêu đề
+    // (giữ accuracy) thay cho .phoneme-detail__title để khỏi lặp tiêu đề.
+    if (opts.collapsible) {
+        return `<details class="phoneme-detail phoneme-detail-wrapper">
+            <summary class="phoneme-detail__title">${titleText}</summary>
+            ${body}
+        </details>`;
+    }
+    return `<div class="phoneme-detail">
+        <div class="phoneme-detail__title">${titleText}</div>
+        ${body}
     </div>`;
 }
 
@@ -780,10 +813,25 @@ function scoresBreakdownHtml(scores, exam, phoneme) {
              + row(cfg.overallLabel,
                    overall != null ? overall + '/' + cfg.overallMax : '--');
 
+    // Khối phoneme lồng dưới tiêu chí Pronunciation. Cờ chống render 2 lần khi
+    // có nhiều tiêu chí khớp "pronun"; nếu không khớp tiêu chí nào → fallback cuối.
+    let renderedPhoneme = false;
     const criteria = Array.isArray(scores.criteria) ? scores.criteria : [];
     if (criteria.length) {
         html += '<div style="margin-top:1rem;">' + criteria.map(c => {
             const suggestions = (c.suggestions || []).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+            // Nhận diện tiêu chí phát âm: thử các field id/code khả dĩ trước, rồi
+            // mới fallback heuristic chứa "pronun" (criterion có thể là label).
+            const key = (c.code || c.id || c.key || c.criterion || '').toString().toLowerCase();
+            const isPronunciation = key === 'pronunciation' || key.includes('pronun');
+            let phonemeBlock = '';
+            if (isPronunciation && !renderedPhoneme) {
+                const detail = phonemeErrorsHtml(phoneme, { collapsible: true });
+                if (detail) {
+                    phonemeBlock = detail;
+                    renderedPhoneme = true;
+                }
+            }
             return `
                 <div style="background:#f9fafb;border-radius:8px;padding:0.85rem;margin-bottom:0.6rem;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.35rem;">
@@ -793,6 +841,7 @@ function scoresBreakdownHtml(scores, exam, phoneme) {
                     <div style="color:#555;line-height:1.5;font-size:0.92rem;">${escapeHtml(c.justification)}</div>
                     ${suggestions ? `<ul style="margin:0.5rem 0 0 1.1rem;color:#4338ca;font-size:0.9rem;">${suggestions}</ul>` : ''}
                     ${correctionsHtml(c.corrections)}
+                    ${phonemeBlock}
                 </div>`;
         }).join('') + '</div>';
     }
@@ -802,7 +851,9 @@ function scoresBreakdownHtml(scores, exam, phoneme) {
             <p style="color:#555;line-height:1.6;white-space:pre-wrap;">${escapeHtml(scores.score_rationale)}</p>
         </div>`;
     }
-    html += phonemeErrorsHtml(phoneme);
+    // Fallback: không có tiêu chí phát âm nào khớp (vd exam khác) → render rời ở
+    // cuối như cũ, tránh mất dữ liệu. renderedPhoneme chặn render trùng.
+    if (!renderedPhoneme) html += phonemeErrorsHtml(phoneme);
     return html;
 }
 
@@ -1057,7 +1108,25 @@ function printSingleReport() {
   .just { color: #4b5563; font-size: 0.92rem; }
   ul { margin: 0.5rem 0 0 1.1rem; color: #4338ca; font-size: 0.9rem; }
   p.body { white-space: pre-wrap; color: #374151; }
-  @media print { body { margin: 1rem; } h2 { break-after: avoid; } .crit, .tile { break-inside: avoid; } }
+  /* ── Pronunciation detail (phoneme) — mirror of styles.css for the popup ── */
+  .phoneme-detail { margin-top: 1.5rem; background: #fff7ed; border-radius: 8px; padding: 0.85rem; }
+  .phoneme-detail__title { font-weight: 600; color: #333; margin-bottom: 0.3rem; }
+  .phoneme-legend { color: #888; font-size: 0.8rem; margin-bottom: 0.5rem; }
+  .phoneme-words { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+  .phoneme-word { background: #fff; border: 1px solid #fed7aa; border-radius: 8px; padding: 0.4rem 0.6rem; display: flex; flex-direction: column; gap: 0.15rem; }
+  .phoneme-word--err { border-color: #fdba74; background: #fffbeb; }
+  .phoneme-word__text { font-weight: 600; color: #333; font-size: 0.9rem; }
+  .phoneme-ipa { color: #444; font-size: 0.95rem; }
+  .phoneme-sym { letter-spacing: 0.03em; display: inline-block; }
+  .phoneme-stress { color: #4338ca; font-weight: 700; font-family: Arial, sans-serif; font-size: 1.35em; line-height: 1; vertical-align: 0.05em; margin-right: 0.02em; }
+  .phoneme-sym--bad { color: #b91c1c; font-weight: 700; }
+  .phoneme-sym--missing { color: #b91c1c; font-weight: 700; text-decoration: line-through; }
+  .phoneme-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 0.3rem; }
+  .phoneme-table th, .phoneme-table td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #fed7aa; vertical-align: top; }
+  .phoneme-table th { color: #92400e; font-size: 0.8rem; font-weight: 600; }
+  .phoneme-table__word { font-weight: 600; color: #333; }
+  .phoneme-detail td:last-child { text-align: left; font-weight: 400; }
+  @media print { body { margin: 1rem; } h2 { break-after: avoid; } .crit, .tile, .phoneme-word, .phoneme-table tr { break-inside: avoid; } }
 </style></head>
 <body>
   <h1>${escapeHtml(cfg.label)} Speaking Report</h1>
@@ -1077,6 +1146,8 @@ function printSingleReport() {
   <div class="tiles">${featuresHtml}</div>
 
   ${reportCriteriaHtml(s, cfg)}
+
+  ${phonemeErrorsHtml(data.phoneme) /* block carries its own title + accuracy; non-collapsible → expanded in print */}
 
   ${s.score_rationale ? `<h2>Score Rationale</h2><p class="body">${escapeHtml(s.score_rationale)}</p>` : ''}
 

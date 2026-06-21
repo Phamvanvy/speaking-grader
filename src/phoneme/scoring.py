@@ -229,6 +229,7 @@ def _build_word_details(
     predicted: list[str],
     reference: list[str],
     spans: list[WordSpan] | None,
+    reference_stress: list[str | None] | None = None,
 ) -> tuple[list[WordPronunciation], bool, int]:
     """Từ DTW path + reference_spans → phát âm chi tiết từng từ.
 
@@ -245,15 +246,22 @@ def _build_word_details(
     if not spans:
         return [], False, 0
 
+    def _stress_at(ref_idx: int) -> str | None:
+        # Defensive: nhấn âm song song 1-1 với reference; vẫn guard lệch độ dài.
+        if reference_stress and ref_idx < len(reference_stress):
+            return reference_stress[ref_idx]
+        return None
+
     status_by_ref: dict[int, PhonemePoint] = {}
     for pred_idx, ref_idx in path:
         if ref_idx < 0:
             continue
         ref_ph = reference[ref_idx]
+        stress = _stress_at(ref_idx)
         if pred_idx >= 0:
             pred_ph = predicted[pred_idx]
             if normalize_ipa(pred_ph) == normalize_ipa(ref_ph):
-                point = PhonemePoint(symbol=ref_ph, status="ok")
+                point = PhonemePoint(symbol=ref_ph, status="ok", stress=stress)
             else:
                 sim = phoneme_similarity(pred_ph, ref_ph)
                 point = PhonemePoint(
@@ -261,9 +269,12 @@ def _build_word_details(
                     status="sub",
                     heard=pred_ph,
                     severity=error_severity(sim),
+                    stress=stress,
                 )
         else:
-            point = PhonemePoint(symbol=ref_ph, status="del", severity="high")
+            point = PhonemePoint(
+                symbol=ref_ph, status="del", severity="high", stress=stress
+            )
 
         existing = status_by_ref.get(ref_idx)
         status_by_ref[ref_idx] = (
@@ -278,7 +289,11 @@ def _build_word_details(
     for span in kept:
         points = [
             status_by_ref.get(
-                i, PhonemePoint(symbol=reference[i], status="del", severity="high")
+                i,
+                PhonemePoint(
+                    symbol=reference[i], status="del", severity="high",
+                    stress=_stress_at(i),
+                ),
             )
             for i in range(span.start_idx, span.end_idx)
         ]
@@ -307,6 +322,7 @@ def compute_phoneme_score(
     segments: list[PhonemeSegment],
     reference_phonemes: list[str],
     reference_spans: list[WordSpan] | None = None,
+    reference_stress: list[str | None] | None = None,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -321,6 +337,9 @@ def compute_phoneme_score(
         reference_spans: optional — map từ reference index → từ (xem WordSpan).
             Có thì mỗi lỗi substitution/deletion được gắn `word`; None thì các
             lỗi giữ word=None (giữ tương thích ngược).
+        reference_stress: optional — nhấn âm song song 1-1 với reference_phonemes
+            (xem text_to_ipa_sequence_with_spans). Có thì mỗi PhonemePoint được
+            gắn `stress`; None thì stress=None (giữ tương thích ngược).
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -349,7 +368,7 @@ def compute_phoneme_score(
         errors = _annotate_words(errors, reference_spans)
         # Path rỗng → _build_word_details gán mọi âm thành "del"
         words, words_truncated, words_total = _build_word_details(
-            [], [], reference_phonemes, reference_spans
+            [], [], reference_phonemes, reference_spans, reference_stress
         )
         return PhonemeScore(
             overall_accuracy=0.0,
@@ -376,7 +395,7 @@ def compute_phoneme_score(
 
     # Phát âm chi tiết từng từ (IPA full + từng âm) cho UI kiểu ELSA.
     words, words_truncated, words_total = _build_word_details(
-        path, predicted_phonemes, reference_phonemes, reference_spans
+        path, predicted_phonemes, reference_phonemes, reference_spans, reference_stress
     )
 
     # Count by type

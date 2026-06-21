@@ -80,16 +80,17 @@ class Config:
     # dễ vượt 4096 → JSON bị cắt. Để rộng; cả 2 backend đều dừng sớm khi xong
     # nên đặt cao không tốn thêm (chỉ tính token thực sinh ra).
     max_tokens: int = 30000
-    # ASR backends cho routing nhiều tầng:
-    # - default: production mặc định
-    # - fast: lane tối ưu throughput (có thể fallback default nếu không sẵn sàng)
-    # - review: lane chấm chi tiết (chạy khi mode=review hoặc auto trigger)
-    asr_backend_default: str = "faster_whisper"
-    asr_backend_fast: str = "insanely_fast_whisper"
-    asr_backend_review: str = "whisperx"
-    # Bật/tắt fast lane ở runtime (dùng khi rollout production theo từng môi trường).
-    fast_backend_enabled: bool = True
-    # Model HF cho adapter Insanely Fast Whisper (transformers pipeline).
+    # ASR engine + model theo user mode (tách rời business mode khỏi engine):
+    # - practice: lane nhanh, có thể tự leo lên mock_test khi tín hiệu kém.
+    # - mock_test: lane chấm chi tiết (engine tốt nhất + phoneme).
+    # Model rỗng → fallback về whisper_model (WHISPER_MODEL) để container cũ
+    # chỉ đặt WHISPER_MODEL vẫn chạy, không bị âm thầm nâng lên model nặng.
+    asr_engine_practice: str = "faster_whisper"
+    asr_engine_mock_test: str = "whisperx"
+    asr_model_practice: str = "base"
+    asr_model_mock_test: str = "base"
+    # Model HF cho adapter Insanely Fast Whisper (transformers pipeline) — engine
+    # tuỳ chọn, giữ lại để có thể trỏ asr_engine_* sang insanely_fast_whisper.
     insanely_fast_model_id: str = "openai/whisper-small"
     # Ngưỡng auto-review.
     auto_confidence_threshold: float = 0.75
@@ -125,7 +126,8 @@ class Config:
 
 
 def load_config() -> Config:
-    fast_enabled_raw = (os.getenv("TOEIC_FAST_BACKEND_ENABLED", "true") or "true").strip().lower()
+    # Model ASR theo mode: lấy env riêng, rỗng → fallback WHISPER_MODEL chung.
+    whisper_model = os.getenv("WHISPER_MODEL", "base")
     # Kỳ thi mặc định: tên env mới (đúng nghĩa multi-exam) → fallback tên cũ → "toeic".
     default_exam = (
         os.getenv("SPEAKING_GRADER_DEFAULT_EXAM")
@@ -141,7 +143,7 @@ def load_config() -> Config:
     return Config(
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         model=os.getenv("TOEIC_MODEL", "claude-sonnet-4-6"),
-        whisper_model=os.getenv("WHISPER_MODEL", "base"),
+        whisper_model=whisper_model,
         # auto: ưu tiên CUDA khi môi trường torch hỗ trợ, fallback CPU.
         whisper_device=os.getenv("WHISPER_DEVICE", "auto"),
         backend=(os.getenv("TOEIC_BACKEND", "anthropic") or "anthropic").lower(),
@@ -154,19 +156,20 @@ def load_config() -> Config:
         ).strip().lower() in {"1", "true", "yes", "on"},
         feedback_lang=os.getenv("TOEIC_FEEDBACK_LANG", "vi") or "vi",
         max_tokens=int(os.getenv("TOEIC_MAX_TOKENS", "30000")),
-        asr_backend_default=(
-            os.getenv("TOEIC_ASR_BACKEND_DEFAULT", "faster_whisper")
+        asr_engine_practice=(
+            os.getenv("TOEIC_ASR_ENGINE_PRACTICE", "faster_whisper")
             or "faster_whisper"
         ).lower(),
-        asr_backend_fast=(
-            os.getenv("TOEIC_ASR_BACKEND_FAST", "insanely_fast_whisper")
-            or "insanely_fast_whisper"
-        ).lower(),
-        asr_backend_review=(
-            os.getenv("TOEIC_ASR_BACKEND_REVIEW", "whisperx")
+        asr_engine_mock_test=(
+            os.getenv("TOEIC_ASR_ENGINE_MOCK_TEST", "whisperx")
             or "whisperx"
         ).lower(),
-        fast_backend_enabled=fast_enabled_raw not in {"0", "false", "no", "off"},
+        asr_model_practice=(
+            os.getenv("TOEIC_ASR_MODEL_PRACTICE") or whisper_model
+        ),
+        asr_model_mock_test=(
+            os.getenv("TOEIC_ASR_MODEL_MOCK_TEST") or whisper_model
+        ),
         insanely_fast_model_id=(
             os.getenv("TOEIC_INSANELY_FAST_MODEL_ID", "openai/whisper-small")
             or "openai/whisper-small"

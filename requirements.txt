@@ -25,3 +25,10 @@ torch>=2.0.0
 transformers>=4.35.0
 librosa>=0.10.0
 g2p-en>=2.1.0
+# accelerate: đặt device (GPU) cho transformers.pipeline — dùng bởi ASR backend
+# 'insanely_fast_whisper' (src/asr.py:_transcribe_insanely_fast_whisper) và wav2vec.
+accelerate>=0.26.0
+# whisperx: ASR engine 'whisperx' (mock_test mode) — transcribe + alignment từ.
+# Kéo theo torchaudio/ctranslate2/pyannote; nặng, thiên GPU. Bắt buộc nếu
+# TOEIC_ASR_ENGINE_MOCK_TEST=whisperx (xem src/asr.py:_transcribe_whisperx).
+whisperx>=3.3.0

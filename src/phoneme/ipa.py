@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Final
+from typing import Final, Literal
 
 from .models import WordSpan
 
 logger = logging.getLogger("toeic.phoneme.ipa")
+
+# Nhãn nhấn âm (word stress) song song với IPA symbol. Khai báo kiểu rõ ràng để
+# tránh typo ("primay"/"Primary") khi giá trị này đi qua nhiều layer tới UI.
+StressType = Literal["primary", "secondary"]
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Tập phonemes IPA tiếng Anh (RP/General American unified)
@@ -290,70 +294,123 @@ def _get_g2p() -> object | None:
 def word_to_ipa(word: str) -> list[str]:
     """Chuyển 1 từ tiếng Anh thành danh sách IPA phonemes.
 
+    Thin wrapper của word_to_ipa_with_stress() — giữ chữ ký cũ cho các caller
+    chỉ cần danh sách symbol (không cần nhấn âm).
+
     Priority:
       1. Built-in dictionary (_COMMON_WORD_PRONUNCIATIONS)
       2. g2p module (grapheme-to-phoneme), instance được cache
       3. Fallback: empty list (caller sẽ handle missing words)
     """
+    symbols, _stress = word_to_ipa_with_stress(word)
+    return symbols
+
+
+def word_to_ipa_with_stress(
+    word: str,
+) -> tuple[list[str], list[StressType | None]]:
+    """Như word_to_ipa() nhưng kèm danh sách nhấn âm song song 1-1 với symbols.
+
+    Nhấn âm CHỈ dùng để hiển thị — KHÔNG bao giờ chèn vào chuỗi phoneme dùng cho
+    DTW alignment (predicted từ wav2vec không có dấu nhấn → sẽ lệch).
+
+    - Built-in dictionary: ARPAbet không kèm stress digit → stress toàn None.
+    - g2p_en: ARPAbet vowel token kèm stress digit (AH0/AH1/AH2). Map
+      1→"primary", 2→"secondary", 0/không có→None. Digit chỉ nằm trên nguyên âm
+      nên số token có digit = số âm tiết.
+    - Từ ĐƠN ÂM TIẾT (≤1 âm tiết): set toàn bộ stress về None — từ điển chuẩn
+      không ký hiệu nhấn cho từ 1 âm tiết (cat /kæt/ chứ không /ˈkæt/).
+
+    Returns (symbols, stresses) với len(symbols) == len(stresses).
+    """
     key = word.lower().strip(".,;:!?\"'()[]{}")
     if not key:
-        return []
+        return [], []
 
     # Built-in dictionary first. Lọc theo ARPABET_TO_IPA (giống nhánh g2p) để
     # token không hợp lệ không lọt vào chuỗi IPA tham chiếu thành "phoneme" rác.
+    # Dictionary lưu ARPAbet KHÔNG kèm stress digit → stress toàn None.
     if key in _COMMON_WORD_PRONUNCIATIONS:
-        arpabet = _COMMON_WORD_PRONUNCIATIONS[key]
-        return [ARPABET_TO_IPA[a] for a in arpabet if a in ARPABET_TO_IPA]
+        symbols = [ARPABET_TO_IPA[a] for a in _COMMON_WORD_PRONUNCIATIONS[key]
+                   if a in ARPABET_TO_IPA]
+        return symbols, [None] * len(symbols)
 
     # Try g2p if available (cached instance — KHÔNG khởi tạo lại mỗi từ)
     transcriber = _get_g2p()
     if transcriber is not None:
         try:
-            # g2p_en trả về flat list các ARPAbet token (kèm stress digit + space)
-            arpabet_seq = [
-                re.sub(r"\d", "", p)  # bỏ stress marker (AH0 → AH)
-                for p in transcriber(key)
-                if p.strip()
-            ]
-            ipa = [ARPABET_TO_IPA.get(a, a) for a in arpabet_seq if a in ARPABET_TO_IPA]
-            if ipa:
-                return ipa
+            symbols: list[str] = []
+            stresses: list[StressType | None] = []
+            syllables = 0
+            # g2p_en trả về flat list các ARPAbet token (kèm stress digit + space).
+            # Parse digit TRƯỚC khi strip để giữ nhấn âm; build symbol+stress lockstep
+            # theo đúng filter `a in ARPABET_TO_IPA` → index khớp 1-1.
+            for raw in transcriber(key):
+                if not raw.strip():
+                    continue
+                digit = re.search(r"\d", raw)
+                base = re.sub(r"\d", "", raw)  # AH0 → AH
+                if base not in ARPABET_TO_IPA:
+                    continue
+                symbols.append(ARPABET_TO_IPA[base])
+                if digit is not None:
+                    syllables += 1  # digit chỉ trên nguyên âm → đếm âm tiết
+                stresses.append(
+                    "primary" if (digit and digit.group() == "1")
+                    else "secondary" if (digit and digit.group() == "2")
+                    else None
+                )
+            if symbols:
+                # Từ đơn âm tiết: không ký hiệu nhấn.
+                if syllables <= 1:
+                    stresses = [None] * len(symbols)
+                if len(symbols) != len(stresses):
+                    raise ValueError(
+                        "IPA symbols and stress list length mismatch"
+                    )
+                return symbols, stresses
+        except ValueError:
+            raise  # guard alignment — không nuốt
         except Exception:  # noqa: BLE001 - lỗi runtime g2p
             pass
 
     # Fallback: empty list (caller detect và handle missing words)
-    return []
+    return [], []
 
 
 def text_to_ipa_sequence_with_spans(
     text: str,
-) -> tuple[list[str], list[WordSpan]]:
-    """Chuyển text → (danh sách phonemes tham chiếu, danh sách WordSpan).
+) -> tuple[list[str], list[WordSpan], list[StressType | None]]:
+    """Chuyển text → (phonemes tham chiếu, WordSpan, nhấn âm song song).
 
     Input:  "The quick brown fox"
     Output: (["ð", "ə", "k", "w", "ɪ", "k", ...],
-             [WordSpan("The", 0, 2), WordSpan("quick", 2, 6), ...])
+             [WordSpan("The", 0, 2), WordSpan("quick", 2, 6), ...],
+             [None, None, None, None, "primary", None, ...])
 
-    Phonemes và spans được build trong CÙNG vòng lặp tokenize/word_to_ipa, nên
-    luôn khớp 1-1 theo index: từ nào không tra được IPA (dropped) sẽ KHÔNG sinh
-    span và KHÔNG đẩy phoneme nào → index của các từ sau không bị lệch.
+    Phonemes, spans và stress được build trong CÙNG vòng lặp tokenize/
+    word_to_ipa_with_stress, nên luôn khớp 1-1 theo index: từ nào không tra được
+    IPA (dropped) sẽ KHÔNG sinh span và KHÔNG đẩy phoneme/stress nào → index của
+    các từ sau không bị lệch. `stress` song song 1-1 với `phonemes`.
 
     Span dùng để map ngược lỗi phoneme (theo position trong reference sequence)
     về đúng từ. `word` giữ nguyên dạng token (re.findall đã loại dấu câu) và giữ
     nguyên hoa/thường để hiển thị; word_to_ipa tự lower() khi tra từ điển.
     """
     if not text:
-        return [], []
+        return [], [], []
 
     words = re.findall(r"[a-zA-Z'-]+", text)
     phonemes: list[str] = []
     spans: list[WordSpan] = []
+    stress: list[StressType | None] = []
     dropped: list[str] = []
     for word in words:
-        word_phones = word_to_ipa(word)
+        word_phones, word_stress = word_to_ipa_with_stress(word)
         if word_phones:
             start = len(phonemes)
             phonemes.extend(word_phones)
+            stress.extend(word_stress)
             spans.append(WordSpan(word, start, len(phonemes)))
         else:
             # Word không tra được IPA (không có trong dict & g2p) — bỏ qua, ghi log.
@@ -370,7 +427,7 @@ def text_to_ipa_sequence_with_spans(
             " ..." if len(dropped) > 10 else "",
         )
 
-    return phonemes, spans
+    return phonemes, spans, stress
 
 
 def text_to_ipa_sequence(text: str) -> list[str]:
@@ -382,5 +439,5 @@ def text_to_ipa_sequence(text: str) -> list[str]:
     Thin wrapper của text_to_ipa_sequence_with_spans() — giữ chữ ký cũ cho các
     caller chỉ cần phoneme list (không cần word mapping).
     """
-    phonemes, _spans = text_to_ipa_sequence_with_spans(text)
+    phonemes, _spans, _stress = text_to_ipa_sequence_with_spans(text)
     return phonemes

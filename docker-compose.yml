@@ -1,34 +1,34 @@
 # Chạy thử local: `docker compose up --build`
-# Đọc biến môi trường từ file .env (ANTHROPIC_API_KEY, TOEIC_MODEL, WHISPER_*...).
+# Đọc biến môi trường từ file .env (HF_TOKEN, TOEIC_MODEL, WHISPER_*...).
 services:
   grader:
     build: .
+    # init: tini làm PID 1, nhận & chuyển SIGTERM xuống uvicorn/worker khi Ctrl+C
+    # → container dừng nhanh & sạch, không bị kill cứng (exit 137) sau 10s chờ.
+    init: true
     ports:
       - "8000:8000"
     env_file:
       - .env
-    # Cache model Whisper sống qua mọi lần recreate → không tải lại ~1.6GB
-    # (large-v3-turbo) mỗi lần khởi động. faster-whisper tải qua HuggingFace Hub
-    # vào ~/.cache/huggingface (container chạy root → /root/.cache/huggingface).
+    # Cache model NGAY TRONG PROJECT (bind mount ./.model_cache → /root/.cache):
+    # gom CẢ HuggingFace (faster-whisper, wav2vec) LẪN torch hub (alignment model
+    # của whisperx) để không tải lại bất cứ phần nào qua mỗi lần chạy. Thư mục
+    # ./.model_cache đã được .gitignore. (Trước đây chỉ mount /huggingface nên
+    # phần /root/.cache/torch của whisperx vẫn bị tải lại.)
     volumes:
-      - whisper-cache:/root/.cache/huggingface
+      - ./.model_cache:/root/.cache
     # Cho phép container gọi service trên host (llama.cpp) qua host.docker.internal.
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Image này CHỈ cài faster-whisper (whisperx/insanely_fast_whisper không có
-    # trong requirements.txt vì rất nặng + thiên GPU). Ép cả 3 tầng ASR về
-    # faster_whisper để mọi mode (default/fast/review/auto) chạy được trên CPU.
-    # `environment` ghi đè giá trị tương ứng trong .env.
-    # → Đã cài whisperx/insanely_fast_whisper (bản GPU)? Xóa/comment 3 dòng dưới.
+    
+    # ── ĐỒNG BỘ MÔI TRƯỜNG & TOKEN TẢI TỐC ĐỘ CAO ─────────────────────────────
+    # Đã xóa các dòng ép về faster_whisper để kích hoạt lại luồng Fast/Review từ file .env.
+    # Dùng cú pháp Dictionary để Docker nạp biến chuỗi chính xác tuyệt đối.
     environment:
-      TOEIC_ASR_BACKEND_DEFAULT: faster_whisper
-      TOEIC_ASR_BACKEND_FAST: faster_whisper
-      TOEIC_ASR_BACKEND_REVIEW: faster_whisper
+      # NVIDIA_VISIBLE_DEVICES: "1"       # Ép container chỉ nhìn thấy chiếc card đồ họa số 2
+      HF_TOKEN: ""           # Đồng bộ Token từ file .env để triệt tiêu lỗi Warning HuggingFace
       TOEIC_PHONEME_ANALYSIS_ENABLED: "true"
-      # GPU: cần WHISPER_DEVICE=cuda (đặt trong .env). cuBLAS/cuDNN lấy từ wheel
-      # nvidia-*-cu12 + LD_LIBRARY_PATH trong Dockerfile; GPU do khối deploy inject.
-      # Máy KHÔNG có GPU? Bỏ comment dòng dưới để ép CPU (và comment khối deploy).
-      # WHISPER_DEVICE: cpu
+
     # Healthcheck dùng endpoint /health có sẵn của app.
     # healthcheck:
     #   test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -36,16 +36,16 @@ services:
     #   timeout: 5s
     #   retries: 3
     #   start_period: 40s
-    restart: unless-stopped
+    # restart: unless-stopped   # Bật lại khi DEPLOY thật. Lúc DEV để comment:
+    #   nếu không, sau khi Ctrl+C container tự sống lại ở nền, giữ port 8000
+    #   → lần `up` sau báo "port is already allocated", buộc phải `down` trước.
 
-    # Muốn chạy GPU: build bằng Dockerfile bản CUDA rồi bỏ comment khối dưới.
+    # ── PHÂN BỔ TÀI NGUYÊN GPU 1 KHÔNG TRANH CHẤP LUỒNG LLM ──────────────────
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               count: all
+              # device_ids: ['1']         # CHỈ định tuyến duy nhất GPU 1 vào container này
               capabilities: [gpu]
-
-volumes:
-  whisper-cache:

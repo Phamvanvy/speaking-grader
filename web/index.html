@@ -29,6 +29,24 @@
         <div class="card">
             <h2>📝 Grading <span style="font-weight:400;font-size:0.85rem;color:#888;">— 1 file = single · 2+ files = batch</span></h2>
 
+            <!-- Exam selector lên đầu: user chọn kỳ thi TRƯỚC, các trường chỉ-TOEIC
+                 (Reference Script, Image) bên dưới sẽ tự ẩn/hiện theo lựa chọn này. -->
+            <div class="row">
+                <div class="form-group">
+                    <label for="exam">Exam</label>
+                    <select id="exam">
+                        <option value="toeic">TOEIC</option>
+                        <option value="ielts">IELTS</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="question-type">Question Type</label>
+                    <!-- Options populated by app.js theo exam đã chọn -->
+                    <select id="question-type"></select>
+                </div>
+            </div>
+
             <div class="form-group">
                 <label class="file-upload" id="single-file-label">
                     <input type="file" id="audio-file" multiple accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4,.mov,.mkv,.avi">
@@ -46,14 +64,14 @@
                 <div id="single-file-name" class="file-list"></div>
             </div>
 
-            <div class="form-group">
+            <div class="form-group" id="reference-group">
                 <label for="reference-text">Reference Script (optional - for Read Aloud)</label>
                 <textarea id="reference-text" placeholder="Enter the reference transcript here..."></textarea>
             </div>
 
             <!-- Ảnh đề bài (Describe Picture). API field: image. TOEIC: đừng nhập
                  đồng thời Reference Script. Áp dụng cho cả batch. -->
-            <div class="form-group">
+            <div class="form-group" id="image-group">
                 <label class="file-upload" id="image-file-label">
                     <input type="file" id="image-file" accept="image/*">
                     <div class="file-upload-text">
@@ -71,28 +89,10 @@
 
             <div class="row">
                 <div class="form-group">
-                    <label for="exam">Exam</label>
-                    <select id="exam">
-                        <option value="toeic">TOEIC</option>
-                        <option value="ielts">IELTS</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="question-type">Question Type</label>
-                    <!-- Options populated by app.js theo exam đã chọn -->
-                    <select id="question-type"></select>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="form-group">
                     <label for="mode">Grading Mode</label>
                     <select id="mode">
-                        <option value="auto">Auto (recommended)</option>
-                        <option value="default">Default</option>
-                        <option value="fast">Fast</option>
-                        <option value="review">Review</option>
+                        <option value="practice">Practice</option>
+                        <option value="mock_test">Mock Test</option>
                     </select>
                     <p class="mode-note" id="mode-note"></p>
                 </div>

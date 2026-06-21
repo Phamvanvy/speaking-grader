@@ -18,6 +18,7 @@ from src.phoneme.ipa import (
     phoneme_similarity,
     text_to_ipa_sequence,
     word_to_ipa,
+    word_to_ipa_with_stress,
 )
 
 
@@ -82,6 +83,58 @@ class TestWordToIpa:
         assert result_lower == result_upper
 
 
+class TestWordStress:
+    """Word stress (nhấn âm) song song với IPA — chỉ hiển thị, không vào DTW."""
+
+    # 20 nguyên âm đầu của ENGLISH_IPA_PHONEMES (theo comment trong ipa.py).
+    _VOWELS = set(ENGLISH_IPA_PHONEMES[:20])
+
+    @staticmethod
+    def _g2p_or_skip(word):
+        """Trả (symbols, stresses); skip nếu g2p không có (từ đa âm tiết → rỗng)."""
+        symbols, stresses = word_to_ipa_with_stress(word)
+        if not symbols:
+            pytest.skip("g2p_en không khả dụng — bỏ qua test phụ thuộc g2p")
+        return symbols, stresses
+
+    def test_alignment_length(self):
+        # symbols và stresses luôn khớp độ dài 1-1.
+        for w in ("the", "you", "think", "traditional", "interesting", "cat"):
+            symbols, stresses = word_to_ipa_with_stress(w)
+            assert len(symbols) == len(stresses), w
+
+    def test_dictionary_word_no_stress(self):
+        # Từ trong từ điển nội bộ: ARPAbet không kèm stress → toàn None.
+        symbols, stresses = word_to_ipa_with_stress("the")
+        assert symbols
+        assert len(symbols) == len(stresses)
+        assert all(s is None for s in stresses)
+
+    def test_multisyllable_has_primary(self):
+        # "traditional" qua g2p → có đúng nhấn chính, nằm trên một nguyên âm.
+        symbols, stresses = self._g2p_or_skip("traditional")
+        assert "primary" in stresses
+        for sym, st in zip(symbols, stresses):
+            if st is not None:
+                assert sym in self._VOWELS, (sym, st)
+
+    def test_multisyllable_interesting(self):
+        symbols, stresses = self._g2p_or_skip("interesting")
+        assert "primary" in stresses
+
+    def test_monosyllable_suppressed(self):
+        # Từ 1 âm tiết (cat) qua g2p: nhấn âm bị suppress ở backend → toàn None.
+        symbols, stresses = self._g2p_or_skip("cat")
+        assert all(s is None for s in stresses)
+
+    def test_uppercase_matches_lower(self):
+        # .lower() ngay đầu hàm: hoa/thường cho kết quả stress giống nhau.
+        assert word_to_ipa_with_stress("Traditional") == \
+            word_to_ipa_with_stress("traditional")
+        assert word_to_ipa_with_stress("INTERESTING") == \
+            word_to_ipa_with_stress("interesting")
+
+
 class TestTextToIpaSequence:
     """Text → IPA phoneme sequence."""
 
@@ -105,7 +158,7 @@ class TestTextToIpaSequenceWithSpans:
     def test_spans_cover_phonemes_contiguously(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        phonemes, spans = text_to_ipa_sequence_with_spans("the brown fox")
+        phonemes, spans, _stress = text_to_ipa_sequence_with_spans("the brown fox")
         assert spans  # at least some words mapped
         # First span starts at 0; each span continues from the previous end.
         assert spans[0].start_idx == 0
@@ -117,22 +170,25 @@ class TestTextToIpaSequenceWithSpans:
     def test_wrapper_returns_same_phonemes(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        phonemes, _ = text_to_ipa_sequence_with_spans("the brown fox")
+        phonemes, _spans, _stress = text_to_ipa_sequence_with_spans("the brown fox")
         assert text_to_ipa_sequence("the brown fox") == phonemes
 
     def test_dropped_word_keeps_alignment(self, monkeypatch):
         import src.phoneme.ipa as ipa_mod
 
-        # Force the middle word to be unmappable (word_to_ipa → []). g2p_en maps
-        # almost any token, so the drop path must be triggered deterministically.
-        real = ipa_mod.word_to_ipa
+        # Force the middle word to be unmappable (→ empty). g2p_en maps almost any
+        # token, so the drop path must be triggered deterministically. Patch
+        # word_to_ipa_with_stress since text_to_ipa_sequence_with_spans calls it.
+        real = ipa_mod.word_to_ipa_with_stress
 
-        def fake_word_to_ipa(word):
-            return [] if word.lower() == "drop" else real(word)
+        def fake_word_to_ipa_with_stress(word):
+            return ([], []) if word.lower() == "drop" else real(word)
 
-        monkeypatch.setattr(ipa_mod, "word_to_ipa", fake_word_to_ipa)
+        monkeypatch.setattr(
+            ipa_mod, "word_to_ipa_with_stress", fake_word_to_ipa_with_stress
+        )
 
-        phonemes, spans = ipa_mod.text_to_ipa_sequence_with_spans("the drop fox")
+        phonemes, spans, _stress = ipa_mod.text_to_ipa_sequence_with_spans("the drop fox")
         words = [s.word for s in spans]
         assert "drop" not in words  # dropped word contributes no span
         assert words == ["the", "fox"]
@@ -314,7 +370,7 @@ class TestComputePhonemeScore:
     def test_substitution_gets_word_from_spans(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the brown fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the brown fox")
         pred = list(ref)
         pred[-1] = "x"  # corrupt last phoneme (in "fox") → substitution there
         segs = self._make_segments(pred)
@@ -327,7 +383,7 @@ class TestComputePhonemeScore:
     def test_insertion_word_is_none_even_with_spans(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         pred = [ref[0]] + ["x"] + ref[1:]  # extra "x" → insertion (position=pred idx)
         segs = self._make_segments(pred)
         score = compute_phoneme_score(segs, ref, spans)
@@ -338,7 +394,7 @@ class TestComputePhonemeScore:
     def test_word_propagates_to_dict(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         pred = list(ref)
         pred[-1] = "x"
         segs = self._make_segments(pred)
@@ -358,7 +414,7 @@ class TestWordDetails:
     def test_all_correct_word_is_ok(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         segs = self._make_segments(list(ref))
         score = compute_phoneme_score(segs, ref, spans)
         assert score.words
@@ -372,7 +428,7 @@ class TestWordDetails:
     def test_ipa_reconstructs_reference_span_without_slashes(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         segs = self._make_segments(list(ref))
         score = compute_phoneme_score(segs, ref, spans)
         for w, span in zip(score.words, spans):
@@ -382,7 +438,7 @@ class TestWordDetails:
     def test_substitution_point_has_heard_and_severity(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         pred = list(ref)
         pred[-1] = "x"  # corrupt last phoneme (in "fox") → substitution
         segs = self._make_segments(pred)
@@ -396,7 +452,7 @@ class TestWordDetails:
     def test_deletion_point_marked_high(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         pred = list(ref)[:-1]  # drop last reference phoneme → deletion
         segs = self._make_segments(pred)
         score = compute_phoneme_score(segs, ref, spans)
@@ -407,7 +463,7 @@ class TestWordDetails:
     def test_no_prediction_all_deletions(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         score = compute_phoneme_score([], ref, spans)
         assert score.overall_accuracy == 0.0
         assert score.words
@@ -420,7 +476,7 @@ class TestWordDetails:
         # predicted phoneme must not add/drop per-word points or shift indices.
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         pred = [ref[0]] + ["x"] + ref[1:]  # extra "x" insertion after first phoneme
         segs = self._make_segments(pred)
         score = compute_phoneme_score(segs, ref, spans)
@@ -438,14 +494,14 @@ class TestWordDetails:
     def test_words_serialize_in_to_dict(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         segs = self._make_segments(list(ref))
         d = compute_phoneme_score(segs, ref, spans).to_dict()
         assert "words" in d and "words_truncated" in d and "words_total" in d
         assert d["words"]
         assert set(d["words"][0]) == {"word", "ipa", "phonemes", "accuracy"}
         assert set(d["words"][0]["phonemes"][0]) == {
-            "symbol", "status", "heard", "severity"
+            "symbol", "status", "heard", "severity", "stress"
         }
 
 
