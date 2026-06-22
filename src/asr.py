@@ -315,6 +315,7 @@ def _transcribe_whisperx(
                     device=device,
                     compute_type=compute_type,
                     language=language or None,
+                    vad_method="silero",
                 )
                 _whisperx_model_cache[model_key] = model
     result = model.transcribe(audio, batch_size=16, language=language)

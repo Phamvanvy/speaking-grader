@@ -8,15 +8,18 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# ── ÉP CỨNG ĐƯỜNG DẪN CACHE VỀ THƯ MỤC SẼ MOUNT VOLUME ────────────────────
+# Đảm bảo cả HuggingFace, Torch Hub và các thư viện khác ghi chung vào một chỗ
+ENV HF_HOME=/root/.cache/huggingface \
+    TORCH_HOME=/root/.cache/torch \
+    XDG_CACHE_HOME=/root/.cache
+
 # Cài deps trước (tận dụng layer cache khi chỉ đổi source).
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Cho loader Linux tìm thấy libcublas.so.12 / libcudnn*.so.9 từ các wheel nvidia-*-cu12.
 ENV LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.11/site-packages/nvidia/cudnn/lib
-
-# ❌ ĐÃ XÓA dòng RUN python -c tải trước model ở đây.
-# Hãy để cơ chế Volume tự động lưu cache ở lần chạy đầu tiên trên máy local.
 
 COPY src ./src
 COPY web ./web

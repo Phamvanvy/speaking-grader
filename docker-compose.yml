@@ -1,5 +1,5 @@
-# Chạy thử local: `docker compose up --build`
-# Đọc biến môi trường từ file .env (HF_TOKEN, TOEIC_MODEL, WHISPER_*...).
+version: '3.8'
+
 services:
   grader:
     build: .
@@ -10,24 +10,26 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    
     # Cache model NGAY TRONG PROJECT (bind mount ./.model_cache → /root/.cache):
-    # gom CẢ HuggingFace (faster-whisper, wav2vec) LẪN torch hub (alignment model
-    # của whisperx) để không tải lại bất cứ phần nào qua mỗi lần chạy. Thư mục
-    # ./.model_cache đã được .gitignore. (Trước đây chỉ mount /huggingface nên
-    # phần /root/.cache/torch của whisperx vẫn bị tải lại.)
+    # Gom cả HuggingFace lẫn torch hub để không tải lại bất cứ phần nào qua mỗi lần chạy.
+    # Thư mục ./.model_cache cần được thêm vào .gitignore.
     volumes:
-      - ./.model_cache:/root/.cache
+      - whisper-cache:/root/.cache
+
     # Cho phép container gọi service trên host (llama.cpp) qua host.docker.internal.
     extra_hosts:
       - "host.docker.internal:host-gateway"
     
     # ── ĐỒNG BỘ MÔI TRƯỜNG & TOKEN TẢI TỐC ĐỘ CAO ─────────────────────────────
-    # Đã xóa các dòng ép về faster_whisper để kích hoạt lại luồng Fast/Review từ file .env.
-    # Dùng cú pháp Dictionary để Docker nạp biến chuỗi chính xác tuyệt đối.
     environment:
-      # NVIDIA_VISIBLE_DEVICES: "1"       # Ép container chỉ nhìn thấy chiếc card đồ họa số 2
-      HF_TOKEN: ""           # Đồng bộ Token từ file .env để triệt tiêu lỗi Warning HuggingFace
+      HF_TOKEN: ""
       TOEIC_PHONEME_ANALYSIS_ENABLED: "true"
+      # Ép các biến môi trường runtime đồng bộ với Dockerfile để chỉ định hướng lưu cache
+      HF_HOME: "/root/.cache/huggingface"
+      TORCH_HOME: "/root/.cache/torch"
+      XDG_CACHE_HOME: "/root/.cache"
+      # NVIDIA_VISIBLE_DEVICES: "1" # Mở ra nếu muốn ép container chỉ nhìn thấy GPU số 2
 
     # Healthcheck dùng endpoint /health có sẵn của app.
     # healthcheck:
@@ -36,9 +38,8 @@ services:
     #   timeout: 5s
     #   retries: 3
     #   start_period: 40s
-    # restart: unless-stopped   # Bật lại khi DEPLOY thật. Lúc DEV để comment:
-    #   nếu không, sau khi Ctrl+C container tự sống lại ở nền, giữ port 8000
-    #   → lần `up` sau báo "port is already allocated", buộc phải `down` trước.
+    
+    # restart: unless-stopped   # Bật lại khi DEPLOY thật. Lúc DEV để comment.
 
     # ── PHÂN BỔ TÀI NGUYÊN GPU 1 KHÔNG TRANH CHẤP LUỒNG LLM ──────────────────
     deploy:
@@ -47,5 +48,8 @@ services:
           devices:
             - driver: nvidia
               count: all
-              # device_ids: ['1']         # CHỈ định tuyến duy nhất GPU 1 vào container này
+              # device_ids: ['1']       # CHỈ định tuyến duy nhất GPU 1 vào container này
               capabilities: [gpu]
+
+volumes:
+  whisper-cache:

@@ -140,9 +140,12 @@ def grade_response(
             wav2vec_model=config.phoneme_wav2vec_model,
             device=config.phoneme_device,
         )
+        # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
+        # Speaking, Describe Picture, Respond...) không có script → fallback về
+        # transcript ASR: đo phát âm của chính những từ thí sinh đã nói (kiểu ELSA).
         phoneme_result = phoneme_analyzer.analyze(
             audio_path,
-            reference_text=reference_script,
+            reference_text=reference_script or transcription.text,
         )
         step_timings_ms["phoneme"] = int((time.perf_counter() - step_started) * 1000)
         if phoneme_result.score:

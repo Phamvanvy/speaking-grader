@@ -32,3 +32,4 @@ accelerate>=0.26.0
 # Kéo theo torchaudio/ctranslate2/pyannote; nặng, thiên GPU. Bắt buộc nếu
 # TOEIC_ASR_ENGINE_MOCK_TEST=whisperx (xem src/asr.py:_transcribe_whisperx).
 whisperx>=3.3.0
+onnxruntime>=1.18
