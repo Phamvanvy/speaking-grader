@@ -372,7 +372,7 @@ class TestCompactPhonemeOutput:
         assert s["words"]
         # Per-word contract the frontend relies on.
         w0 = s["words"][0]
-        assert set(w0) == {"word", "ipa", "phonemes", "accuracy"}
+        assert set(w0) == {"word", "ipa", "phonemes", "accuracy", "skip_reason"}
         assert "/" not in w0["ipa"]
         bad = [
             p for w in s["words"] for p in w["phonemes"]

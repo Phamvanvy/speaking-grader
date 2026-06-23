@@ -720,7 +720,15 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     if (!words) return phonemeErrorsLegacyHtml(phoneme);   // older payloads
     if (!words.length) return '';
 
-    const isBad = p => p.status === 'sub' || p.status === 'del';
+    // CHỈ tô đỏ lỗi THẬT (sub/del severity medium|high). Âm severity 'low' (nhiều
+    // khả năng do recognizer nuốt / biến thể) và 'skipped' (ASR nghe nhầm cả từ)
+    // KHÔNG tô đỏ — gom vào phần "Hidden recognizer noise" bên dưới để khỏi hoang mang.
+    const isSignificant = p =>
+        (p.status === 'sub' || p.status === 'del') &&
+        (p.severity === 'medium' || p.severity === 'high');
+    const isNoise = p =>
+        p.status === 'skipped' ||
+        ((p.status === 'sub' || p.status === 'del') && p.severity === 'low');
     // Dấu nhấn âm (nhấn âm) — span riêng, render trước nguyên âm. Backend đã
     // suppress nhấn cho từ đơn âm tiết nên UI chỉ cần đọc p.stress (có thể vắng
     // ở payload cũ → bỏ qua).
@@ -729,25 +737,27 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
       : p.stress === 'secondary' ? '<span class="phoneme-stress">ˌ</span>'
       : '';
     const symHtml = p => {
-        const cls = p.status === 'del' ? 'phoneme-sym phoneme-sym--missing'
-                  : p.status === 'sub' ? 'phoneme-sym phoneme-sym--bad'
+        const sig = isSignificant(p);
+        const cls = sig && p.status === 'del' ? 'phoneme-sym phoneme-sym--missing'
+                  : sig && p.status === 'sub' ? 'phoneme-sym phoneme-sym--bad'
                   : 'phoneme-sym';
         return `${stressMark(p)}<span class="${cls}">${escapeHtml(p.symbol)}</span>`;
     };
     // Full reference IPA, wrapped in /…/ here (backend stores symbols without slashes).
     const ipaHtml = w => `<span class="phoneme-ipa">/${(w.phonemes || []).map(symHtml).join('')}/</span>`;
-    // Heard transcription: ok→symbol, sub→heard (bold+red), del→omitted.
+    // Heard transcription: ok→symbol, sub significant→heard (bold+red), sub low→heard
+    // neutral, del→omitted.
     const heardHtml = w => {
         const parts = (w.phonemes || []).filter(p => p.status !== 'del').map(p =>
-            p.status === 'sub'
+            isSignificant(p) && p.status === 'sub'
                 ? `<span class="phoneme-sym phoneme-sym--bad">${escapeHtml(p.heard ?? '')}</span>`
-                : `<span class="phoneme-sym">${escapeHtml(p.symbol)}</span>`);
+                : `<span class="phoneme-sym">${escapeHtml(p.status === 'sub' ? (p.heard ?? '') : p.symbol)}</span>`);
         return `<span class="phoneme-ipa">/${parts.join('')}/</span>`;
     };
 
     // ── Per-word cards (all words) ──
     const cardHtml = w => {
-        const hasErr = (w.phonemes || []).some(isBad);
+        const hasErr = (w.phonemes || []).some(isSignificant);
         return `<div class="phoneme-word${hasErr ? ' phoneme-word--err' : ''}">
             <span class="phoneme-word__text">${escapeHtml(w.word)}</span>
             ${ipaHtml(w)}
@@ -760,11 +770,11 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         ? `<details style="margin-top:0.3rem;"><summary style="cursor:pointer;color:#4338ca;font-size:0.85rem;">hiện ${rest.length} từ nữa</summary><div class="phoneme-words">${rest.map(cardHtml).join('')}</div></details>`
         : '';
 
-    // ── Detail table (only words with at least one error) ──
+    // ── Detail table (only words with a significant error: medium|high) ──
     const sevRank = { high: 2, medium: 1, low: 0 };
-    const errWords = words.filter(w => (w.phonemes || []).some(isBad));
+    const errWords = words.filter(w => (w.phonemes || []).some(isSignificant));
     const tableRows = errWords.map(w => {
-        const bad = (w.phonemes || []).filter(isBad);
+        const bad = (w.phonemes || []).filter(isSignificant);
         const pairs = bad.map(p => {
             const heard = p.status === 'del' ? '∅' : escapeHtml(p.heard ?? '');
             return `<span style="color:${sevColor(p.severity)};">${escapeHtml(p.symbol)} → ${heard}</span>`;
@@ -792,13 +802,43 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     const truncLine = score.words_truncated
         ? `<div style="color:#888;font-size:0.8rem;margin-bottom:0.3rem;">hiển thị ${words.length}/${score.words_total} từ</div>` : '';
 
+    // ── Hidden recognizer noise: từ bị Recognition Reliability bỏ qua (kèm LÝ DO)
+    //    + âm severity 'low' — giữ lại để debug, không tô đỏ ──
+    const skipReasonLabel = r =>
+        r === 'whisper_mismatch' ? 'ASR nghe khác script' : (r || 'không khớp');
+    // Từ bị skip cả từ (mỗi từ một dòng, kèm lý do); KHÔNG liệt kê per-phoneme.
+    const skippedWordItems = words
+        .filter(w => w.skip_reason)
+        .map(w => `${escapeHtml(w.word)} — ${escapeHtml(skipReasonLabel(w.skip_reason))}`);
+    // Âm 'low' lẻ tẻ trong các từ KHÔNG bị skip.
+    const lowItems = [];
+    words.forEach(w => {
+        if (w.skip_reason) return;
+        (w.phonemes || []).forEach(p => {
+            if (isNoise(p)) {
+                const heard = p.status === 'del' ? '∅' : escapeHtml(p.heard ?? '');
+                lowItems.push(`${escapeHtml(w.word)}: ${escapeHtml(p.symbol)} → ${heard}`);
+            }
+        });
+    });
+    const noiseCount = skippedWordItems.length + lowItems.length;
+    const noiseHtml = noiseCount
+        ? `<details style="margin-top:0.5rem;">
+            <summary style="cursor:pointer;color:#9ca3af;font-size:0.82rem;">Hidden recognizer noise (${noiseCount})</summary>
+            <div style="color:#9ca3af;font-size:0.82rem;margin-top:0.25rem;line-height:1.5;">${
+                [...skippedWordItems, ...lowItems].join(' · ')
+            }</div>
+        </details>`
+        : '';
+
     const titleText = `Pronunciation detail (phoneme)${accLine}`;
     const body = `
-        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm</div>
-        <div class="phoneme-legend">Từ lặp lại là từ xuất hiện nhiều lần trong câu (câu có ý nghĩa) — không phải lỗi trùng lặp.</div>
+        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm</div>
+        <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ.</div>
         ${truncLine}
         <div class="phoneme-words">${head}</div>${moreCards}
-        ${table}`;
+        ${table}
+        ${noiseHtml}`;
     // Collapsible: lồng dưới tiêu chí Pronunciation — dùng <summary> làm tiêu đề
     // (giữ accuracy) thay cho .phoneme-detail__title để khỏi lặp tiêu đề.
     if (opts.collapsible) {

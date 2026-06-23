@@ -105,6 +105,13 @@ class Config:
     # Số từ tối đa hiển thị trong phoneme word-detail. Cắt theo ranh giới từ để
     # tránh payload quá lớn với bài dài. Đặt qua TOEIC_PHONEME_MAX_WORDS.
     phoneme_max_words: int = 200
+    # Confidence knee: lỗi sub của phoneme có confidence < knee bị hạ penalty (recognizer
+    # không chắc → ít khả năng lỗi người đọc). Đặt qua TOEIC_PHONEME_CONFIDENCE_KNEE.
+    phoneme_confidence_knee: float = 0.5
+    # Ngưỡng SequenceMatcher.ratio để coi 1 từ ASR-nghe-nhầm là "lệch lớn" → bỏ qua
+    # không chấm phoneme (vd Son Tinh→Andy). Ratio cao (mountains→mountain) vẫn chấm.
+    # Đặt qua TOEIC_PHONEME_SKIP_RATIO.
+    phoneme_skip_ratio: float = 0.6
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
@@ -209,6 +216,10 @@ def load_config() -> Config:
             os.getenv("TOEIC_PHONEME_MIN_DURATION_SEC", "0.1")
         ),
         phoneme_max_words=int(os.getenv("TOEIC_PHONEME_MAX_WORDS", "200")),
+        phoneme_confidence_knee=float(
+            os.getenv("TOEIC_PHONEME_CONFIDENCE_KNEE", "0.5")
+        ),
+        phoneme_skip_ratio=float(os.getenv("TOEIC_PHONEME_SKIP_RATIO", "0.6")),
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},

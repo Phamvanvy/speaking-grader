@@ -449,7 +449,7 @@ class TestWordDetails:
         assert all(p.heard is not None and p.severity is not None for p in subs)
         assert fox.accuracy < 1.0
 
-    def test_deletion_point_marked_high(self):
+    def test_deletion_point_marked(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
         ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
@@ -458,18 +458,33 @@ class TestWordDetails:
         score = compute_phoneme_score(segs, ref, spans)
         dels = [p for w in score.words for p in w.phonemes if p.status == "del"]
         assert dels
-        assert all(p.severity == "high" and p.heard is None for p in dels)
+        # Severity giờ theo loại âm/vị trí (không còn luôn "high"); heard luôn None.
+        assert all(p.severity in ("low", "medium", "high") and p.heard is None
+                   for p in dels)
+
+    def test_dropped_onset_consonant_is_high(self):
+        # Nuốt/đọc sai phụ âm ĐẦU TỪ (onset θ trong think) → high severity. DTW có
+        # thể xếp thành sub hoặc del tuỳ alignment — điều quan trọng là nó nặng.
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans, _stress = text_to_ipa_sequence_with_spans("think")
+        pred = list(ref)[1:]  # bỏ phoneme đầu (θ)
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans)
+        bad = [p for w in score.words for p in w.phonemes
+               if p.status in ("sub", "del")]
+        assert any(p.severity == "high" for p in bad)
 
     def test_no_prediction_all_deletions(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
         ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
         score = compute_phoneme_score([], ref, spans)
+        # "Said nothing" → 0% và mọi âm là deletion (severity nay đa dạng).
         assert score.overall_accuracy == 0.0
         assert score.words
         for w in score.words:
-            assert w.accuracy == 0.0
-            assert all(p.status == "del" and p.severity == "high" for p in w.phonemes)
+            assert all(p.status == "del" and p.heard is None for p in w.phonemes)
 
     def test_insertion_adjacent_keeps_one_point_per_ref_index(self):
         # Regression for the one-status-per-reference-index invariant: an extra
@@ -499,7 +514,7 @@ class TestWordDetails:
         d = compute_phoneme_score(segs, ref, spans).to_dict()
         assert "words" in d and "words_truncated" in d and "words_total" in d
         assert d["words"]
-        assert set(d["words"][0]) == {"word", "ipa", "phonemes", "accuracy"}
+        assert set(d["words"][0]) == {"word", "ipa", "phonemes", "accuracy", "skip_reason"}
         assert set(d["words"][0]["phonemes"][0]) == {
             "symbol", "status", "heard", "severity", "stress"
         }
@@ -525,6 +540,236 @@ class TestWeightedAccuracy:
             avg_confidence=0.0, errors=[],
         )
         assert weighted_accuracy(score) == 0.0
+
+
+# ── De-noise: normalize / matcher / severity / scoring ───────────────────────
+
+from src.phoneme.ipa import (
+    deletion_penalty,
+    deletion_severity,
+    normalize_ipa,
+    phonemes_match,
+)
+from src.phoneme.models import WordSpan
+
+
+class TestMinimalNormalization:
+    """normalize_ipa CHỈ gộp cặp chắc chắn — flap & ɜ giữ riêng."""
+
+    def test_flap_not_merged_to_t(self):
+        # ɾ KHÔNG bị normalize thành t (allophone xử lý ở phonemes_match).
+        assert normalize_ipa("ɾ") != normalize_ipa("t")
+
+    def test_nurse_vowel_kept_distinct_from_schwa(self):
+        # ɜ giữ khác ə để lỗi thật (bird vs bud) không bị nuốt ở tầng normalize.
+        assert normalize_ipa("ɜː") != normalize_ipa("ə")
+
+    def test_r_colored_schwa_merges_to_schwa(self):
+        assert normalize_ipa("ɚ") == normalize_ipa("ə")
+        assert normalize_ipa("ɝ") == normalize_ipa("ə")
+
+
+class TestContinuousSimilarity:
+    """phoneme_similarity liên tục: near-vowel cao, khác hẳn = 0."""
+
+    def test_near_vowels_high(self):
+        assert phoneme_similarity("ɪ", "iː") >= 0.8
+        assert phoneme_similarity("ʊ", "uː") >= 0.8
+
+    def test_dental_fricative_mid(self):
+        # θ↔s: lỗi ESL thật, không nên = 1.0 (giữ là lỗi rõ).
+        assert 0.0 < phoneme_similarity("θ", "s") < 0.7
+
+
+class TestPhonemesMatch:
+    """Tolerance layer — allophone / reduction / function word."""
+
+    def test_flap_allophone(self):
+        assert phonemes_match("t", "ɾ")
+        assert phonemes_match("d", "ɾ")
+
+    def test_r_colored_er_as_r(self):
+        # every /evɜːiː/ → /evɹiː/: ɜ↔r coi là khớp.
+        assert phonemes_match("ɜ", "ɹ")
+
+    def test_unstressed_reduction_when_reducible(self):
+        assert phonemes_match("ɜ", "ə", reducible=True)
+        assert phonemes_match("uː", "ʊ", reducible=True)
+
+    def test_not_reducible_keeps_real_error(self):
+        # bird-like: ɜ là nhân chính (reducible False) → KHÔNG khớp với ə.
+        assert not phonemes_match("ɜ", "ə", reducible=False)
+
+    def test_function_word_strong_form(self):
+        # and /ənd/ → /ænd/: æ↔ə chỉ mở cho function word.
+        assert phonemes_match("ə", "æ", word="and")
+        assert not phonemes_match("ə", "æ", word="cat", reducible=False)
+
+
+class TestDeletionSeverity:
+    """Severity của âm thiếu theo loại âm + vị trí (không còn luôn high)."""
+
+    def test_recognizer_prone_low(self):
+        assert deletion_severity("ð") == "low"   # the
+        assert deletion_severity("h") == "low"   # his
+        assert deletion_severity("ə") == "low"
+
+    def test_onset_consonant_high(self):
+        assert deletion_severity("θ", is_onset=True) == "high"   # think
+        assert deletion_severity("k", is_onset=True) == "high"   # cluster
+
+    def test_coda_consonant_medium(self):
+        assert deletion_severity("k", is_onset=False) == "medium"
+
+    def test_stressed_vowel_high_unstressed_low(self):
+        assert deletion_severity("æ", stress="primary") == "high"
+        assert deletion_severity("æ", stress=None) == "low"
+
+    def test_penalty_orders_with_severity(self):
+        assert deletion_penalty("ð") < deletion_penalty("k", is_onset=True)
+
+
+class TestDeNoiseScoring:
+    """End-to-end de-noise trên reference dựng tay (không phụ thuộc g2p)."""
+
+    def _segs(self, phonemes, conf=0.9):
+        return [
+            PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=conf)
+            for i, p in enumerate(phonemes)
+        ]
+
+    def test_american_flap_and_er_not_flagged(self):
+        # water /wɒtɜ/ đọc kiểu Mỹ /wɒɾə/: flap + đuôi -er → KHÔNG lỗi.
+        ref = ["w", "ɒ", "t", "ɜ"]
+        spans = [WordSpan("water", 0, 4)]
+        stress = [None, "primary", None, None]
+        score = compute_phoneme_score(self._segs(["w", "ɒ", "ɾ", "ə"]), ref, spans, stress)
+        assert score.overall_accuracy == 1.0
+        assert score.substitution_count == 0
+        assert score.deletion_count == 0
+
+    def test_and_strong_form_not_flagged(self):
+        ref = ["ə", "n", "d"]
+        spans = [WordSpan("and", 0, 3)]
+        score = compute_phoneme_score(self._segs(["æ", "n", "d"]), ref, spans,
+                                      [None, None, None])
+        assert score.overall_accuracy == 1.0
+        assert score.substitution_count == 0
+
+    def test_real_stressed_vowel_error_preserved(self):
+        # bird /bɜd/ → /bəd/: ɜ là nhân chính → vẫn là lỗi (substitution).
+        ref = ["b", "ɜ", "d"]
+        spans = [WordSpan("bird", 0, 3)]
+        score = compute_phoneme_score(self._segs(["b", "ə", "d"]), ref, spans,
+                                      [None, None, None])
+        assert score.substitution_count >= 1
+
+    def test_low_confidence_downweights_substitution(self):
+        ref = ["k"]
+        hi = compute_phoneme_score(self._segs(["t"], conf=0.9), ref)
+        lo = compute_phoneme_score(self._segs(["t"], conf=0.1), ref)
+        # Confidence thấp → penalty thấp hơn → accuracy cao hơn + severity nhẹ hơn.
+        assert lo.overall_accuracy > hi.overall_accuracy
+        assert hi.errors and hi.errors[0].severity in ("medium", "high")
+        assert lo.errors and lo.errors[0].severity == "low"
+
+    def test_skips_excluded_from_score(self):
+        from src.phoneme.reliability import SkipDecision, SkipReason
+
+        ref = ["ð", "ə", "f", "ɒ", "k", "s"]
+        spans = [WordSpan("the", 0, 2), WordSpan("fox", 2, 6)]
+        stress = [None] * 6
+        pred = ["ð", "ə", "x", "x", "x", "x"]  # fox đọc hỏng hoàn toàn (ASR nghe nhầm)
+        scored = compute_phoneme_score(self._segs(pred), ref, spans, stress)
+        # Skip span index 1 ("fox") qua mapping index-keyed (occurrence-specific).
+        skipped = compute_phoneme_score(
+            self._segs(pred), ref, spans, stress,
+            skips={1: SkipDecision(1, SkipReason.WHISPER_MISMATCH)},
+        )
+        # Bỏ qua "fox" → chỉ còn "the" (đúng) được chấm → accuracy 1.0, không lỗi.
+        assert skipped.overall_accuracy == 1.0
+        assert skipped.substitution_count == 0
+        assert scored.overall_accuracy < 1.0
+        # "fox" mang status skipped + skip_reason; "the" được chấm bình thường.
+        fox = next(w for w in skipped.words if w.word == "fox")
+        assert fox.skip_reason == "whisper_mismatch"
+        assert all(p.status == "skipped" for p in fox.phonemes)
+        the = next(w for w in skipped.words if w.word == "the")
+        assert the.skip_reason is None
+
+    def test_skip_keyed_by_index_not_string(self):
+        # "the" lặp 3 lần; skip CHỈ occurrence thứ 2 (span index 1) → 2 "the" còn lại
+        # vẫn được chấm. Đây là regression cho bug skip-theo-chuỗi.
+        from src.phoneme.reliability import SkipDecision, SkipReason
+
+        ref = ["ð", "ə", "ð", "ə", "ð", "ə"]
+        spans = [WordSpan("the", 0, 2), WordSpan("the", 2, 4), WordSpan("the", 4, 6)]
+        stress = [None] * 6
+        score = compute_phoneme_score(
+            self._segs(list(ref)), ref, spans, stress,
+            skips={1: SkipDecision(1, SkipReason.WHISPER_MISMATCH)},
+        )
+        skipped = [w for w in score.words if w.skip_reason]
+        assert len(skipped) == 1  # chỉ 1 occurrence bị skip, không phải cả 3
+        assert score.words[0].skip_reason is None
+        assert score.words[1].skip_reason == "whisper_mismatch"
+        assert score.words[2].skip_reason is None
+
+
+# ── Recognition Reliability layer (pure, cross-source, index-keyed) ──────────
+
+from src.phoneme.reliability import (
+    RecognizerEvidence,
+    SkipDecision,
+    SkipReason,
+    assess_reliability,
+)
+
+
+class TestRecognitionReliability:
+    """assess_reliability — pure layer, decides skips from cross-source evidence only."""
+
+    def test_perfect_match_no_skips(self):
+        ref = ["the", "quick", "brown", "fox"]
+        ev = RecognizerEvidence.from_transcript("the quick brown fox")
+        assert assess_reliability(ref, ev) == {}
+
+    def test_deletion_skips_that_word(self):
+        # Recognizer không nghe ra "brown".
+        ref = ["the", "quick", "brown", "fox"]
+        ev = RecognizerEvidence.from_transcript("the quick fox")
+        skips = assess_reliability(ref, ev)
+        assert set(skips) == {2}
+        assert skips[2].reason is SkipReason.WHISPER_MISMATCH
+
+    def test_large_substitution_skips_minor_kept(self):
+        # Lệch lớn (traditional→xyzzy, ratio≈0) → skip; "mountains"→"mountain" gần → giữ.
+        ref = ["a", "traditional", "story"]
+        ev = RecognizerEvidence.from_transcript("a xyzzy story")
+        skips = assess_reliability(ref, ev)
+        assert 1 in skips and 0 not in skips and 2 not in skips
+
+        ref2 = ["the", "mountains", "rise"]
+        ev2 = RecognizerEvidence.from_transcript("the mountain rise")
+        assert assess_reliability(ref2, ev2) == {}  # ratio cao → không skip
+
+    def test_repeated_word_skips_only_the_mismatched_occurrence(self):
+        # "the" xuất hiện 3 lần; chỉ occurrence giữa bị recognizer nghe nhầm.
+        ref = ["the", "king", "and", "the", "queen", "saw", "the", "sea"]
+        ev = RecognizerEvidence.from_transcript("the king and a queen saw the sea")
+        skips = assess_reliability(ref, ev)
+        # "the"#2 (index 3) → "a": skip index 3 only, not the other "the"s (0, 6).
+        assert 3 in skips
+        assert 0 not in skips and 6 not in skips
+
+    def test_returns_index_keyed_mapping_pure(self):
+        # SkipDecision không mang `word`; key là index; layer không cần scorer types.
+        ref = ["alpha", "beta"]
+        ev = RecognizerEvidence.from_transcript("alpha")  # beta deleted
+        skips = assess_reliability(ref, ev)
+        assert isinstance(skips[1], SkipDecision)
+        assert skips[1].word_index == 1
+        assert not hasattr(skips[1], "word")
 
 
 # ── Model serialization tests ────────────────────────────────────────────────

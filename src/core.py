@@ -15,7 +15,9 @@ from typing import Any
 from . import asr, features as features_mod, gating, report, scoring
 from .config import Config
 from .phoneme.analyzer import HybridPhonemeAnalyzer
+from .phoneme.ipa import text_to_ipa_sequence_with_spans
 from .phoneme.models import PhonemeResult
+from .phoneme.reliability import RecognizerEvidence, assess_reliability
 from .rubrics.base import QuestionType
 
 logger = logging.getLogger("toeic.core")
@@ -163,13 +165,29 @@ def grade_response(
                 wav2vec_model=config.phoneme_wav2vec_model,
                 device=config.phoneme_device,
                 max_words=config.phoneme_max_words,
+                confidence_knee=config.phoneme_confidence_knee,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về
             # transcript ASR: đo phát âm của chính những từ thí sinh đã nói (kiểu ELSA).
+            #
+            # Recognition Reliability (tầng TRÊN scorer): CHỈ khi có script, so transcript
+            # recognizer với script (cross-source) → quyết định từ nào KHÔNG đáng tin để
+            # chấm (vd Son Tinh→Andy). Keyed theo CHỈ SỐ TỪ chuẩn (occurrence) nên "the"
+            # lặp nhiều lần không bị skip oan. reference_words dựng từ cùng hàm mà analyzer
+            # dùng (deterministic) → chỉ số khớp spans của scorer.
+            skips: dict = {}
+            if reference_script:
+                _ph, ref_spans, _st = text_to_ipa_sequence_with_spans(reference_script)
+                reference_words = [s.word for s in ref_spans]
+                evidence = RecognizerEvidence.from_transcript(transcription.text)
+                skips = dict(assess_reliability(
+                    reference_words, evidence, skip_ratio=config.phoneme_skip_ratio
+                ))
             phoneme_result = phoneme_analyzer.analyze(
                 audio_path,
                 reference_text=reference_script or transcription.text,
+                skips=skips,
             )
         except Exception:  # noqa: BLE001 - phoneme là phụ trợ, lỗi không fatal
             logger.exception("Phoneme | question=%s | analyzer crashed", question_id)

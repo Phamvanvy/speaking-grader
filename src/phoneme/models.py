@@ -132,11 +132,14 @@ class WordPronunciation:
         ipa: phiên âm IPA đầy đủ của từ (ghép các symbol, KHÔNG kèm / /)
         phonemes: danh sách PhonemePoint theo thứ tự reference
         accuracy: tỉ lệ âm đúng trong từ (ok_count / len(phonemes))
+        skip_reason: nếu từ bị Recognition Reliability bỏ qua (không chấm phoneme),
+            đây là lý do (vd "whisper_mismatch"); None nếu từ được chấm bình thường.
     """
     word: str
     ipa: str
     phonemes: list[PhonemePoint] = field(default_factory=list)
     accuracy: float = 0.0
+    skip_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -144,6 +147,7 @@ class WordPronunciation:
             "ipa": self.ipa,
             "phonemes": [p.to_dict() for p in self.phonemes],
             "accuracy": round(self.accuracy, 4),
+            "skip_reason": self.skip_reason,
         }
 
 

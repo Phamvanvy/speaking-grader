@@ -16,11 +16,17 @@ Architecture (hybrid-ready):
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 
 from .ipa import text_to_ipa_sequence_with_spans
 from .models import PhonemeResult
-from .scoring import MAX_WORDS_RETURNED, compute_phoneme_score
+from .reliability import SkipDecision
+from .scoring import (
+    MAX_WORDS_RETURNED,
+    PHONEME_CONFIDENCE_KNEE,
+    compute_phoneme_score,
+)
 from .wav2vec_backend import (
     DEFAULT_WAV2VEC_MODEL,
     MIN_PHONEME_DURATION_SEC,
@@ -69,9 +75,11 @@ class HybridPhonemeAnalyzer:
         confidence_threshold: float = PHONEME_CONFIDENCE_THRESHOLD,
         enable_phoneme_analysis: bool = True,
         max_words: int = MAX_WORDS_RETURNED,
+        confidence_knee: float = PHONEME_CONFIDENCE_KNEE,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         self._max_words = max_words
+        self._confidence_knee = confidence_knee
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
@@ -95,6 +103,7 @@ class HybridPhonemeAnalyzer:
         self,
         audio_path: str,
         reference_text: str | None = None,
+        skips: Mapping[int, SkipDecision] | None = None,
     ) -> PhonemeResult:
         """Phân tích phonemes trong audio, optional so với reference text.
 
@@ -102,6 +111,9 @@ class HybridPhonemeAnalyzer:
             audio_path: đường dẫn file audio (.wav, .mp3, .m4a, ...)
             reference_text: text tham chiếu (vd script đọc aloud) → chuyển thành
                 IPA sequence để so sánh. None = chỉ predict, không scoring.
+            skips: quyết định bỏ qua từ Recognition Reliability (tầng TRÊN), keyed
+                theo chỉ số từ tham chiếu chuẩn (xem compute_phoneme_score). None =
+                chấm hết. Analyzer chỉ truyền xuống — KHÔNG tự tính reliability.
 
         Returns:
             PhonemeResult với segments, reference_phonemes, score, warning.
@@ -167,6 +179,8 @@ class HybridPhonemeAnalyzer:
             score = compute_phoneme_score(
                 segments, reference_phonemes, reference_spans, reference_stress,
                 max_words=self._max_words,
+                skips=skips,
+                confidence_knee=self._confidence_knee,
             )
 
         logger.info(

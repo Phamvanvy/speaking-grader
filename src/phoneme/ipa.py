@@ -9,6 +9,7 @@ Cung cấp:
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from typing import Final, Literal
@@ -194,17 +195,23 @@ def _same_place_of_articulation(p1: str, p2: str) -> bool:
 # ARPAbet→IPA / g2p_en (reference) để không tính nhầm phát âm đúng thành lỗi.
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Các cặp tương đương (sau khi đã bỏ dấu trường ː).
-# Gộp back-vowels (cot-caught merger), r-âm, schwa nhấn/không nhấn... — chấp nhận
-# được cho chấm phát âm ESL; thà bỏ sót lỗi còn hơn báo sai phát âm đúng.
+# Các cặp tương đương (sau khi đã bỏ dấu trường ː). CHỈ giữ những cặp gần như CHẮC
+# CHẮN tương đương giữa eSpeak (wav2vec) và ARPAbet→IPA (g2p) — mọi tolerance "có
+# thể chấp nhận" (flap, vowel reduction, near-vowels) KHÔNG nằm ở đây mà ở
+# phonemes_match() / phoneme_similarity(), để normalize không vô tình nuốt lỗi thật.
+#
+# Cố ý KHÔNG có:
+#   - `ɾ → t`: flap chỉ là allophone — xử lý riêng trong phonemes_match (_ALLOPHONE_PAIRS),
+#     không erase ở đây (nếu erase thì writer/water mất khả năng phân biệt).
+#   - `ɜ → ə`: giữ ɜː khác ə để lỗi thật như bird /bɜːd/ vs /bəd/ không bị bỏ sót
+#     (chỉ vùng KHÔNG nhấn mới khoan dung ɜ↔ə, do phonemes_match quyết định theo stress).
 _IPA_EQUIV: Final[dict[str, str]] = {
     "ɹ": "r",                 # eSpeak r ↔ CMU r
-    "ɾ": "t",                 # flap (water/store kiểu Mỹ) ↔ t (allophone, không phải lỗi)
     "g": "ɡ",                 # ascii g ↔ IPA ɡ
-    "ɚ": "ɜ", "ɝ": "ɜ",       # r-colored schwa ↔ ER
+    "ɚ": "ə", "ɝ": "ə",       # r-colored schwa → schwa (giữ ɜ riêng)
     "ʌ": "ə", "ɐ": "ə",       # schwa nhấn/không nhấn
     "ɛ": "e",                 # EH
-    "ɒ": "ɔ", "ɑ": "ɔ", "o": "ɔ",  # back vowels gộp 1 nhóm
+    "ɒ": "ɔ", "ɑ": "ɔ", "o": "ɔ",  # back vowels gộp 1 nhóm (cot-caught)
     "oʊ": "əʊ",               # OW
 }
 
@@ -219,17 +226,62 @@ def normalize_ipa(phoneme: str) -> str:
     return _IPA_EQUIV.get(p, p)
 
 
+# Tập nguyên âm ở dạng đã chuẩn hoá (sau normalize_ipa) — dùng để nhận diện
+# nguyên âm sau khi đã bỏ ː / gộp tương đương (vd "iː"→"i", "ɒ"→"ɔ").
+_VOWELS_NORM: Final[frozenset[str]] = frozenset(normalize_ipa(v) for v in _VOWELS)
+
+
+def is_vowel(phoneme: str) -> bool:
+    """True nếu phoneme là nguyên âm (so sau khi chuẩn hoá: bỏ ː, gộp tương đương)."""
+    return normalize_ipa(phoneme) in _VOWELS_NORM
+
+
+def _near(a: str, b: str, score: float) -> tuple[frozenset[str], float]:
+    """Build 1 entry của bảng near-pair với key đã chuẩn hoá (symbol pair)."""
+    return frozenset({normalize_ipa(a), normalize_ipa(b)}), score
+
+
+# Bảng "cặp âm gần nhau" được tuyển CHỌN TAY (không xây hệ toạ độ IPA đầy đủ) —
+# dễ bảo trì/tuning/giải thích hơn. Score cao = penalty thấp = severity nhẹ.
+# Cặp KHÔNG có trong bảng rơi về heuristic class/place bên dưới.
+# LƯU Ý: key đã qua normalize nên "iː"→"i", "ʊ"/"uː"→"ʊ"/"u" v.v.
+_NEAR_PAIRS: Final[dict[frozenset[str], float]] = dict([
+    _near("ɪ", "iː", 0.85),   # bit ↔ beat (rút gọn nguyên âm)
+    _near("ʊ", "uː", 0.85),   # book ↔ boot
+    _near("e", "eɪ", 0.80),   # bed ↔ bay
+    _near("æ", "e", 0.80),    # bat ↔ bet (lỗi ESL phổ biến nhưng gần)
+    _near("ɜː", "ə", 0.70),   # NURSE ↔ schwa: gần (đuôi -er KHÔNG nhấn còn được
+                              #   phonemes_match cho khớp hẳn); nhấn thì vẫn là lỗi nhẹ
+    _near("ə", "ɪ", 0.80),    # reduced vowels
+    _near("ə", "ʊ", 0.70),
+    _near("ə", "uː", 0.70),
+    _near("iː", "eɪ", 0.60),
+    _near("ɔ", "əʊ", 0.55),   # thought ↔ go (back, hơi gần)
+])
+
+
+@functools.lru_cache(maxsize=8192)
 def phoneme_similarity(p1: str, p2: str) -> float:
     """Tính độ tương đồng giữa 2 phonemes (0.0 = hoàn toàn khác, 1.0 = giống hệt).
 
+    Continuous (không chỉ 4 mức) để penalty = 1 - similarity mượt — vd ɪ↔iː rất
+    gần (0.85, penalty 0.15) trong khi θ↔k khác hẳn (0.0). Đây là NGUỒN CHÂN LÝ
+    điều khiển cả penalty lẫn severity của substitution.
+
     Algorithm:
-      - Giống hệt (sau chuẩn hóa eSpeak↔ARPAbet): 1.0
-      - Cùng class + cùng place: 0.7
-      - Cùng class hoặc cùng place: 0.4
-      - Khác hoàn toàn: 0.0
+      1. Giống hệt (sau chuẩn hóa eSpeak↔ARPAbet): 1.0
+      2. Cặp trong bảng near-pair tuyển tay (chủ yếu nguyên âm): score của bảng
+      3. Heuristic class/place: cùng class + cùng place 0.7; chỉ 1 trong 2: 0.4
+      4. Khác hoàn toàn: 0.0
+
+    Cached (lru_cache) vì DTW gọi O(n·m) lần mà inventory IPA chỉ vài chục âm.
     """
-    if p1 == p2 or normalize_ipa(p1) == normalize_ipa(p2):
+    n1, n2 = normalize_ipa(p1), normalize_ipa(p2)
+    if n1 == n2:
         return 1.0
+    near = _NEAR_PAIRS.get(frozenset({n1, n2}))
+    if near is not None:
+        return near
     same_cls = _same_class(p1, p2)
     same_place = _same_place_of_articulation(p1, p2)
     if same_cls and same_place:
@@ -246,6 +298,111 @@ def error_severity(similarity: float) -> str:
     if similarity >= 0.4:
         return "medium"
     return "high"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tolerance: phonemes_match — quyết định 2 âm có coi là KHỚP không (≠ identical)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Allophone — biến thể phát âm KHÔNG phải lỗi (sau normalize). Giữ NHỎ + tường minh.
+#  - {t,ɾ}, {d,ɾ}: alveolar flap kiểu Mỹ (water/writer/abilities) — vẫn đúng.
+#  - {r,ɜ}: g2p hay biến ER/r-âm-tiết KHÔNG nhấn thành ɜː trong khi người đọc phát
+#    [ɹ] (every /evɜːiː/→/evɹiː/, arrives /ɜːaɪvz/→/ɹaɪvz/). Coi là khớp.
+_ALLOPHONE_PAIRS: Final[frozenset[frozenset[str]]] = frozenset({
+    frozenset({"t", "ɾ"}),
+    frozenset({"d", "ɾ"}),
+    frozenset({"r", "ɜ"}),
+})
+
+# Nguyên âm rút gọn (dạng đã normalize) — ở vị trí KHÔNG nhấn / trong function word,
+# các nguyên âm này hoán đổi cho nhau là chấp nhận được (weak/strong form).
+_REDUCED_VOWELS: Final[frozenset[str]] = frozenset({"ə", "ʊ", "ɪ", "i", "u", "ɜ"})
+
+# Function words: thường đọc dạng yếu, cho phép reduction kể cả khi (đơn âm tiết)
+# stress=None không phân biệt được. Tập TĨNH — không NLP. Thêm contraction sau nếu cần.
+FUNCTION_WORDS: Final[frozenset[str]] = frozenset({
+    "a", "an", "the", "and", "or", "but", "of", "to", "for", "from", "in", "on",
+    "at", "by", "with", "as", "is", "am", "are", "was", "were", "be", "been",
+    "do", "does", "did", "have", "has", "had", "can", "could", "will", "would",
+    "shall", "should", "may", "might", "must", "that", "than", "them", "then",
+    "their", "there", "he", "she", "we", "you", "his", "her", "him", "us",
+    "our", "your", "it", "its", "my", "me", "i",
+})
+
+
+def phonemes_match(
+    expected: str,
+    predicted: str,
+    *,
+    stress: str | None = None,
+    word: str | None = None,
+    reducible: bool | None = None,
+) -> bool:
+    """True nếu `predicted` coi là phát âm ĐÚNG của `expected` (rộng hơn identical).
+
+    Tầng tolerance (theo thứ tự, dừng ở True đầu tiên):
+      1. Bằng nhau sau normalize tối thiểu.
+      2. Cặp allophone (flap t/d↔ɾ, r↔ɜ) — biến thể đúng.
+      3. Vowel reduction ở vị trí được phép rút gọn: các nguyên âm rút gọn hoán đổi
+         cho nhau (đuôi -er ɜ↔ə, to /tuː/→/tʊ/...). `æ↔ə` chỉ mở cho function word.
+
+    `reducible`: cho phép rút gọn nguyên âm tại VỊ TRÍ NÀY hay không. Caller (scoring)
+    tính sẵn = "nguyên âm KHÔNG phải nhân chính của từ" HOẶC function word — vì stress
+    đơn lẻ không phân biệt được nhân chính của từ ĐƠN âm tiết (bird /bɜːd/: stress=None
+    nhưng ɜ là nhân chính → KHÔNG được rút gọn thành ə, giữ là lỗi thật). Nếu None thì
+    suy từ stress/word (stress is None hoặc function word) — chỉ dùng khi gọi độc lập.
+    """
+    e, p = normalize_ipa(expected), normalize_ipa(predicted)
+    if e == p:
+        return True
+    pair = frozenset({e, p})
+    if pair in _ALLOPHONE_PAIRS:
+        return True
+    in_func = bool(word) and word.lower().strip(".,;:!?\"'()[]{}") in FUNCTION_WORDS
+    if reducible is None:
+        reducible = stress is None or in_func
+    if reducible and e in _REDUCED_VOWELS and p in _REDUCED_VOWELS:
+        return True
+    # æ↔ə (strong/weak "and", "a", "an", "at"...) chỉ cho function word.
+    if in_func and pair == frozenset({"æ", "ə"}):
+        return True
+    return False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Deletion severity/penalty — KHÔNG còn luôn "high"; phụ thuộc loại âm + vị trí
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Âm wav2vec hay "nuốt" (yếu/ngắn) — mất các âm này thường là lỗi NHẬN DẠNG, không
+# phải lỗi người đọc (dạng đã normalize: ð, h, schwa, ɪ, ʊ).
+_RECOGNIZER_PRONE: Final[frozenset[str]] = frozenset({"ð", "h", "ə", "ɪ", "ʊ"})
+
+_SEVERITY_PENALTY: Final[dict[str, float]] = {"low": 0.1, "medium": 0.5, "high": 0.9}
+
+
+def deletion_severity(
+    phoneme: str, *, is_onset: bool = False, stress: str | None = None
+) -> str:
+    """Severity cho 1 âm reference bị THIẾU, theo loại âm + vị trí.
+
+    - Âm recognizer-prone (ð, h, ə, ɪ, ʊ) → low (nhiều khả năng do recognizer nuốt).
+    - Nguyên âm: high nếu được nhấn (primary/secondary), còn lại low (reduction).
+    - Phụ âm: high nếu là onset (đầu từ / trong cụm đầu — vd think θ→∅, school sk→s),
+      ngược lại (coda) medium.
+    """
+    p = normalize_ipa(phoneme)
+    if p in _RECOGNIZER_PRONE:
+        return "low"
+    if p in _VOWELS_NORM:
+        return "high" if stress in ("primary", "secondary") else "low"
+    return "high" if is_onset else "medium"
+
+
+def deletion_penalty(
+    phoneme: str, *, is_onset: bool = False, stress: str | None = None
+) -> float:
+    """Penalty liên tục (qua bucket severity) cho 1 âm bị thiếu — xem deletion_severity."""
+    return _SEVERITY_PENALTY[deletion_severity(phoneme, is_onset=is_onset, stress=stress)]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
