@@ -65,6 +65,8 @@ READ_ALOUD = QuestionType(
     criteria=[PRONUNCIATION, INTONATION_STRESS],
     scale_description=SCALE_0_3,
     uses_reference_script=True,
+    display_inputs=("reference",),
+    required_inputs=("reference",),
     guidance=(
         "Đây là bài đọc to một đoạn văn cho sẵn. Có script tham chiếu, vì vậy "
         "accuracy_metrics (WER, deletions = từ bị bỏ, substitutions = đọc sai, "
@@ -96,6 +98,8 @@ DESCRIBE_PICTURE = QuestionType(
     label="Describe a picture (Q3-4)",
     criteria=[PRONUNCIATION, INTONATION_STRESS, GRAMMAR, VOCABULARY, COHESION],
     scale_description=SCALE_0_3,
+    display_inputs=("image",),
+    required_inputs=("image",),
     guidance=(
         "Thí sinh mô tả một bức tranh trong khoảng 30-45 giây. KHÔNG có script "
         "tham chiếu — không có accuracy_metrics/WER.\n\n"
@@ -162,6 +166,10 @@ RESPOND_WITH_INFO = QuestionType(
     criteria=[PRONUNCIATION, INTONATION_STRESS, GRAMMAR, VOCABULARY, RELEVANCE],
     scale_description=SCALE_0_3,
     uses_provided_info=True,
+    # Ảnh có thể là TÀI LIỆU NGUỒN (lịch trình/agenda) → hiện ô ảnh; nhưng "đề"
+    # cốt lõi là câu hỏi (prompt), nên required chỉ cần prompt.
+    display_inputs=("prompt", "image"),
+    required_inputs=("prompt",),
     guidance=(
         "Thí sinh được cho một tài liệu (lịch trình, agenda, itinerary, bảng "
         "thông tin...) — cung cấp dưới dạng provided_info (text) và/hoặc ẢNH đính "

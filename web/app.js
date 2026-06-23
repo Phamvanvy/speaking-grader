@@ -12,13 +12,17 @@ const EXAM_CONFIG = {
         overallLabel: 'Estimated TOEIC Speaking Score',
         overallMax: 200,
         criterionMax: 3,
+        // `uses` = ô nhập nào HIỆN cho dạng câu này (khớp display_inputs ở backend).
+        // `required` = chỉ cần MỘT trong các input này là coi như "có đề" (khớp
+        // required_inputs backend) — dùng cho popup cảnh báo trước khi chấm. Cả hai
+        // chỉ là cosmetic/UX — backend mới là nơi quyết định chấm thật.
         questionTypes: [
-            { value: '', label: 'Auto-detect' },
-            { value: 'read_aloud', label: 'Read Aloud' },
-            { value: 'describe_picture', label: 'Describe Picture' },
-            { value: 'respond_questions', label: 'Respond to Questions' },
-            { value: 'respond_with_info', label: 'Respond with Info' },
-            { value: 'express_opinion', label: 'Express Opinion' },
+            { value: '', label: 'Auto-detect', uses: ['reference', 'image', 'prompt'] },
+            { value: 'read_aloud', label: 'Read Aloud', uses: ['reference'], required: ['reference'] },
+            { value: 'describe_picture', label: 'Describe Picture', uses: ['image'], required: ['image'] },
+            { value: 'respond_questions', label: 'Respond to Questions', uses: ['prompt'], required: ['prompt'] },
+            { value: 'respond_with_info', label: 'Respond with Info', uses: ['prompt', 'image'], required: ['prompt'] },
+            { value: 'express_opinion', label: 'Express Opinion', uses: ['prompt'], required: ['prompt'] },
         ],
     },
     ielts: {
@@ -29,9 +33,9 @@ const EXAM_CONFIG = {
         criterionMax: 9,
         // Không có "Auto-detect": Part 1 vs Part 3 không phân biệt được → luôn gửi rõ.
         questionTypes: [
-            { value: 'part1_interview', label: 'Part 1 — Interview' },
-            { value: 'part2_long_turn', label: 'Part 2 — Long turn (cue card)' },
-            { value: 'part3_discussion', label: 'Part 3 — Discussion' },
+            { value: 'part1_interview', label: 'Part 1 — Interview', uses: ['prompt'], required: ['prompt'] },
+            { value: 'part2_long_turn', label: 'Part 2 — Long turn (cue card)', uses: ['prompt'], required: ['prompt'] },
+            { value: 'part3_discussion', label: 'Part 3 — Discussion', uses: ['prompt'], required: ['prompt'] },
         ],
     },
 };
@@ -404,21 +408,39 @@ function populateQuestionTypes() {
     questionTypeSelect.selectedIndex = 0;  // reset về option đầu của exam mới
 }
 
-// Ẩn các trường chỉ dành cho TOEIC (Reference Script, Image) khi chấm IELTS.
-// KHÔNG xóa giá trị — giữ state để user bấm nhầm TOEIC↔IELTS không mất dữ liệu;
-// việc tránh-gửi-nhầm xử lý ở appendCommonFields theo examSelect.value.
-function syncExamSpecificFields() {
-    const isToeic = examSelect.value === 'toeic';
-    document.getElementById('reference-group').classList.toggle('hidden', !isToeic);
-    document.getElementById('image-group').classList.toggle('hidden', !isToeic);
+// Hiện đúng ô nhập theo dạng câu đang chọn ("cái nào dùng cái đó"): Read Aloud
+// chỉ Reference, Describe Picture chỉ Image, các dạng Q&A chỉ Prompt... Khi ẩn
+// một group → XÓA luôn giá trị bên trong để không gửi nhầm dữ liệu cũ còn sót
+// trong DOM khi user chuyển qua lại các dạng câu.
+function setGroupVisible(groupId, visible) {
+    const group = document.getElementById(groupId);
+    if (!group) return;
+    group.classList.toggle('hidden', !visible);
+    if (!visible) {
+        group.querySelectorAll('input, textarea').forEach(el => { el.value = ''; });
+    }
+}
+
+function syncConditionalFields() {
+    const cfg = examConfig(examSelect.value);
+    const qt = cfg.questionTypes.find(q => q.value === questionTypeSelect.value);
+    // Không tìm thấy metadata (phòng hờ) → hiện tất cả.
+    const uses = (qt && qt.uses) || ['reference', 'image', 'prompt'];
+    setGroupVisible('reference-group', uses.includes('reference'));
+    setGroupVisible('prompt-group', uses.includes('prompt'));
+    const imageVisible = uses.includes('image');
+    setGroupVisible('image-group', imageVisible);
+    // image-preview nằm ngoài <input> → đồng bộ lại preview sau khi reset value.
+    if (!imageVisible) renderImagePreview();
 }
 
 examSelect.addEventListener('change', () => {
     populateQuestionTypes();
-    syncExamSpecificFields();
+    syncConditionalFields();
 });
+questionTypeSelect.addEventListener('change', syncConditionalFields);
 populateQuestionTypes();
-syncExamSpecificFields();
+syncConditionalFields();
 
 // ── Dark mode ─────────────────────────────────────────────────────────
 // Lựa chọn của user được lưu localStorage; lần đầu thì theo cài đặt hệ điều hành.
@@ -519,15 +541,17 @@ async function checkHealth() {
 // ── Grading ───────────────────────────────────────────────────────────
 // Append the shared grading options (same form for single & batch).
 function appendCommonFields(formData) {
-    // Reference Script & Image chỉ có nghĩa với TOEIC. Các trường này bị ẩn khi
-    // chấm IELTS nhưng giá trị vẫn còn trong DOM → gate theo exam để không gửi nhầm.
-    const isToeic = examSelect.value === 'toeic';
+    // Chỉ gửi input đang HIỆN cho dạng câu hiện tại (group không bị ẩn). Tránh
+    // gửi dữ liệu cũ còn sót trong DOM khi chuyển dạng câu. (Group ẩn đã được
+    // clear value ở syncConditionalFields nên đây là lớp bảo vệ thứ hai.)
+    const isVisible = (groupId) =>
+        !document.getElementById(groupId).classList.contains('hidden');
 
     const referenceText = document.getElementById('reference-text').value;
-    if (isToeic && referenceText) formData.append('text', referenceText);
+    if (isVisible('reference-group') && referenceText) formData.append('text', referenceText);
 
     const promptText = document.getElementById('prompt-text').value;
-    if (promptText) formData.append('prompt', promptText);
+    if (isVisible('prompt-group') && promptText) formData.append('prompt', promptText);
 
     formData.append('exam', examSelect.value);
 
@@ -542,11 +566,26 @@ function appendCommonFields(formData) {
     const expectedDuration = document.getElementById('expected-duration').value;
     if (expectedDuration) formData.append('expected_duration_sec', expectedDuration);
 
-    // Ảnh đề bài (Describe Picture) — dùng chung cho cả single & batch; chỉ TOEIC.
+    // Ảnh đề bài (Describe Picture / Respond with Info) — chỉ gửi khi ô ảnh đang hiện.
     const imageFile = imageInput.files[0];
-    if (isToeic && imageFile) formData.append('image', imageFile);
+    if (isVisible('image-group') && imageFile) formData.append('image', imageFile);
 
     formData.append('no_ai', document.getElementById('no-ai').checked);
+}
+
+// True nếu dạng câu đang chọn đã có "đề" (mirror QuestionType.has_task_context
+// ở backend — CHỈ để cảnh báo UX; backend vẫn tự enforce). Auto-detect / không có
+// metadata `required` → bỏ pre-check, để backend quyết.
+function hasTaskContext() {
+    const cfg = examConfig(examSelect.value);
+    const qt = cfg.questionTypes.find(q => q.value === questionTypeSelect.value);
+    if (!qt || !qt.required) return true;
+    const present = new Set();
+    if (document.getElementById('prompt-text').value.trim()) present.add('prompt');
+    if (document.getElementById('reference-text').value.trim()) present.add('reference');
+    if (imageInput.files[0]) present.add('image');
+    // provided_info: UI chưa có ô riêng → không có từ UI.
+    return qt.required.some(r => present.has(r));
 }
 
 // Grade — routes to /grade (1 file) or /grade-batch (≥2 files).
@@ -557,6 +596,17 @@ async function grade() {
     if (files.length === 0) {
         alert('Please select at least one audio file');
         return;
+    }
+
+    // Thiếu đề bài → cảnh báo trước: vẫn chấm được nhưng CHỈ phát âm, không có
+    // điểm tổng. Cho user cơ hội quay lại nhập đề (Cancel) thay vì chấm hụt.
+    if (!hasTaskContext()) {
+        const ok = confirm(
+            '⚠️ Chưa nhập đề/câu hỏi cho dạng câu này nên không thể chấm điểm '
+            + 'tổng — chỉ chấm phát âm.\n\n'
+            + 'Nhấn OK để vẫn chấm phát âm, hoặc Cancel để quay lại nhập đề bài.'
+        );
+        if (!ok) return;
     }
 
     const isBatch = files.length > 1;
@@ -796,8 +846,19 @@ function phonemeErrorsLegacyHtml(phoneme) {
     </div>`;
 }
 
-function scoresBreakdownHtml(scores, exam, phoneme) {
+function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
     if (!scores) {
+        // pronunciation-only: thiếu đề bài → backend chủ động bỏ chấm điểm tổng,
+        // chỉ trả phoneme. KHÔNG suy ra trạng thái này từ (scores == null) vì còn
+        // nhiều lý do khác (no_ai, gating, lỗi/timeout LLM) → dựa vào cờ backend.
+        if (opts.pronunciationOnly) {
+            const msg = opts.notice
+                || 'Chưa có đề bài — chỉ chấm phát âm. Nhập đề để chấm đầy đủ.';
+            return `<div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:0.85rem;color:#854d0e;line-height:1.5;">
+                    ⚠️ ${escapeHtml(msg)}
+                </div>`
+                + phonemeErrorsHtml(phoneme);
+        }
         return '<p style="color:#666;">No AI scoring (ASR-only or skipped by gating).</p>'
              + phonemeErrorsHtml(phoneme);
     }
@@ -878,12 +939,19 @@ function showSingleResult(data) {
     lastSingleData = data;
     const resultDiv = document.getElementById('result');
     const cfg = examConfig(data.exam);
-    document.getElementById('score-label').textContent = cfg.overallLabel;
-    document.getElementById('overall-score').textContent = data.scores?.[cfg.scoreField] ?? '--';
+    const pronunciationOnly = !!data.pronunciation_only;
+    document.getElementById('score-label').textContent =
+        pronunciationOnly ? 'Chỉ chấm phát âm (chưa có đề)' : cfg.overallLabel;
+    document.getElementById('overall-score').textContent =
+        pronunciationOnly ? '--' : (data.scores?.[cfg.scoreField] ?? '--');
     document.getElementById('transcript').textContent = data.transcript || 'No transcript available';
     document.getElementById('features-grid').innerHTML = featureGridHtml(data.features || {});
-    document.getElementById('scores-breakdown').innerHTML = scoresBreakdownHtml(data.scores, data.exam, data.phoneme);
-    document.getElementById('feedback').textContent = data.scores?.summary_feedback || 'No feedback available';
+    document.getElementById('scores-breakdown').innerHTML = scoresBreakdownHtml(
+        data.scores, data.exam, data.phoneme,
+        { pronunciationOnly, notice: data.notice });
+    document.getElementById('feedback').textContent =
+        data.scores?.summary_feedback
+        || (pronunciationOnly ? (data.notice || '') : 'No feedback available');
     document.getElementById('telemetry').innerHTML = telemetryHtml(data.telemetry);
     resultDiv.classList.add('visible');
     resultDiv.scrollIntoView({ behavior: 'smooth' });
@@ -894,10 +962,18 @@ function showBatchResult(data) {
     lastBatchData = data;
     const cfg = examConfig(data.exam);
     const wrap = document.getElementById('batch-result');
+    // Số bài chỉ chấm phát âm do thiếu đề (để báo gộp, khỏi mở từng item).
+    const pronOnlyCount = (data.results || [])
+        .filter(it => it.result && it.result.pronunciation_only).length;
+    const pronOnlyNote = pronOnlyCount
+        ? `<div class="status-bar info" style="justify-content:center;margin-top:0.5rem;">
+               <span>⚠️ ${pronOnlyCount} bài chỉ chấm phát âm do thiếu đề bài.</span>
+           </div>`
+        : '';
     document.getElementById('batch-summary').innerHTML = `
         <div class="status-bar ${data.failed ? 'info' : 'success'}" style="justify-content:center;">
             <span>${data.succeeded}/${data.count} graded${data.failed ? ` · ${data.failed} failed` : ''} · exam: ${escapeHtml(cfg.label)} · type: ${escapeHtml(data.question_type)} · mode: ${escapeHtml(data.mode_requested)}</span>
-        </div>`;
+        </div>${pronOnlyNote}`;
 
     const results = (data.results || []).slice().sort((a, b) => a.index - b.index);
     document.getElementById('batch-results-list').innerHTML = results.map(item => {
@@ -908,11 +984,12 @@ function showBatchResult(data) {
             </div>`;
         }
         const r = item.result || {};
-        const score = r.scores?.[cfg.scoreField] ?? '--';
-        const feedback = r.scores?.summary_feedback;
+        const pronOnly = !!r.pronunciation_only;
+        const score = pronOnly ? '🔊' : (r.scores?.[cfg.scoreField] ?? '--');
+        const feedback = r.scores?.summary_feedback || (pronOnly ? r.notice : '');
         return `<details class="batch-result">
             <summary style="cursor:pointer;display:flex;align-items:center;gap:0.75rem;list-style:none;">
-                <span class="batch-score" style="margin:0;">${score}</span>
+                <span class="batch-score" style="margin:0;" title="${pronOnly ? 'Chỉ chấm phát âm' : ''}">${score}</span>
                 <span class="filename" style="margin:0;flex:1;">📄 ${escapeHtml(item.audio_filename)}</span>
                 <span style="color:#888;font-size:0.85rem;">▼ details</span>
             </summary>
@@ -920,7 +997,7 @@ function showBatchResult(data) {
                 <div style="font-weight:600;color:#333;margin-bottom:0.3rem;">Transcript</div>
                 <p style="color:#555;line-height:1.5;white-space:pre-wrap;">${escapeHtml(r.transcript || '(empty)')}</p>
                 <div class="features-grid" style="margin-top:0.85rem;">${featureGridHtml(r.features || {})}</div>
-                <div style="margin-top:0.85rem;">${scoresBreakdownHtml(r.scores, r.exam ?? data.exam, r.phoneme)}</div>
+                <div style="margin-top:0.85rem;">${scoresBreakdownHtml(r.scores, r.exam ?? data.exam, r.phoneme, { pronunciationOnly: pronOnly, notice: r.notice })}</div>
                 ${feedback ? `<div style="font-weight:600;color:#333;margin:0.85rem 0 0.3rem;">Feedback</div><p style="color:#555;line-height:1.6;white-space:pre-wrap;">${escapeHtml(feedback)}</p>` : ''}
             </div>
         </details>`;
@@ -1132,10 +1209,12 @@ function printSingleReport() {
   <h1>${escapeHtml(cfg.label)} Speaking Report</h1>
   <div class="meta">File: ${escapeHtml(filename)} · Generated ${escapeHtml(new Date().toLocaleString())}</div>
 
-  <div class="overall">
+  ${data.pronunciation_only
+    ? `<div class="overall"><span class="lbl">⚠️ ${escapeHtml(data.notice || 'Chỉ chấm phát âm (chưa có đề bài).')}</span></div>`
+    : `<div class="overall">
     <span class="big">${escapeHtml(overall ?? '--')}</span>
     <span class="lbl">${escapeHtml(cfg.overallLabel)} (max ${cfg.overallMax})</span>
-  </div>
+  </div>`}
 
   ${summaryRows ? `<table>${summaryRows}</table>` : ''}
 

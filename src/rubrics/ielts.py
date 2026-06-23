@@ -93,6 +93,10 @@ PART2_LONG_TURN = QuestionType(
     criteria=_ALL_CRITERIA,
     scale_description=SCALE_0_9,
     uses_provided_info=True,
+    # Cue card nhập qua ô prompt (UI chưa có ô provided_info riêng); chấp nhận
+    # cả provided_info nếu client gửi qua API.
+    display_inputs=("prompt",),
+    required_inputs=("prompt", "provided_info"),
     exam=Exam.IELTS.value,
     guidance=(
         "Part 2: thí sinh nhận một cue card (đưa qua provided_info — chủ đề + các "

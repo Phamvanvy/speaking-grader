@@ -20,6 +20,12 @@ from .rubrics.base import QuestionType
 
 logger = logging.getLogger("toeic.core")
 
+# Thông báo khi chỉ chấm phát âm vì thiếu đề bài (không có prompt/script/ảnh).
+_PRONUNCIATION_ONLY_NOTICE = (
+    "Chưa nhập đề/câu hỏi cho dạng câu này nên không thể chấm điểm tổng — "
+    "chỉ chấm phát âm. Nhập đề bài để chấm đầy đủ."
+)
+
 
 def _compact_phoneme_output(phoneme_result: PhonemeResult | None) -> dict | None:
     """Bản gọn của phoneme analysis cho JSON output + UI.
@@ -84,6 +90,19 @@ def grade_response(
         if phoneme_analysis is None
         else phoneme_analysis
     )
+    # Thiếu "đề bài" của dạng câu (vd IELTS Part 2 bỏ trống prompt, Describe
+    # Picture không có ảnh) → KHÔNG chấm điểm tổng (LLM tự suy diễn độ liên quan
+    # là không đáng tin), chỉ chấm phát âm. Bỏ qua khi no_ai (user chủ động chỉ
+    # lấy ASR). qt.has_task_context là nguồn chân lý duy nhất cho quyết định này.
+    task_context_missing = not no_ai and not qt.has_task_context(
+        prompt=prompt_text,
+        reference=reference_script,
+        image=bool(image_b64),
+        provided_info=provided_info,
+    )
+    # Khi chỉ chấm phát âm → ép bật phoneme để luôn có báo cáo (không overwrite
+    # cờ đã bật; không chạy lại nếu trước đó đã bật theo mode/config).
+    phoneme_enabled = phoneme_enabled or task_context_missing
     active_model = config.local_model if config.is_local else config.model
     logger.info(
         "Chấm | audio=%s | question=%s | type=%s | backend=%s | model=%s | no_ai=%s",
@@ -136,19 +155,28 @@ def grade_response(
     phoneme_result = None
     if phoneme_enabled and transcription.text.strip():
         step_started = time.perf_counter()
-        phoneme_analyzer = HybridPhonemeAnalyzer(
-            wav2vec_model=config.phoneme_wav2vec_model,
-            device=config.phoneme_device,
-        )
-        # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
-        # Speaking, Describe Picture, Respond...) không có script → fallback về
-        # transcript ASR: đo phát âm của chính những từ thí sinh đã nói (kiểu ELSA).
-        phoneme_result = phoneme_analyzer.analyze(
-            audio_path,
-            reference_text=reference_script or transcription.text,
-        )
+        # Bọc try/except: lỗi phoneme (vd wav2vec OOM/CPU nghẽn) KHÔNG được làm
+        # hỏng cả request — nhất là khi pronunciation-only thì notice vẫn phải
+        # trả về được thay vì 500.
+        try:
+            phoneme_analyzer = HybridPhonemeAnalyzer(
+                wav2vec_model=config.phoneme_wav2vec_model,
+                device=config.phoneme_device,
+            )
+            # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
+            # Speaking, Describe Picture, Respond...) không có script → fallback về
+            # transcript ASR: đo phát âm của chính những từ thí sinh đã nói (kiểu ELSA).
+            phoneme_result = phoneme_analyzer.analyze(
+                audio_path,
+                reference_text=reference_script or transcription.text,
+            )
+        except Exception:  # noqa: BLE001 - phoneme là phụ trợ, lỗi không fatal
+            logger.exception("Phoneme | question=%s | analyzer crashed", question_id)
+            phoneme_result = None
         step_timings_ms["phoneme"] = int((time.perf_counter() - step_started) * 1000)
-        if phoneme_result.score:
+        if phoneme_result is None:
+            pass  # đã log exception ở trên
+        elif phoneme_result.score:
             logger.info(
                 "Phoneme | question=%s | accuracy=%.2f | substitutions=%d | deletions=%d | insertions=%d",
                 question_id,
@@ -194,6 +222,12 @@ def grade_response(
         logger.info("Bỏ qua chấm điểm (no_ai).")
     elif gate.should_skip_ai:
         logger.warning("Audio rỗng/không nhận ra lời — không gọi LLM.")
+    elif task_context_missing:
+        scoring_status = "pronunciation_only"
+        logger.info(
+            "Skip AI scoring | reason=missing_task_context | question=%s | phoneme_only=True",
+            qt.key,
+        )
     else:
         step_started = time.perf_counter()
         result = scoring.score(
@@ -227,10 +261,16 @@ def grade_response(
 
     if scoring_status != "completed":
         step_timings_ms["scoring"] = 0
+        if no_ai:
+            _status_label = "no_ai"
+        elif scoring_status == "pronunciation_only":
+            _status_label = "pronunciation_only"
+        else:
+            _status_label = "skipped_by_gating"
         logger.info(
             "Timing | question=%s | step=scoring | duration_ms=0 | status=%s",
             question_id,
-            scoring_status if no_ai else "skipped_by_gating",
+            _status_label,
         )
 
     # [5] Report
@@ -244,6 +284,9 @@ def grade_response(
         features=feats.to_dict(),
         scores=scores_dict,
         phoneme=_compact_phoneme_output(phoneme_result),
+        pronunciation_only=task_context_missing,
+        reason="missing_task_context" if task_context_missing else None,
+        notice=_PRONUNCIATION_ONLY_NOTICE if task_context_missing else None,
         telemetry={
             "asr_backend_used": asr_run.backend_used,
             "transcription_time_ms": asr_run.elapsed_ms,

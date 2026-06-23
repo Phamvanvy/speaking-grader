@@ -44,3 +44,36 @@ class QuestionType:
     # văn phong system prompt). Giữ kiểu str (= Exam.X.value) cho đồng nhất với
     # các field chuỗi khác và để serialize JSON không cần xử lý enum.
     exam: str = Exam.TOEIC.value
+    # Inputs LIÊN QUAN dạng câu này → điều khiển hiển thị ô nhập trên UI.
+    # Giá trị hợp lệ: "prompt", "reference", "image". (Frontend chỉ dùng để
+    # ẩn/hiện; KHÔNG phải nguồn quyết định chấm điểm.)
+    display_inputs: tuple[str, ...] = ("prompt",)
+    # CHỈ CẦN một trong các input này có mặt là coi như "có đề bài" → chấm đầy đủ.
+    # Thiếu hết → chỉ chấm phát âm (xem QuestionType.has_task_context + core.py).
+    # Đây là NGUỒN CHÂN LÝ DUY NHẤT cho quyết định pronunciation-only.
+    # Giá trị hợp lệ: "prompt", "reference", "image", "provided_info".
+    required_inputs: tuple[str, ...] = ("prompt",)
+
+    def has_task_context(
+        self,
+        *,
+        prompt: str | None = None,
+        reference: str | None = None,
+        image: bool = False,
+        provided_info: str | None = None,
+    ) -> bool:
+        """True nếu có đủ "đề bài" để chấm nội dung (không chỉ phát âm).
+
+        Đủ khi ít nhất MỘT required_input có mặt. Text được strip để " " không
+        bị tính là có đề.
+        """
+        present: set[str] = set()
+        if prompt and prompt.strip():
+            present.add("prompt")
+        if reference and reference.strip():
+            present.add("reference")
+        if image:
+            present.add("image")
+        if provided_info and provided_info.strip():
+            present.add("provided_info")
+        return bool(set(self.required_inputs) & present)

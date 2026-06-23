@@ -21,11 +21,17 @@ def build_output(
     telemetry: dict | None = None,
     exam: str = "toeic",
     phoneme: dict | None = None,
+    pronunciation_only: bool = False,
+    reason: str | None = None,
+    notice: str | None = None,
 ) -> dict[str, Any]:
     """Gom toàn bộ kết quả thành 1 dict để lưu JSON (đầy đủ để debug sau).
 
     phoneme: bản gọn của phoneme analysis cho UI/JSON ({backend_used, warning,
         score:{overall_accuracy, errors[...]}}); None nếu không có.
+    pronunciation_only: True khi bỏ chấm điểm tổng (LLM) vì thiếu đề bài, chỉ
+        trả phân tích phát âm. reason: mã lý do máy đọc được (vd
+        "missing_task_context"). notice: thông báo hiển thị cho user.
     """
     return {
         "audio_path": audio_path,
@@ -37,6 +43,9 @@ def build_output(
         "features": features,
         "scores": scores,
         "phoneme": phoneme,
+        "pronunciation_only": pronunciation_only,
+        "reason": reason,
+        "notice": notice,
         "telemetry": telemetry or {},
     }
 
