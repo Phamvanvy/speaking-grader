@@ -18,7 +18,11 @@ from typing import Any
 from . import asr, features as features_mod, gating, report, scoring
 from .config import Config
 from .phoneme.analyzer import HybridPhonemeAnalyzer
-from .phoneme.diagnostics import DiagnosticsContext, TelemetryWriter
+from .phoneme.diagnostics import (
+    DiagnosticsContext,
+    TelemetryWriter,
+    map_reference_words_to_windows,
+)
 from .phoneme.ipa import text_to_ipa_sequence_with_spans
 from .phoneme.models import PhonemeResult
 from .phoneme.reliability import RecognizerEvidence, assess_reliability
@@ -185,6 +189,10 @@ def grade_response(
             # lặp nhiều lần không bị skip oan. reference_words dựng từ cùng hàm mà analyzer
             # dùng (deterministic) → chỉ số khớp spans của scorer.
             skips: dict = {}
+            word_windows = None
+            # reference_text mà scorer dùng (KHỚP analyzer): có script → script; không
+            # → transcript (free-speech, đo phát âm của chính từ thí sinh đã nói).
+            phoneme_reference_text = reference_script or transcription.text
             if reference_script:
                 _ph, ref_spans, _st = text_to_ipa_sequence_with_spans(reference_script)
                 reference_words = [s.word for s in ref_spans]
@@ -192,6 +200,19 @@ def grade_response(
                 skips = dict(assess_reliability(
                     reference_words, evidence, skip_ratio=config.phoneme_skip_ratio
                 ))
+            # PR3-0 drift telemetry: map TỪ THAM CHIẾU → cửa sổ thời gian Whisper (CHỈ khi
+            # telemetry bật → zero overhead). Áp dụng cho CẢ Read Aloud (có script) lẫn
+            # free-speech (reference = transcript) — vì các false positive cần đo (vd
+            # traditional/Vietnam/folktales/blood) nằm ở đường free-speech. Dùng cùng kỹ
+            # thuật difflib với Recognition Reliability; DIAGNOSTIC ONLY, không đụng điểm/skip.
+            if config.phoneme_telemetry_enabled and phoneme_reference_text.strip():
+                _wph, win_spans, _wst = text_to_ipa_sequence_with_spans(
+                    phoneme_reference_text
+                )
+                word_windows = map_reference_words_to_windows(
+                    [s.word for s in win_spans],
+                    [(w.text, w.start, w.end) for w in transcription.words],
+                )
             # Telemetry (PR2): chỉ bật khi config bật — sink ghi JSONL per-word, KHÔNG
             # ảnh hưởng điểm. Tắt → sink None → scorer không tính diagnostics.
             diagnostics_sink = None
@@ -209,6 +230,7 @@ def grade_response(
                 reference_text=reference_script or transcription.text,
                 skips=skips,
                 diagnostics_sink=diagnostics_sink,
+                word_windows=word_windows,
             )
         except Exception:  # noqa: BLE001 - phoneme là phụ trợ, lỗi không fatal
             logger.exception("Phoneme | question=%s | analyzer crashed", question_id)

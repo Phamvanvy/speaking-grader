@@ -908,6 +908,149 @@ class TestTelemetryWriter:
         # 2 lần emit (mỗi lần 1 dòng summary, 0 word) → 2 dòng.
         assert len(path.read_text(encoding="utf-8").splitlines()) == 2
 
+    def test_summary_aggregates_drift_fraction(self, tmp_path):
+        import json
+
+        path = tmp_path / "drift.jsonl"
+        ctx = DiagnosticsContext("s", "a", "u")
+        diags = [
+            # 1 sub trong window (hallucination) + 3 sub ngoài window (drift) → 3/4 = 0.75.
+            WordDiagnostic("blood", 0, "blʌd", "flʌd", 1.0, 0.8, 0.8, 3, 1, 0, 0, 0.6,
+                           None, window_start=0.0, window_end=0.4,
+                           sub_inside_window=1, sub_outside_window=0),
+            WordDiagnostic("folktales", 1, "foʊkteɪlz", "vtæz", 0.6, 0.5, 0.3, 0, 3, 0, 0,
+                           1.8, None, window_start=1.0, window_end=1.6,
+                           sub_inside_window=0, sub_outside_window=3),
+        ]
+        TelemetryWriter(path).emit(ctx, diags)
+        lines = [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines()]
+        summary = next(ln for ln in lines if ln["type"] == "summary")
+        assert summary["subs_inside_window"] == 1
+        assert summary["subs_outside_window"] == 3
+        assert summary["drift_fraction"] == 0.75
+
+    def test_summary_drift_fraction_none_when_no_windows(self, tmp_path):
+        import json
+
+        path = tmp_path / "nowin.jsonl"
+        ctx = DiagnosticsContext("s", "a", "u")
+        # Không từ nào có window phân loại → drift_fraction None (không suy diễn 0).
+        diags = [WordDiagnostic("fox", 0, "fɒks", "fɒks", 1.0, 0.9, 0.9, 4, 0, 0, 0,
+                                0.0, None)]
+        TelemetryWriter(path).emit(ctx, diags)
+        lines = [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines()]
+        summary = next(ln for ln in lines if ln["type"] == "summary")
+        assert summary["drift_fraction"] is None
+        assert summary["subs_inside_window"] == 0
+
+
+# ── PR3-0: word-window mapping + drift-vs-hallucination classification ─────────
+
+from src.phoneme.diagnostics import map_reference_words_to_windows
+
+
+class TestMapReferenceWordsToWindows:
+    """map_reference_words_to_windows — tái dùng kỹ thuật difflib của reliability."""
+
+    def test_equal_maps_positionally(self):
+        win = map_reference_words_to_windows(
+            ["the", "fox"], [("the", 0.0, 0.5), ("fox", 0.5, 1.0)]
+        )
+        assert win == {0: (0.0, 0.5), 1: (0.5, 1.0)}
+
+    def test_replace_takes_best_ratio_window(self):
+        # "mountains" ↔ "mountain" (ratio cao) → vẫn lấy window của từ transcript đó.
+        win = map_reference_words_to_windows(
+            ["mountains"], [("mountain", 1.0, 1.5)]
+        )
+        assert win == {0: (1.0, 1.5)}
+
+    def test_deleted_reference_word_has_no_window(self):
+        # "traditional" không có trong transcript → index 1 không có window (unalignable);
+        # "the"/"fox" vẫn map đúng chỉ số occurrence.
+        win = map_reference_words_to_windows(
+            ["the", "traditional", "fox"],
+            [("the", 0.0, 0.5), ("fox", 0.5, 1.0)],
+        )
+        assert 1 not in win
+        assert win[0] == (0.0, 0.5)
+        assert win[2] == (0.5, 1.0)
+
+    def test_punctuation_and_case_normalized(self):
+        win = map_reference_words_to_windows(
+            ["vietnam"], [("Vietnam.", 0.0, 1.0)]
+        )
+        assert win == {0: (0.0, 1.0)}
+
+    def test_empty_inputs(self):
+        assert map_reference_words_to_windows([], [("x", 0.0, 1.0)]) == {}
+        assert map_reference_words_to_windows(["x"], []) == {}
+
+
+class TestDriftClassification:
+    """build_word_diagnostics phân loại sub theo cửa sổ thời gian Whisper (PR3-0)."""
+
+    def _capture(self, ref, pred, spans, times, word_windows):
+        captured: list[list] = []
+        segs = [PhonemeSegment(phoneme=p, start=s, end=e, confidence=0.9)
+                for p, (s, e) in zip(pred, times)]
+        compute_phoneme_score(
+            segs, ref, spans, diagnostics_sink=captured.append,
+            word_windows=word_windows,
+        )
+        return captured[0] if captured else []
+
+    def test_substitution_inside_window_is_hallucination(self):
+        # /fɒks/, predicted /fɒts/ — sub 'k'→'t' tại time (2,3) NẰM TRONG window (0,4).
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        times = [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0)]
+        diags = self._capture(ref, ["f", "ɒ", "t", "s"], spans, times, {0: (0.0, 4.0)})
+        d = diags[0]
+        assert d.substitutions == 1
+        assert d.sub_inside_window == 1
+        assert d.sub_outside_window == 0
+        assert (d.window_start, d.window_end) == (0.0, 4.0)
+
+    def test_substitution_outside_window_is_drift(self):
+        # Cùng sub nhưng window từ ở (10,12) — predicted segment (2,3) NGOÀI → drift.
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        times = [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0)]
+        diags = self._capture(ref, ["f", "ɒ", "t", "s"], spans, times, {0: (10.0, 12.0)})
+        d = diags[0]
+        assert d.sub_inside_window == 0
+        assert d.sub_outside_window == 1
+
+    def test_no_window_leaves_classification_zero(self):
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        times = [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0)]
+        diags = self._capture(ref, ["f", "ɒ", "t", "s"], spans, times, {})  # no windows
+        d = diags[0]
+        assert d.sub_inside_window == 0 and d.sub_outside_window == 0
+        assert d.window_start is None and d.window_end is None
+
+    def test_window_pad_absorbs_edge(self):
+        # Segment (4.0,4.05) vừa ra ngoài window (0,4) nhưng trong pad 0.08 → vẫn inside.
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        times = [(0.0, 1.0), (1.0, 2.0), (4.0, 4.05), (3.0, 3.5)]
+        diags = self._capture(ref, ["f", "ɒ", "t", "s"], spans, times, {0: (0.0, 4.0)})
+        assert diags[0].sub_inside_window == 1
+
+    def test_telemetry_with_windows_does_not_change_score(self):
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        segs = [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+                for i, p in enumerate(["f", "ɒ", "t", "s"])]
+        base = compute_phoneme_score(segs, ref, spans)
+        withwin = compute_phoneme_score(
+            segs, ref, spans, diagnostics_sink=lambda d: None,
+            word_windows={0: (10.0, 12.0)},
+        )
+        assert base.overall_accuracy == withwin.overall_accuracy
+
 
 # ── Model serialization tests ────────────────────────────────────────────────
 

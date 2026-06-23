@@ -106,6 +106,7 @@ class HybridPhonemeAnalyzer:
         reference_text: str | None = None,
         skips: Mapping[int, SkipDecision] | None = None,
         diagnostics_sink: Callable[[list[WordDiagnostic]], None] | None = None,
+        word_windows: Mapping[int, tuple[float, float]] | None = None,
     ) -> PhonemeResult:
         """Phân tích phonemes trong audio, optional so với reference text.
 
@@ -118,6 +119,8 @@ class HybridPhonemeAnalyzer:
                 chấm hết. Analyzer chỉ truyền xuống — KHÔNG tự tính reliability.
             diagnostics_sink: optional sink nhận WordDiagnostic để ghi telemetry (PR2);
                 chỉ truyền xuống scorer, KHÔNG ảnh hưởng điểm.
+            word_windows: optional (PR3-0) — cửa sổ thời gian Whisper theo chỉ số từ chuẩn,
+                cho telemetry drift-vs-hallucination; chỉ truyền xuống scorer, KHÔNG ảnh hưởng điểm.
 
         Returns:
             PhonemeResult với segments, reference_phonemes, score, warning.
@@ -186,6 +189,7 @@ class HybridPhonemeAnalyzer:
                 skips=skips,
                 confidence_knee=self._confidence_knee,
                 diagnostics_sink=diagnostics_sink,
+                word_windows=word_windows,
             )
 
         logger.info(

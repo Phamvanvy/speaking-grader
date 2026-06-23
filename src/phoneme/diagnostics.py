@@ -1,4 +1,4 @@
-"""Phoneme telemetry (PR2) — per-word diagnostic records cho calibration.
+"""Phoneme telemetry (PR2/PR3-0) — per-word diagnostic records cho calibration.
 
 DIAGNOSTIC ONLY: dữ liệu ở đây KHÔNG bao giờ quay lại quyết định scoring/reliability.
 Nó được tính từ DTW alignment (nơi DUY NHẤT có attribution predicted→word) nhưng tách
@@ -8,14 +8,24 @@ gì → zero overhead.
 
 Mỗi audio sinh nhiều dòng JSON `type:"word"` + 1 dòng `type:"summary"`. `schema_version`
 bắt buộc để đổi format sau này không vỡ parser. Greppable bằng jq/grep.
+
+PR3-0 (drift-vs-hallucination): để KIỂM CHỨNG giả thuyết "false positive đến từ DTW gán
+phoneme LỆCH ranh giới từ", mỗi substitution được phân loại theo VỊ TRÍ THỜI GIAN của
+predicted segment so với CỬA SỔ THỜI GIAN Whisper của từ đó:
+  - predicted segment NẰM TRONG window (±pad)  → hallucination (wav2vec nhả rác trong từ).
+  - predicted segment NGOÀI window              → drift (DTW mượn âm của từ kế bên).
+Cửa sổ từ map qua `map_reference_words_to_windows` (cùng kỹ thuật difflib với Recognition
+Reliability — KHÔNG phải alignment thứ hai độc lập). Vẫn DIAGNOSTIC ONLY.
 """
 
 from __future__ import annotations
 
+import difflib
 import json
 import logging
+import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -24,7 +34,65 @@ from .models import PhonemePoint, WordSpan
 logger = logging.getLogger("toeic.phoneme.diagnostics")
 
 # Tăng khi đổi cấu trúc record. Parser downstream đọc field này để biết schema.
-TELEMETRY_SCHEMA_VERSION: int = 1
+# v2: thêm window_start/end + sub_inside_window/sub_outside_window (PR3-0 drift telemetry).
+TELEMETRY_SCHEMA_VERSION: int = 2
+
+# Đệm cửa sổ thời gian khi phân loại drift: predicted segment chạm mép window trong
+# khoảng này vẫn coi là "trong từ". Whisper word timestamps lệch ~±100–300ms; pad nhỏ
+# ở đây CHỈ nuốt sai số biên, KHÔNG nới rộng tới từ kế bên. CHỈ dùng cho telemetry.
+DRIFT_WINDOW_PAD_SEC: float = 0.08
+
+# Tách transcript/từ thành token chuẩn (lowercase, bỏ dấu câu) — KHỚP với
+# RecognizerEvidence.from_transcript trong reliability để mapping nhất quán với skip.
+_WORD_TOKEN_RE = re.compile(r"[a-z0-9']+")
+
+
+def _normalize_word(text: str) -> str:
+    """Chuẩn hoá 1 từ → 1 token (ghép các mảnh [a-z0-9']); '' nếu toàn dấu câu."""
+    return "".join(_WORD_TOKEN_RE.findall((text or "").lower()))
+
+
+def map_reference_words_to_windows(
+    reference_words: list[str],
+    transcript_words: list[tuple[str, float, float]],
+) -> dict[int, tuple[float, float]]:
+    """Map CHỈ SỐ TỪ THAM CHIẾU (occurrence) → cửa sổ thời gian Whisper (start, end).
+
+    DIAGNOSTIC ONLY (PR3-0). Dùng CÙNG kỹ thuật difflib.SequenceMatcher trên 2 danh
+    sách từ như Recognition Reliability (reliability.assess_reliability) — KHÔNG tạo
+    alignment thứ hai độc lập; chỉ lấy timestamp của từ transcript đã khớp:
+      - 'equal'  : ref[i] khớp hyp[j] theo vị trí → window = hyp_time[j].
+      - 'replace': mỗi ref[i] lấy hyp[j] có ratio cao nhất trong block → window đó.
+      - 'delete' : từ script không có trong transcript → KHÔNG có window (unalignable;
+        cũng chính là từ Recognition Reliability skip) → bỏ khỏi map.
+      - 'insert' : transcript thừa từ → không có ref tương ứng → bỏ qua.
+
+    `transcript_words`: list (text, start_s, end_s) lấy thẳng từ Whisper word timestamps.
+    Trả {word_index: (start_s, end_s)}; chỉ số khớp WordSpan của scorer (cùng nguồn từ).
+    """
+    if not reference_words or not transcript_words:
+        return {}
+    ref_norm = [w.lower() for w in reference_words]
+    hyp_norm = [_normalize_word(t) for (t, _s, _e) in transcript_words]
+    windows: dict[int, tuple[float, float]] = {}
+    matcher = difflib.SequenceMatcher(a=ref_norm, b=hyp_norm, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            for off in range(i2 - i1):
+                _t, s, e = transcript_words[j1 + off]
+                windows[i1 + off] = (float(s), float(e))
+        elif tag == "replace":
+            for i in range(i1, i2):
+                best_j, best_ratio = -1, -1.0
+                for j in range(j1, j2):
+                    r = difflib.SequenceMatcher(None, ref_norm[i], hyp_norm[j]).ratio()
+                    if r > best_ratio:
+                        best_j, best_ratio = j, r
+                if best_j >= 0:
+                    _t, s, e = transcript_words[best_j]
+                    windows[i] = (float(s), float(e))
+        # 'delete' / 'insert' → không có window
+    return windows
 
 
 @dataclass(frozen=True)
@@ -53,6 +121,12 @@ class WordDiagnostic:
     insertions: int
     penalty: float
     skip_reason: str | None
+    # PR3-0 drift telemetry — cửa sổ thời gian Whisper của từ + phân loại substitution
+    # theo vị trí predicted segment (mặc định để tương thích ngược: không có window).
+    window_start: float | None = None   # None nếu từ không map được sang transcript word
+    window_end: float | None = None
+    sub_inside_window: int = 0          # sub có predicted segment TRONG window → hallucination
+    sub_outside_window: int = 0         # sub có predicted segment NGOÀI window → drift
 
 
 def percentile(values: list[float], p: float) -> float:
@@ -78,12 +152,19 @@ def build_word_diagnostics(
     spans: list[WordSpan] | None,
     result: dict[int, tuple[PhonemePoint, float | None]],
     span_skip_reason: dict[int, str],
+    predicted_times: list[tuple[float, float]] | None = None,
+    word_windows: Mapping[int, tuple[float, float]] | None = None,
+    pad: float = DRIFT_WINDOW_PAD_SEC,
 ) -> list[WordDiagnostic]:
     """THUẦN: dựng WordDiagnostic cho mỗi span từ alignment đã có.
 
     Attribution predicted→từ dùng VỊ TRÍ trong DTW path (không phải match-ratio):
     phoneme predicted khớp ref index trong span → thuộc từ đó; insertion (ref_idx<0)
     gán cho từ liền trước. coverage/confidence chỉ là CHẨN ĐOÁN.
+
+    PR3-0: nếu có `predicted_times` (start,end mỗi predicted segment) + `word_windows`
+    (cửa sổ Whisper theo chỉ số từ), mỗi substitution được phân loại drift-vs-hallucination
+    theo vị trí segment so với window (±pad). Thiếu một trong hai → 0/0 (không phân loại).
     """
     if not spans:
         return []
@@ -96,6 +177,7 @@ def build_word_diagnostics(
 
     word_pred: dict[int, list[int]] = defaultdict(list)  # span k → predicted indices
     word_ins: dict[int, int] = defaultdict(int)
+    pred_for_ref: dict[int, int] = {}  # ref_idx → predicted_idx (cặp diagonal, cho drift)
     last_k = -1
     for pred_idx, ref_idx in path:
         if ref_idx >= 0:
@@ -104,6 +186,8 @@ def build_word_diagnostics(
                 last_k = k
                 if pred_idx >= 0:
                     word_pred[k].append(pred_idx)
+            if pred_idx >= 0:
+                pred_for_ref[ref_idx] = pred_idx
         elif pred_idx >= 0 and last_k >= 0:
             word_pred[last_k].append(pred_idx)  # insertion → từ liền trước
             word_ins[last_k] += 1
@@ -127,6 +211,26 @@ def build_word_diagnostics(
                 dels += 1
             if pen is not None:
                 penalty += pen
+
+        # PR3-0 drift classification: chỉ khi có window cho từ + times cho predicted.
+        win = word_windows.get(k) if word_windows else None
+        sub_in = sub_out = 0
+        if win is not None and predicted_times is not None:
+            w_lo, w_hi = win
+            for i in idxs:
+                point, _pen = result[i]
+                if point.status != "sub":
+                    continue
+                pi = pred_for_ref.get(i)
+                if pi is None or pi >= len(predicted_times):
+                    continue
+                ps, pe = predicted_times[pi]
+                # overlap với [w_lo - pad, w_hi + pad] → trong từ (hallucination).
+                if pe >= w_lo - pad and ps <= w_hi + pad:
+                    sub_in += 1
+                else:
+                    sub_out += 1
+
         diags.append(WordDiagnostic(
             word=span.word,
             index=k,
@@ -141,6 +245,10 @@ def build_word_diagnostics(
             insertions=word_ins.get(k, 0),
             penalty=round(penalty, 4),
             skip_reason=span_skip_reason.get(k),
+            window_start=round(win[0], 3) if win is not None else None,
+            window_end=round(win[1], 3) if win is not None else None,
+            sub_inside_window=sub_in,
+            sub_outside_window=sub_out,
         ))
     return diags
 
@@ -172,10 +280,22 @@ class TelemetryWriter:
         for d in diags:
             if d.skip_reason:
                 reasons[d.skip_reason] += 1
+        # PR3-0: tổng hợp drift-vs-hallucination cho utterance này. drift_fraction =
+        # sub ngoài window / tổng sub đã phân loại; None nếu chưa có window nào (telemetry
+        # bật nhưng thiếu Whisper timestamps / không có script). Gate kill PR3-0 cộng dồn
+        # các con số này qua cả corpus, KHÔNG đọc 1 utterance lẻ.
+        subs_inside = sum(d.sub_inside_window for d in diags)
+        subs_outside = sum(d.sub_outside_window for d in diags)
+        subs_classified = subs_inside + subs_outside
+        drift_fraction = (
+            round(subs_outside / subs_classified, 4) if subs_classified else None
+        )
         lines.append(json.dumps(
             {"schema_version": TELEMETRY_SCHEMA_VERSION, "type": "summary", **ids,
              "words_total": len(diags), "words_skipped": skipped,
-             "skip_reasons": dict(reasons)},
+             "skip_reasons": dict(reasons),
+             "subs_inside_window": subs_inside, "subs_outside_window": subs_outside,
+             "drift_fraction": drift_fraction},
             ensure_ascii=False,
         ))
         try:

@@ -385,6 +385,7 @@ def compute_phoneme_score(
     skips: Mapping[int, SkipDecision] | None = None,
     confidence_knee: float = PHONEME_CONFIDENCE_KNEE,
     diagnostics_sink: Callable[[list[WordDiagnostic]], None] | None = None,
+    word_windows: Mapping[int, tuple[float, float]] | None = None,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -402,6 +403,9 @@ def compute_phoneme_score(
         confidence_knee: ngưỡng confidence để hạ penalty lỗi sub (xem PHONEME_CONFIDENCE_KNEE).
         diagnostics_sink: optional — nhận list[WordDiagnostic] để ghi telemetry (PR2).
             CHỈ để quan sát; KHÔNG ảnh hưởng điểm. None = không tính telemetry (zero overhead).
+        word_windows: optional (PR3-0) — cửa sổ thời gian Whisper theo CHỈ SỐ TỪ chuẩn
+            (khớp reference_spans). CHỈ dùng cho telemetry drift-vs-hallucination; KHÔNG
+            ảnh hưởng điểm. Bỏ qua nếu không có diagnostics_sink.
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -490,11 +494,13 @@ def compute_phoneme_score(
         point_by_ref, reference_phonemes, reference_spans, max_words, span_skip_reason
     )
 
-    # Telemetry (PR2) — DIAGNOSTIC ONLY, chỉ tính khi có sink (zero overhead khi tắt).
+    # Telemetry (PR2/PR3-0) — DIAGNOSTIC ONLY, chỉ tính khi có sink (zero overhead khi tắt).
     if diagnostics_sink is not None:
+        predicted_times = [(s.start, s.end) for s in segments]
         diagnostics_sink(build_word_diagnostics(
             path, predicted_phonemes, predicted_conf, reference_phonemes,
             reference_spans, result, span_skip_reason,
+            predicted_times=predicted_times, word_windows=word_windows,
         ))
 
     # Sort errors by severity (high → medium → low) rồi cap.
