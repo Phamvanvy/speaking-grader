@@ -16,9 +16,10 @@ Architecture (hybrid-ready):
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from .diagnostics import WordDiagnostic
 from .ipa import text_to_ipa_sequence_with_spans
 from .models import PhonemeResult
 from .reliability import SkipDecision
@@ -104,6 +105,7 @@ class HybridPhonemeAnalyzer:
         audio_path: str,
         reference_text: str | None = None,
         skips: Mapping[int, SkipDecision] | None = None,
+        diagnostics_sink: Callable[[list[WordDiagnostic]], None] | None = None,
     ) -> PhonemeResult:
         """Phân tích phonemes trong audio, optional so với reference text.
 
@@ -114,6 +116,8 @@ class HybridPhonemeAnalyzer:
             skips: quyết định bỏ qua từ Recognition Reliability (tầng TRÊN), keyed
                 theo chỉ số từ tham chiếu chuẩn (xem compute_phoneme_score). None =
                 chấm hết. Analyzer chỉ truyền xuống — KHÔNG tự tính reliability.
+            diagnostics_sink: optional sink nhận WordDiagnostic để ghi telemetry (PR2);
+                chỉ truyền xuống scorer, KHÔNG ảnh hưởng điểm.
 
         Returns:
             PhonemeResult với segments, reference_phonemes, score, warning.
@@ -181,6 +185,7 @@ class HybridPhonemeAnalyzer:
                 max_words=self._max_words,
                 skips=skips,
                 confidence_knee=self._confidence_knee,
+                diagnostics_sink=diagnostics_sink,
             )
 
         logger.info(

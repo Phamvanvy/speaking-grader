@@ -112,6 +112,10 @@ class Config:
     # không chấm phoneme (vd Son Tinh→Andy). Ratio cao (mountains→mountain) vẫn chấm.
     # Đặt qua TOEIC_PHONEME_SKIP_RATIO.
     phoneme_skip_ratio: float = 0.6
+    # Telemetry phoneme (PR2): ghi per-word diagnostic JSONL để hiệu chỉnh trên golden
+    # corpus. Chỉ quan sát, KHÔNG ảnh hưởng điểm. Bật qua TOEIC_PHONEME_TELEMETRY=1.
+    phoneme_telemetry_enabled: bool = False
+    phoneme_telemetry_path: str = "outputs/phoneme_telemetry.jsonl"
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
@@ -220,6 +224,12 @@ def load_config() -> Config:
             os.getenv("TOEIC_PHONEME_CONFIDENCE_KNEE", "0.5")
         ),
         phoneme_skip_ratio=float(os.getenv("TOEIC_PHONEME_SKIP_RATIO", "0.6")),
+        phoneme_telemetry_enabled=(
+            os.getenv("TOEIC_PHONEME_TELEMETRY", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_telemetry_path=(
+            os.getenv("TOEIC_PHONEME_TELEMETRY_PATH", "outputs/phoneme_telemetry.jsonl")
+        ),
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},

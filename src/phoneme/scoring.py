@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import bisect
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Final
 
+from .diagnostics import WordDiagnostic, build_word_diagnostics
 from .ipa import (
     deletion_penalty,
     deletion_severity,
@@ -322,8 +323,10 @@ def _align_points(
 ) -> tuple[dict[int, tuple[PhonemePoint, float | None]], int]:
     """Một lượt qua DTW path → (point+penalty cho mỗi reference index, số insertion).
 
+    - Từ bị skip (Recognition Reliability) → "skipped", penalty None — KIỂM TRA TRƯỚC
+      mọi thứ: cả từ không đáng tin thì KHÔNG chấm bất kỳ âm nào, kể cả âm tình cờ khớp
+      (nếu không, âm khớp ngẫu nhiên trong từ rác vẫn lọt vào mẫu số → skip không trọn).
     - phonemes_match (allophone / vowel reduction / function word) → "ok", penalty 0.
-    - Từ ASR nghe nhầm (word ∈ skip) → "skipped", penalty None (loại khỏi điểm).
     - Substitution thật: penalty = (1 - similarity) * conf_factor (confidence thấp →
       hạ penalty vì recognizer không chắc); severity suy từ penalty.
     - Mỗi ref index giữ point TỐT NHẤT nếu path chạm nhiều lần (_better_point).
@@ -338,18 +341,18 @@ def _align_points(
         ref_ph = reference[ref_idx]
         word = ref_word[ref_idx]
         stress = ref_stress[ref_idx]
-        skipped = ref_skipped[ref_idx]
-        if pred_idx >= 0:
+        if ref_skipped[ref_idx]:
+            # Cả từ bị skip → mọi âm "skipped" bất kể có khớp hay không.
+            point = PhonemePoint(symbol=ref_ph, status="skipped", stress=stress)
+            penalty: float | None = None
+        elif pred_idx >= 0:
             pred_ph = predicted[pred_idx]
             conf = predicted_conf[pred_idx] if pred_idx < len(predicted_conf) else 1.0
             if phonemes_match(
                 ref_ph, pred_ph, word=word, reducible=ref_reducible[ref_idx]
             ):
                 point = PhonemePoint(symbol=ref_ph, status="ok", stress=stress)
-                penalty: float | None = 0.0
-            elif skipped:
-                point = PhonemePoint(symbol=ref_ph, status="skipped", stress=stress)
-                penalty = None
+                penalty = 0.0
             else:
                 sim = phoneme_similarity(pred_ph, ref_ph)
                 conf_factor = min(1.0, conf / knee) if knee > 0 else 1.0
@@ -362,9 +365,6 @@ def _align_points(
                     symbol=ref_ph, status="sub", heard=pred_ph,
                     severity=_severity_from_penalty(penalty), stress=stress,
                 )
-        elif skipped:
-            point = PhonemePoint(symbol=ref_ph, status="skipped", stress=stress)
-            penalty = None
         else:
             sev = deletion_severity(ref_ph, is_onset=ref_is_onset[ref_idx], stress=stress)
             penalty = deletion_penalty(ref_ph, is_onset=ref_is_onset[ref_idx], stress=stress)
@@ -384,6 +384,7 @@ def compute_phoneme_score(
     max_words: int = MAX_WORDS_RETURNED,
     skips: Mapping[int, SkipDecision] | None = None,
     confidence_knee: float = PHONEME_CONFIDENCE_KNEE,
+    diagnostics_sink: Callable[[list[WordDiagnostic]], None] | None = None,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -399,6 +400,8 @@ def compute_phoneme_score(
             KHÔNG tự quyết định reliability (không suy từ match-ratio/similarity/penalty).
             Từ bị skip: mọi âm thành "skipped", loại khỏi cả tử số lẫn mẫu số accuracy.
         confidence_knee: ngưỡng confidence để hạ penalty lỗi sub (xem PHONEME_CONFIDENCE_KNEE).
+        diagnostics_sink: optional — nhận list[WordDiagnostic] để ghi telemetry (PR2).
+            CHỈ để quan sát; KHÔNG ảnh hưởng điểm. None = không tính telemetry (zero overhead).
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -486,6 +489,13 @@ def compute_phoneme_score(
     words, words_truncated, words_total = _build_word_details(
         point_by_ref, reference_phonemes, reference_spans, max_words, span_skip_reason
     )
+
+    # Telemetry (PR2) — DIAGNOSTIC ONLY, chỉ tính khi có sink (zero overhead khi tắt).
+    if diagnostics_sink is not None:
+        diagnostics_sink(build_word_diagnostics(
+            path, predicted_phonemes, predicted_conf, reference_phonemes,
+            reference_spans, result, span_skip_reason,
+        ))
 
     # Sort errors by severity (high → medium → low) rồi cap.
     severity_order = {"high": 0, "medium": 1, "low": 2}

@@ -697,6 +697,22 @@ class TestDeNoiseScoring:
         the = next(w for w in skipped.words if w.word == "the")
         assert the.skip_reason is None
 
+    def test_skipped_word_fully_excluded_even_if_phonemes_match(self):
+        # Từ bị skip phải KHÔNG chấm bất kỳ âm nào, kể cả âm tình cờ khớp (regression
+        # cho bug "phonemes_match thắng skipped" → âm khớp lọt vào mẫu số).
+        from src.phoneme.reliability import SkipDecision, SkipReason
+
+        ref = ["ð", "ə", "f", "ɒ", "k", "s"]
+        spans = [WordSpan("the", 0, 2), WordSpan("fox", 2, 6)]
+        score = compute_phoneme_score(
+            self._segs(list(ref)), ref, spans, [None] * 6,  # pred == ref (fox sẽ khớp)
+            skips={1: SkipDecision(1, SkipReason.WHISPER_MISMATCH)},
+        )
+        fox = next(w for w in score.words if w.word == "fox")
+        assert all(p.status == "skipped" for p in fox.phonemes)  # không có "ok"
+        assert score.substitution_count == 0 and score.deletion_count == 0
+        assert score.overall_accuracy == 1.0  # chỉ "the" được chấm (khớp)
+
     def test_skip_keyed_by_index_not_string(self):
         # "the" lặp 3 lần; skip CHỈ occurrence thứ 2 (span index 1) → 2 "the" còn lại
         # vẫn được chấm. Đây là regression cho bug skip-theo-chuỗi.
@@ -770,6 +786,127 @@ class TestRecognitionReliability:
         assert isinstance(skips[1], SkipDecision)
         assert skips[1].word_index == 1
         assert not hasattr(skips[1], "word")
+
+
+# ── Telemetry (PR2): diagnostics — DIAGNOSTIC ONLY, never affects score ───────
+
+from src.phoneme.diagnostics import (
+    TELEMETRY_SCHEMA_VERSION,
+    DiagnosticsContext,
+    TelemetryWriter,
+    WordDiagnostic,
+    build_word_diagnostics,
+    percentile,
+)
+
+
+class TestPercentile:
+    def test_empty(self):
+        assert percentile([], 20) == 0.0
+
+    def test_single(self):
+        assert percentile([0.7], 20) == 0.7
+
+    def test_p20_exposes_low_tail(self):
+        vals = [0.1, 0.2, 0.9, 0.9, 0.9]
+        # p20 thấp dù trung bình cao — đúng mục đích "lộ collapse cục bộ".
+        assert percentile(vals, 20) < (sum(vals) / len(vals))
+
+
+class TestBuildWordDiagnostics:
+    """build_word_diagnostics — THUẦN, tính từ alignment đã có (không quyết định gì)."""
+
+    def _score_with_capture(self, ref, pred, spans, stress=None, **kw):
+        captured: list[list] = []
+        segs = [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1),
+                               confidence=kw.pop("conf", 0.9))
+                for i, p in enumerate(pred)]
+        score = compute_phoneme_score(
+            segs, ref, spans, stress, diagnostics_sink=captured.append, **kw
+        )
+        return score, (captured[0] if captured else [])
+
+    def test_sink_receives_one_diagnostic_per_word(self):
+        ref = ["ð", "ə", "f", "ɒ", "k", "s"]
+        spans = [WordSpan("the", 0, 2), WordSpan("fox", 2, 6)]
+        _score, diags = self._score_with_capture(ref, list(ref), spans, [None] * 6)
+        assert [d.word for d in diags] == ["the", "fox"]
+        assert all(isinstance(d, WordDiagnostic) for d in diags)
+        assert all(d.skip_reason is None for d in diags)
+
+    def test_fields_for_correct_word(self):
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        _score, diags = self._score_with_capture(ref, list(ref), spans, [None] * 4)
+        d = diags[0]
+        assert d.reference_ipa == "fɒks"
+        assert d.predicted_ipa == "fɒks"
+        assert d.matches == 4 and d.substitutions == 0 and d.deletions == 0
+        assert d.coverage == 1.0
+        assert d.penalty == 0.0
+
+    def test_skip_reason_surfaced(self):
+        from src.phoneme.reliability import SkipDecision, SkipReason
+
+        ref = ["ð", "ə", "f", "ɒ", "k", "s"]
+        spans = [WordSpan("the", 0, 2), WordSpan("fox", 2, 6)]
+        _score, diags = self._score_with_capture(
+            ref, ["ð", "ə", "x", "x", "x", "x"], spans, [None] * 6,
+            skips={1: SkipDecision(1, SkipReason.WHISPER_MISMATCH)},
+        )
+        fox = next(d for d in diags if d.word == "fox")
+        assert fox.skip_reason == "whisper_mismatch"
+
+    def test_telemetry_does_not_change_score(self):
+        # Bật/tắt sink → cùng overall_accuracy (telemetry chỉ quan sát).
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        segs = [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+                for i, p in enumerate(["f", "ɒ", "t", "s"])]  # 1 sub
+        a = compute_phoneme_score(segs, ref, spans)
+        b = compute_phoneme_score(segs, ref, spans, diagnostics_sink=lambda d: None)
+        assert a.overall_accuracy == b.overall_accuracy
+
+    def test_no_sink_is_noop(self):
+        # Không truyền sink → không lỗi, vẫn chấm bình thường.
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        segs = [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+                for i, p in enumerate(ref)]
+        assert compute_phoneme_score(segs, ref, spans).overall_accuracy == 1.0
+
+
+class TestTelemetryWriter:
+    def test_writes_jsonl_with_schema_and_summary(self, tmp_path):
+        import json
+
+        path = tmp_path / "telemetry.jsonl"
+        writer = TelemetryWriter(path)
+        ctx = DiagnosticsContext(session_id="s1", audio_id="a.wav", utterance_id="q1")
+        diags = [
+            WordDiagnostic("the", 0, "ðə", "ðə", 1.0, 0.9, 0.9, 2, 0, 0, 0, 0.0, None),
+            WordDiagnostic("fox", 1, "fɒks", "", 0.0, 0.0, 0.0, 0, 0, 0, 0, 0.0,
+                           "whisper_mismatch"),
+        ]
+        writer.emit(ctx, diags)
+        lines = [json.loads(ln) for ln in path.read_text(encoding="utf-8").splitlines()]
+        assert len(lines) == 3  # 2 word + 1 summary
+        assert all(ln["schema_version"] == TELEMETRY_SCHEMA_VERSION for ln in lines)
+        assert all(ln["session_id"] == "s1" for ln in lines)
+        word_lines = [ln for ln in lines if ln["type"] == "word"]
+        assert {ln["word"] for ln in word_lines} == {"the", "fox"}
+        summary = next(ln for ln in lines if ln["type"] == "summary")
+        assert summary["words_total"] == 2
+        assert summary["words_skipped"] == 1
+        assert summary["skip_reasons"] == {"whisper_mismatch": 1}
+
+    def test_emit_appends(self, tmp_path):
+        path = tmp_path / "t.jsonl"
+        ctx = DiagnosticsContext("s", "a", "u")
+        TelemetryWriter(path).emit(ctx, [])
+        TelemetryWriter(path).emit(ctx, [])
+        # 2 lần emit (mỗi lần 1 dòng summary, 0 word) → 2 dòng.
+        assert len(path.read_text(encoding="utf-8").splitlines()) == 2
 
 
 # ── Model serialization tests ────────────────────────────────────────────────
