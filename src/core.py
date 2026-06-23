@@ -162,6 +162,7 @@ def grade_response(
             phoneme_analyzer = HybridPhonemeAnalyzer(
                 wav2vec_model=config.phoneme_wav2vec_model,
                 device=config.phoneme_device,
+                max_words=config.phoneme_max_words,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về

@@ -96,6 +96,23 @@ _whisperx_load_lock = threading.Lock()
 _asr_inference_lock = threading.Lock()
 
 
+def _split_cuda_device(device: str) -> tuple[str, int]:
+    """Tách device CUDA kèm chỉ số GPU: 'cuda:1' → ('cuda', 1); 'cuda' → ('cuda', 0).
+
+    Cần vì faster-whisper/ctranslate2 và whisperx.load_model nhận device='cuda'
+    KÈM device_index riêng — chúng KHÔNG hiểu chuỗi 'cuda:1'. Các device khác
+    ('cpu', 'auto') trả index 0 và giữ nguyên tên. Dùng để chạy Whisper trên GPU
+    này còn wav2vec trên GPU kia (vd WHISPER_DEVICE=cuda:0, TOEIC_PHONEME_DEVICE=cuda:1).
+    """
+    d = (device or "").strip().lower()
+    if d.startswith("cuda:"):
+        try:
+            return "cuda", int(d.split(":", 1)[1])
+        except ValueError:
+            return "cuda", 0
+    return d or "cpu", 0
+
+
 def _resolve_torch_device(requested_device: str, backend_name: str) -> str:
     """Torch-based backends should degrade to CPU if CUDA is unavailable.
 
@@ -105,7 +122,9 @@ def _resolve_torch_device(requested_device: str, backend_name: str) -> str:
     """
     requested = (requested_device or "").strip().lower() or "auto"
 
-    if requested not in {"auto", "cuda"}:
+    # Chỉ phân giải các yêu cầu CUDA (auto / cuda / cuda:N). Còn lại (vd 'cpu')
+    # giữ nguyên. 'cuda:N' được giữ lại nguyên chỉ số khi CUDA khả dụng.
+    if not (requested == "auto" or requested.startswith("cuda")):
         return requested
 
     try:
@@ -127,7 +146,8 @@ def _resolve_torch_device(requested_device: str, backend_name: str) -> str:
                 torch_cuda_build,
                 int(torch.cuda.device_count()),
             )
-        return "cuda"
+            return "cuda"
+        return requested  # giữ nguyên 'cuda' hoặc 'cuda:N' (chọn đúng GPU)
 
     # Không khả dụng CUDA: log rõ để tránh hiểu nhầm "máy có GPU nhưng torch vẫn CPU-only".
     details = (
@@ -135,7 +155,7 @@ def _resolve_torch_device(requested_device: str, backend_name: str) -> str:
         if not has_cuda_build
         else "CUDA runtime không khả dụng trong torch"
     )
-    if requested == "cuda":
+    if requested.startswith("cuda"):
         logger.warning(
             "%s: yêu cầu cuda nhưng phải hạ xuống cpu (%s, torch=%s, cuda_build=%s).",
             backend_name,
@@ -157,20 +177,27 @@ def _resolve_torch_device(requested_device: str, backend_name: str) -> str:
 def _get_model(model_size: str, device: str):
     key = (model_size, device)
     if key not in _model_cache:
-        if device == "cuda":
+        # 'cuda:1' → base='cuda', index=1: ctranslate2 cần device + device_index
+        # tách rời (không hiểu chuỗi 'cuda:1').
+        base, device_index = _split_cuda_device(device)
+        if base == "cuda":
             _register_cuda_dll_dirs()
         # Import trong hàm để --no-ai và unit test không bắt buộc cài faster-whisper
         from faster_whisper import WhisperModel
 
-        compute_type = "float16" if device == "cuda" else "int8"
+        compute_type = "float16" if base == "cuda" else "int8"
         logger.info(
-            "Đang nạp Whisper model=%s device=%s compute_type=%s",
+            "Đang nạp Whisper model=%s device=%s index=%d compute_type=%s",
             model_size,
-            device,
+            base,
+            device_index,
             compute_type,
         )
         _model_cache[key] = WhisperModel(
-            model_size, device=device, compute_type=compute_type
+            model_size,
+            device=base,
+            device_index=device_index,
+            compute_type=compute_type,
         )
     return _model_cache[key]
 
@@ -285,14 +312,17 @@ def _transcribe_whisperx(
         ) from e
 
     device = _resolve_torch_device(device, "whisperx")
-    if device == "cuda":
+    # 'cuda:1' → base='cuda', index=1 cho load_model (ctranslate2); chuỗi 'cuda:1'
+    # đầy đủ vẫn dùng cho align (torch hiểu trực tiếp).
+    base, device_index = _split_cuda_device(device)
+    if base == "cuda":
         # WhisperX dùng faster-whisper/ctranslate2 bên dưới → cần cuBLAS/cuDNN
         # DLL trên PATH như nhánh faster_whisper, nếu không sẽ lỗi lúc encode.
         _register_cuda_dll_dirs()
 
     # WhisperX cần audio waveform thay vì path string thuần.
     audio = _load_audio_for_whisperx(audio_path, whisperx)
-    compute_type = "float16" if device == "cuda" else "int8"
+    compute_type = "float16" if base == "cuda" else "int8"
 
     # Nạp ASR model 1 lần rồi cache: biết trước language thì truyền vào để bỏ
     # bước tự nhận diện ngôn ngữ mỗi file (tốn thêm thời gian, log "language
@@ -305,14 +335,16 @@ def _transcribe_whisperx(
             model = _whisperx_model_cache.get(model_key)
             if model is None:
                 logger.info(
-                    "Đang nạp WhisperX model=%s device=%s compute_type=%s",
+                    "Đang nạp WhisperX model=%s device=%s index=%d compute_type=%s",
                     model_size,
-                    device,
+                    base,
+                    device_index,
                     compute_type,
                 )
                 model = whisperx.load_model(
                     model_size,
-                    device=device,
+                    device=base,
+                    device_index=device_index,
                     compute_type=compute_type,
                     language=language or None,
                     vad_method="silero",
@@ -510,12 +542,14 @@ def _transcribe_insanely_fast_whisper(
         ) from e
 
     device = _resolve_torch_device(device, "insanely_fast_whisper")
+    base, _device_index = _split_cuda_device(device)
 
     model_id = _resolve_ifw_model_id(model_size)
     key = (model_id, device)
     if key not in _ifw_pipe_cache:
-        torch_dtype = torch.float16 if device == "cuda" else torch.float32
-        device_arg: int | str = 0 if device == "cuda" else "cpu"
+        torch_dtype = torch.float16 if base == "cuda" else torch.float32
+        # transformers pipeline nhận chuỗi torch device ('cuda:1') hoặc 'cpu'.
+        device_arg: int | str = device if base == "cuda" else "cpu"
         logger.info(
             "Đang nạp IFW pipeline model=%s device=%s dtype=%s",
             model_id,

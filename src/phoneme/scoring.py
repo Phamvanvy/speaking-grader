@@ -230,6 +230,7 @@ def _build_word_details(
     reference: list[str],
     spans: list[WordSpan] | None,
     reference_stress: list[str | None] | None = None,
+    max_words: int = MAX_WORDS_RETURNED,
 ) -> tuple[list[WordPronunciation], bool, int]:
     """Từ DTW path + reference_spans → phát âm chi tiết từng từ.
 
@@ -282,7 +283,7 @@ def _build_word_details(
         )
 
     total = len(spans)
-    kept = spans[:MAX_WORDS_RETURNED]
+    kept = spans[:max_words]
     truncated = total > len(kept)
 
     words: list[WordPronunciation] = []
@@ -323,6 +324,7 @@ def compute_phoneme_score(
     reference_phonemes: list[str],
     reference_spans: list[WordSpan] | None = None,
     reference_stress: list[str | None] | None = None,
+    max_words: int = MAX_WORDS_RETURNED,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -368,7 +370,7 @@ def compute_phoneme_score(
         errors = _annotate_words(errors, reference_spans)
         # Path rỗng → _build_word_details gán mọi âm thành "del"
         words, words_truncated, words_total = _build_word_details(
-            [], [], reference_phonemes, reference_spans, reference_stress
+            [], [], reference_phonemes, reference_spans, reference_stress, max_words
         )
         return PhonemeScore(
             overall_accuracy=0.0,
@@ -395,7 +397,7 @@ def compute_phoneme_score(
 
     # Phát âm chi tiết từng từ (IPA full + từng âm) cho UI kiểu ELSA.
     words, words_truncated, words_total = _build_word_details(
-        path, predicted_phonemes, reference_phonemes, reference_spans, reference_stress
+        path, predicted_phonemes, reference_phonemes, reference_spans, reference_stress, max_words
     )
 
     # Count by type

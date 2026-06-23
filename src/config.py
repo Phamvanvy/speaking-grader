@@ -102,6 +102,9 @@ class Config:
     phoneme_device: str = "cpu"
     phoneme_confidence_threshold: float = 0.1
     phoneme_min_duration_sec: float = 0.1
+    # Số từ tối đa hiển thị trong phoneme word-detail. Cắt theo ranh giới từ để
+    # tránh payload quá lớn với bài dài. Đặt qua TOEIC_PHONEME_MAX_WORDS.
+    phoneme_max_words: int = 200
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
@@ -144,7 +147,9 @@ def load_config() -> Config:
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         model=os.getenv("TOEIC_MODEL", "claude-sonnet-4-6"),
         whisper_model=whisper_model,
-        # auto: ưu tiên CUDA khi môi trường torch hỗ trợ, fallback CPU.
+        # auto: ưu tiên CUDA khi môi trường torch hỗ trợ, fallback CPU. Chấp nhận
+        # 'cuda:N' để ghim Whisper vào 1 GPU cụ thể (vd WHISPER_DEVICE=cuda:0 còn
+        # TOEIC_PHONEME_DEVICE=cuda:1 → ASR và wav2vec ở 2 card khác nhau).
         whisper_device=os.getenv("WHISPER_DEVICE", "auto"),
         backend=(os.getenv("TOEIC_BACKEND", "anthropic") or "anthropic").lower(),
         default_exam=default_exam,
@@ -194,6 +199,8 @@ def load_config() -> Config:
             )
             or "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
         ),
+        # 'cpu' | 'cuda' | 'cuda:N'. Đặt 'cuda:1' để wav2vec chạy GPU thứ 2, tách
+        # khỏi Whisper (WHISPER_DEVICE=cuda:0) → tận dụng 2 card song song khi chấm batch.
         phoneme_device=os.getenv("TOEIC_PHONEME_DEVICE", "cpu") or "cpu",
         phoneme_confidence_threshold=float(
             os.getenv("TOEIC_PHONEME_CONFIDENCE_THRESHOLD", "0.1")
@@ -201,6 +208,7 @@ def load_config() -> Config:
         phoneme_min_duration_sec=float(
             os.getenv("TOEIC_PHONEME_MIN_DURATION_SEC", "0.1")
         ),
+        phoneme_max_words=int(os.getenv("TOEIC_PHONEME_MAX_WORDS", "200")),
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},

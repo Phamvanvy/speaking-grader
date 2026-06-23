@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .ipa import text_to_ipa_sequence_with_spans
 from .models import PhonemeResult
-from .scoring import compute_phoneme_score
+from .scoring import MAX_WORDS_RETURNED, compute_phoneme_score
 from .wav2vec_backend import (
     DEFAULT_WAV2VEC_MODEL,
     MIN_PHONEME_DURATION_SEC,
@@ -40,6 +40,7 @@ class HybridPhonemeAnalyzer:
         min_phoneme_duration: segment ngắn nhất được giữ (giây)
         confidence_threshold: probability threshold cho phoneme
         enable_phoneme_analysis: bật/tắt phoneme analysis (mặc định: bật)
+        max_words: số từ tối đa trả về trong word-detail (cắt theo ranh giới từ)
 
     Usage:
         # Basic
@@ -67,8 +68,10 @@ class HybridPhonemeAnalyzer:
         min_phoneme_duration: float = MIN_PHONEME_DURATION_SEC,
         confidence_threshold: float = PHONEME_CONFIDENCE_THRESHOLD,
         enable_phoneme_analysis: bool = True,
+        max_words: int = MAX_WORDS_RETURNED,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
+        self._max_words = max_words
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
@@ -162,7 +165,8 @@ class HybridPhonemeAnalyzer:
         score = None
         if reference_phonemes and segments:
             score = compute_phoneme_score(
-                segments, reference_phonemes, reference_spans, reference_stress
+                segments, reference_phonemes, reference_spans, reference_stress,
+                max_words=self._max_words,
             )
 
         logger.info(

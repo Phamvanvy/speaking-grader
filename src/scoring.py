@@ -262,7 +262,13 @@ short or off-topic answer must get a LOW task_completion.
 task_completion higher than that floor.
 
 {final_score_block}
-Give concrete, actionable suggestions for each criterion.
+
+SUGGESTIONS (required for EVERY criterion):
+- The `suggestions` list of every criterion MUST contain 2-4 concrete, \
+actionable improvement tips the test-taker can practice. NEVER leave it empty — \
+even a strong criterion has something to refine.
+- Each suggestion must tie back to the specific weakness or evidence named in \
+that criterion's justification. Avoid generic advice like "practice more".
 
 VOCABULARY CORRECTIONS (lexical_resource / vocabulary criterion):
 - For the lexical_resource (IELTS) / vocabulary (TOEIC) criterion, populate its \

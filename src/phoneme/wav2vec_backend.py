@@ -228,6 +228,16 @@ def _load_id_to_token(model_id: str, model: Any) -> dict[int, str]:
         return {int(idx): tok for tok, idx in model.config.label2id.items()}
 
 
+def _is_cuda_device(device: str) -> bool:
+    """True nếu device là CUDA ('cuda' hoặc 'cuda:N').
+
+    Cần vì code cũ so sánh cứng `device == "cuda"` → đặt TOEIC_PHONEME_DEVICE=cuda:1
+    (chạy wav2vec trên GPU thứ 2) sẽ âm thầm rớt về CPU. torch nhận thẳng chuỗi
+    'cuda:1' cho .to()/.device nên chỉ cần nhận diện đúng prefix là đủ.
+    """
+    return (device or "").strip().lower().startswith("cuda")
+
+
 def _get_wav2vec_model(
     model_id: str, device: str = "cpu"
 ) -> tuple[Any, Any, dict[int, str]]:
@@ -249,8 +259,8 @@ def _get_wav2vec_model(
                 "Cài: pip install torch transformers"
             ) from e
 
-        torch_device = torch.device(device) if device != "cpu" else torch.device("cpu")
-        dtype = torch.float16 if device == "cuda" else torch.float32
+        is_cuda = _is_cuda_device(device)
+        dtype = torch.float16 if is_cuda else torch.float32
 
         logger.info(
             "Đang nạp wav2vec model=%s device=%s (có thể mất 1-2 phút lần đầu)...",
@@ -265,8 +275,8 @@ def _get_wav2vec_model(
             model_id,
             torch_dtype=dtype,
         )
-        if device == "cuda" and torch.cuda.is_available():
-            model = model.to("cuda")
+        if is_cuda and torch.cuda.is_available():
+            model = model.to(device)  # 'cuda' hoặc 'cuda:N' — chọn đúng GPU
         model.eval()
 
         id_to_token = _load_id_to_token(model_id, model)
@@ -405,7 +415,7 @@ class Wav2VecPhonemePredictor:
             import torch
 
             # Free CUDA memory before loading model (helps avoid OOM with Whisper)
-            if self.device == "cuda" and torch.cuda.is_available():
+            if _is_cuda_device(self.device) and torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 free_mem = torch.cuda.mem_get_info()[0] / (1024**3)
                 logger.debug("CUDA free memory before wav2vec: %.2f GB", free_mem)
@@ -424,8 +434,8 @@ class Wav2VecPhonemePredictor:
             input_values = inputs.input_values
 
             # Move input to device and cast precision to match model
-            if self.device == "cuda" and torch.cuda.is_available():
-                input_values = input_values.to("cuda")
+            if _is_cuda_device(self.device) and torch.cuda.is_available():
+                input_values = input_values.to(self.device)
                 
             # --- ĐOẠN THÊM VÀO ĐỂ FIX LỖI ---
             # Kiểm tra xem tham số của model đang dùng kiểu dữ liệu nào (float16 hay float32)
@@ -466,7 +476,7 @@ class Wav2VecPhonemePredictor:
             )
 
             # Free CUDA memory after prediction
-            if self.device == "cuda" and torch.cuda.is_available():
+            if _is_cuda_device(self.device) and torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 free_mem = torch.cuda.mem_get_info()[0] / (1024**3)
                 logger.debug("CUDA free memory after wav2vec: %.2f GB", free_mem)
@@ -483,7 +493,7 @@ class Wav2VecPhonemePredictor:
 
         except RuntimeError as e:
             # CUDA OOM: suggest CPU fallback
-            if self.device == "cuda" and "cuda" in str(e).lower():
+            if _is_cuda_device(self.device) and "cuda" in str(e).lower():
                 logger.error(
                     "wav2vec CUDA OOM for '%s': %s\n"
                     "Khắc phục: đặt TOEIC_PHONEME_DEVICE=cpu để chạy trên CPU, "

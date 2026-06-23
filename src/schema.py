@@ -44,7 +44,13 @@ class CriterionScore(BaseModel):
     )
     justification: str = Field(description="Lý do chấm, dựa trên số liệu + transcript")
     suggestions: list[str] = Field(
-        default_factory=list, description="Gợi ý cải thiện cụ thể"
+        default_factory=list,
+        description=(
+            "BẮT BUỘC cho MỌI tiêu chí: 2-4 gợi ý cải thiện cụ thể, hành động "
+            "được (mỗi phần tử là một câu). KHÔNG để trống — luôn nêu được ít "
+            "nhất vài điều thí sinh có thể luyện để lên điểm. Mỗi gợi ý phải bám "
+            "vào điểm yếu/bằng chứng đã nêu trong justification, không nói chung chung."
+        ),
     )
     corrections: list[LexicalCorrection] = Field(
         default_factory=list,

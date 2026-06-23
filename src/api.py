@@ -616,9 +616,11 @@ async def grade_batch(
                 logger.exception("Lỗi khi chấm %s", filename)
                 return {"index": idx, "audio_filename": filename, "error": str(e)}
 
+    batch_started = perf_counter()
     results = await asyncio.gather(
         *(_one(i, name, data, suffix) for i, (name, data, suffix) in enumerate(items))
     )
+    total_ms = int((perf_counter() - batch_started) * 1000)
     succeeded = sum(1 for r in results if "result" in r)
     return {
         "exam": exam,
@@ -628,6 +630,9 @@ async def grade_batch(
         "succeeded": succeeded,
         "failed": len(results) - succeeded,
         "concurrency": concurrency,
+        # Wall-clock của cả batch (các file chạy song song theo `concurrency`,
+        # nên giá trị này thường nhỏ hơn tổng thời gian từng file).
+        "total_processing_time_ms": total_ms,
         "results": results,
     }
 

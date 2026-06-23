@@ -44,7 +44,7 @@ function examConfig(exam) {
     return EXAM_CONFIG[exam] || EXAM_CONFIG.toeic;
 }
 
-// Holds the most recent /grade-batch response so "Export CSV" can rebuild it.
+// Holds the most recent /grade-batch response so "Print / PDF" can rebuild a report.
 let lastBatchData = null;
 
 // Holds the most recent single /grade response (+ the file name it came from)
@@ -918,6 +918,24 @@ function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
     return html;
 }
 
+// Milliseconds → human time. <1s stays in ms; otherwise seconds (or m:ss).
+function fmtMs(ms) {
+    const n = Number(ms) || 0;
+    if (n < 1000) return `${n}ms`;
+    const sec = n / 1000;
+    if (sec < 60) return `${sec.toFixed(1)}s`;
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60);
+    return `${m}m${String(s).padStart(2, '0')}s`;
+}
+
+// Wall-clock a single file took, pulled from its telemetry (camelCase wrapper
+// key set by the API, falling back to the engine's snake_case total).
+function itemProcessingMs(result) {
+    const tel = (result && result.telemetry) || {};
+    return tel.totalProcessingTimeMs ?? tel.pipeline_total_ms ?? null;
+}
+
 function telemetryHtml(telemetry) {
     const tel = telemetry || {};
     const steps = tel.step_timings_ms || {};
@@ -970,9 +988,12 @@ function showBatchResult(data) {
                <span>⚠️ ${pronOnlyCount} bài chỉ chấm phát âm do thiếu đề bài.</span>
            </div>`
         : '';
+    const batchTime = data.total_processing_time_ms != null
+        ? ` · ⏱ ${fmtMs(data.total_processing_time_ms)}${data.concurrency > 1 ? ` (×${data.concurrency})` : ''}`
+        : '';
     document.getElementById('batch-summary').innerHTML = `
         <div class="status-bar ${data.failed ? 'info' : 'success'}" style="justify-content:center;">
-            <span>${data.succeeded}/${data.count} graded${data.failed ? ` · ${data.failed} failed` : ''} · exam: ${escapeHtml(cfg.label)} · type: ${escapeHtml(data.question_type)} · mode: ${escapeHtml(data.mode_requested)}</span>
+            <span>${data.succeeded}/${data.count} graded${data.failed ? ` · ${data.failed} failed` : ''} · exam: ${escapeHtml(cfg.label)} · type: ${escapeHtml(data.question_type)} · mode: ${escapeHtml(data.mode_requested)}${batchTime}</span>
         </div>${pronOnlyNote}`;
 
     const results = (data.results || []).slice().sort((a, b) => a.index - b.index);
@@ -987,10 +1008,15 @@ function showBatchResult(data) {
         const pronOnly = !!r.pronunciation_only;
         const score = pronOnly ? '🔊' : (r.scores?.[cfg.scoreField] ?? '--');
         const feedback = r.scores?.summary_feedback || (pronOnly ? r.notice : '');
+        const ms = itemProcessingMs(r);
+        const timeTag = ms != null
+            ? `<span style="color:#888;font-size:0.85rem;white-space:nowrap;">⏱ ${fmtMs(ms)}</span>`
+            : '';
         return `<details class="batch-result">
             <summary style="cursor:pointer;display:flex;align-items:center;gap:0.75rem;list-style:none;">
                 <span class="batch-score" style="margin:0;" title="${pronOnly ? 'Chỉ chấm phát âm' : ''}">${score}</span>
                 <span class="filename" style="margin:0;flex:1;">📄 ${escapeHtml(item.audio_filename)}</span>
+                ${timeTag}
                 <span style="color:#888;font-size:0.85rem;">▼ details</span>
             </summary>
             <div style="margin-top:0.85rem;">
@@ -1015,8 +1041,8 @@ function closeBatchResult() {
     document.getElementById('batch-result').classList.remove('visible');
 }
 
-// ── CSV export (shared by single & batch) ─────────────────────────────
-// One row per audio file. Suitable for opening a whole class in Excel.
+// ── CSV export (single result) ────────────────────────────────────────
+// One row per audio file. Suitable for opening in Excel.
 const CSV_COLUMNS = [
     'index', 'filename', 'status', 'exam',
     'estimated_toeic_score', 'estimated_ielts_band',
@@ -1091,20 +1117,6 @@ function downloadBlob(blob, filename) {
     URL.revokeObjectURL(objectUrl);
 }
 
-function exportBatchCsv() {
-    if (!lastBatchData || !Array.isArray(lastBatchData.results) || lastBatchData.results.length === 0) {
-        alert('No batch results to export. Grade a batch first.');
-        return;
-    }
-    const cfg = examConfig(lastBatchData.exam);
-    const rows = lastBatchData.results
-        .slice()
-        .sort((a, b) => a.index - b.index)
-        .map(item => resultRow(item, lastBatchData.exam));
-    const blob = new Blob([buildCsv(rows)], { type: 'text/csv;charset=utf-8;' });
-    downloadBlob(blob, `${cfg.label.toLowerCase()}-batch-${rows.length}-${fileStamp()}.csv`);
-}
-
 function exportSingleCsv() {
     if (!lastSingleData) {
         alert('No result to export. Grade a file first.');
@@ -1138,32 +1150,10 @@ function reportCriteriaHtml(scores, cfg) {
     return `<h2>Scores Breakdown</h2>${items}`;
 }
 
-function printSingleReport() {
-    if (!lastSingleData) {
-        alert('No result to export. Grade a file first.');
-        return;
-    }
-    const data = lastSingleData;
-    const cfg = examConfig(data.exam);
-    const s = data.scores || {};
-    const f = data.features || {};
-    const overall = s[cfg.scoreField];
-    const filename = data.audio_filename || lastSingleFilename || 'recording';
-
-    const featuresHtml = featureTiles(f).map(t =>
-        `<div class="tile"><div class="tval">${escapeHtml(t.value)}</div><div class="tname">${escapeHtml(t.name)}</div></div>`
-    ).join('');
-
-    const summaryRows = [
-        ['Task Completion', s.task_completion],
-        ['Content Relevance', s.content_relevance],
-    ].filter(([, v]) => v != null && v !== '')
-     .map(([k, v]) => `<tr><td>${k}</td><td>${escapeHtml(v)}</td></tr>`).join('');
-
-    const html = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
-<title>${escapeHtml(cfg.label)} Speaking Report — ${escapeHtml(filename)}</title>
-<style>
+// Shared CSS for the printable single / batch reports (kept identical so a
+// class export looks like the individual ones).
+function reportStyles() {
+    return `
   * { box-sizing: border-box; }
   body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #1f2937; margin: 2rem; line-height: 1.5; }
   h1 { font-size: 1.5rem; margin: 0 0 0.25rem; }
@@ -1203,8 +1193,45 @@ function printSingleReport() {
   .phoneme-table th { color: #92400e; font-size: 0.8rem; font-weight: 600; }
   .phoneme-table__word { font-weight: 600; color: #333; }
   .phoneme-detail td:last-child { text-align: left; font-weight: 400; }
-  @media print { body { margin: 1rem; } h2 { break-after: avoid; } .crit, .tile, .phoneme-word, .phoneme-table tr { break-inside: avoid; } }
-</style></head>
+  /* ── Batch report extras ── */
+  .overview thead th { text-align: left; font-size: 0.8rem; color: #6b7280; border-bottom: 2px solid #4f46e5; padding: 0.4rem 0.5rem; }
+  .overview td { padding: 0.45rem 0.5rem; vertical-align: top; }
+  .overview .col-idx { color: #9ca3af; width: 2.2rem; }
+  .overview .col-score { text-align: right; font-weight: 700; color: #4f46e5; white-space: nowrap; }
+  .overview .col-time { text-align: right; color: #6b7280; font-size: 0.85rem; white-space: nowrap; }
+  .overview .col-fb { font-weight: 400; color: #4b5563; font-size: 0.85rem; }
+  .overview .err { color: #b91c1c; font-weight: 600; }
+  .file-head { background: #4f46e5; color: #fff; border-radius: 8px; padding: 0.6rem 1rem; margin: 0 0 0.5rem; font-weight: 700; font-size: 1.15rem; }
+  @media print { body { margin: 1rem; } h2 { break-after: avoid; } .crit, .tile, .phoneme-word, .phoneme-table tr { break-inside: avoid; }
+    section.file { break-before: page; } section.file:first-of-type { break-before: auto; } }`;
+}
+
+function printSingleReport() {
+    if (!lastSingleData) {
+        alert('No result to export. Grade a file first.');
+        return;
+    }
+    const data = lastSingleData;
+    const cfg = examConfig(data.exam);
+    const s = data.scores || {};
+    const f = data.features || {};
+    const overall = s[cfg.scoreField];
+    const filename = data.audio_filename || lastSingleFilename || 'recording';
+
+    const featuresHtml = featureTiles(f).map(t =>
+        `<div class="tile"><div class="tval">${escapeHtml(t.value)}</div><div class="tname">${escapeHtml(t.name)}</div></div>`
+    ).join('');
+
+    const summaryRows = [
+        ['Task Completion', s.task_completion],
+        ['Content Relevance', s.content_relevance],
+    ].filter(([, v]) => v != null && v !== '')
+     .map(([k, v]) => `<tr><td>${k}</td><td>${escapeHtml(v)}</td></tr>`).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>${escapeHtml(cfg.label)} Speaking Report — ${escapeHtml(filename)}</title>
+<style>${reportStyles()}</style></head>
 <body>
   <h1>${escapeHtml(cfg.label)} Speaking Report</h1>
   <div class="meta">File: ${escapeHtml(filename)} · Generated ${escapeHtml(new Date().toLocaleString())}</div>
@@ -1232,6 +1259,105 @@ function printSingleReport() {
 
   <h2>Feedback</h2>
   <p class="body">${escapeHtml(s.summary_feedback || 'No feedback available')}</p>
+
+  <script>window.onload = function () { window.print(); };<\/script>
+</body></html>`;
+
+    const win = window.open('', '_blank');
+    if (!win) {
+        alert('Popup blocked. Allow popups for this site to print the report.');
+        return;
+    }
+    win.document.write(html);
+    win.document.close();
+}
+
+// ── Printable report (batch results → Print / Save as PDF) ────────────
+// An overview table (one row per file) followed by a full per-file report,
+// each file on its own page. Replaces the old CSV export.
+function printBatchReport() {
+    if (!lastBatchData || !Array.isArray(lastBatchData.results) || lastBatchData.results.length === 0) {
+        alert('No batch results to export. Grade a batch first.');
+        return;
+    }
+    const data = lastBatchData;
+    const cfg = examConfig(data.exam);
+    const results = data.results.slice().sort((a, b) => a.index - b.index);
+
+    // Overview table — at-a-glance score + time + feedback per file.
+    const overviewRows = results.map(item => {
+        if (item.error) {
+            return `<tr><td class="col-idx">${item.index}</td>
+                <td>${escapeHtml(item.audio_filename)}</td>
+                <td class="col-score err">error</td>
+                <td class="col-time">—</td>
+                <td class="col-fb err">${escapeHtml(item.error)}</td></tr>`;
+        }
+        const r = item.result || {};
+        const pronOnly = !!r.pronunciation_only;
+        const score = pronOnly ? '🔊 pron.' : escapeHtml(r.scores?.[cfg.scoreField] ?? '--');
+        const fb = r.scores?.summary_feedback || (pronOnly ? r.notice : '') || '';
+        const ms = itemProcessingMs(r);
+        return `<tr><td class="col-idx">${item.index}</td>
+            <td>${escapeHtml(item.audio_filename)}</td>
+            <td class="col-score">${score}</td>
+            <td class="col-time">${ms != null ? fmtMs(ms) : '—'}</td>
+            <td class="col-fb">${escapeHtml(fb)}</td></tr>`;
+    }).join('');
+
+    // Per-file detail sections — same layout as the single report.
+    const detailSections = results.map(item => {
+        const head = `<div class="file-head">#${item.index} · ${escapeHtml(item.audio_filename)}</div>`;
+        if (item.error) {
+            return `<section class="file">${head}
+                <p class="body err">❌ ${escapeHtml(item.error)}</p></section>`;
+        }
+        const r = item.result || {};
+        const s = r.scores || {};
+        const f = r.features || {};
+        const pronOnly = !!r.pronunciation_only;
+        const overall = s[cfg.scoreField];
+        const featuresHtml = featureTiles(f).map(t =>
+            `<div class="tile"><div class="tval">${escapeHtml(t.value)}</div><div class="tname">${escapeHtml(t.name)}</div></div>`
+        ).join('');
+        const summaryRows = [
+            ['Task Completion', s.task_completion],
+            ['Content Relevance', s.content_relevance],
+        ].filter(([, v]) => v != null && v !== '')
+         .map(([k, v]) => `<tr><td>${k}</td><td>${escapeHtml(v)}</td></tr>`).join('');
+        return `<section class="file">
+            ${head}
+            ${pronOnly
+                ? `<div class="overall"><span class="lbl">⚠️ ${escapeHtml(r.notice || 'Chỉ chấm phát âm (chưa có đề bài).')}</span></div>`
+                : `<div class="overall"><span class="big">${escapeHtml(overall ?? '--')}</span><span class="lbl">${escapeHtml(cfg.overallLabel)} (max ${cfg.overallMax})</span></div>`}
+            ${summaryRows ? `<table>${summaryRows}</table>` : ''}
+            <h2>Transcript</h2>
+            <p class="body">${escapeHtml(r.transcript || 'No transcript available')}</p>
+            <h2>Features</h2>
+            <div class="tiles">${featuresHtml}</div>
+            ${reportCriteriaHtml(s, cfg)}
+            ${phonemeErrorsHtml(r.phoneme)}
+            ${s.score_rationale ? `<h2>Score Rationale</h2><p class="body">${escapeHtml(s.score_rationale)}</p>` : ''}
+            <h2>Feedback</h2>
+            <p class="body">${escapeHtml(s.summary_feedback || (pronOnly ? r.notice : '') || 'No feedback available')}</p>
+        </section>`;
+    }).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>${escapeHtml(cfg.label)} Batch Speaking Report</title>
+<style>${reportStyles()}</style></head>
+<body>
+  <h1>${escapeHtml(cfg.label)} Batch Speaking Report</h1>
+  <div class="meta">${data.succeeded}/${data.count} graded${data.failed ? ` · ${data.failed} failed` : ''} · type: ${escapeHtml(data.question_type)} · mode: ${escapeHtml(data.mode_requested)}${data.total_processing_time_ms != null ? ` · ⏱ ${fmtMs(data.total_processing_time_ms)}${data.concurrency > 1 ? ` (×${data.concurrency})` : ''}` : ''} · Generated ${escapeHtml(new Date().toLocaleString())}</div>
+
+  <h2>Overview</h2>
+  <table class="overview">
+    <thead><tr><th class="col-idx">#</th><th>File</th><th class="col-score">${escapeHtml(cfg.overallLabel)}</th><th class="col-time">Time</th><th class="col-fb">Feedback</th></tr></thead>
+    <tbody>${overviewRows}</tbody>
+  </table>
+
+  ${detailSections}
 
   <script>window.onload = function () { window.print(); };<\/script>
 </body></html>`;
