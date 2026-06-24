@@ -516,7 +516,8 @@ class TestWordDetails:
         assert d["words"]
         assert set(d["words"][0]) == {"word", "ipa", "phonemes", "accuracy", "skip_reason"}
         assert set(d["words"][0]["phonemes"][0]) == {
-            "symbol", "status", "heard", "severity", "stress"
+            "symbol", "status", "heard", "severity", "stress",
+            "penalty_reason", "penalty_adjustment",
         }
 
 
@@ -1039,6 +1040,31 @@ class TestDriftClassification:
         diags = self._capture(ref, ["f", "ɒ", "t", "s"], spans, times, {0: (0.0, 4.0)})
         assert diags[0].sub_inside_window == 1
 
+    def test_correspondences_emitted_per_phoneme(self):
+        # /fɒks/ vs /fɒts/: 4 correspondence, status [ok,ok,sub,ok], is_final chỉ ở 's'.
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        times = [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0), (3.0, 4.0)]
+        diags = self._capture(ref, ["f", "ɒ", "t", "s"], spans, times, {0: (0.0, 4.0)})
+        cs = diags[0].correspondences
+        assert [c["status"] for c in cs] == ["ok", "ok", "sub", "ok"]
+        assert [c["is_final"] for c in cs] == [False, False, False, True]
+        sub = cs[2]
+        assert sub["ref_symbol"] == "k" and sub["pred_symbol"] == "t"
+        assert sub["confidence"] is not None
+        assert sub["sub_outside_window"] is False  # predicted segment trong window
+
+    def test_correspondence_deletion_has_no_pred(self):
+        # 'k' bị xoá (predicted thiếu) → status del, pred_symbol/confidence None.
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        times = [(0.0, 1.0), (1.0, 2.0), (2.0, 3.0)]
+        diags = self._capture(ref, ["f", "ɒ", "s"], spans, times, {0: (0.0, 4.0)})
+        cs = diags[0].correspondences
+        dele = next(c for c in cs if c["status"] == "del")
+        assert dele["ref_symbol"] == "k"
+        assert dele["pred_symbol"] is None and dele["confidence"] is None
+
     def test_telemetry_with_windows_does_not_change_score(self):
         ref = ["f", "ɒ", "k", "s"]
         spans = [WordSpan("fox", 0, 4)]
@@ -1050,6 +1076,118 @@ class TestDriftClassification:
             word_windows={0: (10.0, 12.0)},
         )
         assert base.overall_accuracy == withwin.overall_accuracy
+
+
+# ── L1-aware scoring layer (Vietnamese) ──────────────────────────────────────
+
+from src.phoneme.scoring import _ref_metadata
+
+
+class TestL1AwareScoring:
+    """L1 final-consonant deletion tolerance + low-confidence neutralization."""
+
+    def _segs(self, phs, conf=0.9):
+        return [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=conf)
+                for i, p in enumerate(phs)]
+
+    def _points(self, score):
+        pts = []
+        for w in score.words:
+            pts.extend(w.phonemes)
+        return pts
+
+    def test_final_consonant_deletion_reduced_and_labeled(self):
+        ref = ["h", "æ", "n", "d"]; spans = [WordSpan("hand", 0, 4)]
+        on = compute_phoneme_score(self._segs(["h", "æ", "n"]), ref, spans, l1_enabled=True)
+        off = compute_phoneme_score(self._segs(["h", "æ", "n"]), ref, spans)
+        assert on.overall_accuracy > off.overall_accuracy  # penalty giảm
+        d_pt = next(p for p in self._points(on) if p.symbol == "d")
+        assert d_pt.penalty_reason == "l1_final_deletion"
+        assert d_pt.penalty_adjustment == 0.35
+        assert on.l1_adjusted_count == 1
+        assert on.l1_adjustment_ratio > 0.0
+
+    def test_non_final_consonant_deletion_not_tolerated(self):
+        # onset 'h' bị nuốt → không phải coda → không L1, penalty đầy đủ.
+        ref = ["h", "æ", "n", "d"]; spans = [WordSpan("hand", 0, 4)]
+        on = compute_phoneme_score(self._segs(["æ", "n", "d"]), ref, spans, l1_enabled=True)
+        h_pt = next(p for p in self._points(on) if p.symbol == "h")
+        assert h_pt.penalty_reason == "hard_error"
+        assert h_pt.penalty_adjustment == 1.0
+
+    def test_deletion_never_confidence_weighted(self):
+        # Deletion KHÔNG đi qua confidence: penalty của 'd' giống nhau dù conf khác hẳn.
+        ref = ["h", "æ", "n", "d"]; spans = [WordSpan("hand", 0, 4)]
+        hi = compute_phoneme_score(self._segs(["h", "æ", "n"], conf=0.95), ref, spans, l1_enabled=True)
+        lo = compute_phoneme_score(self._segs(["h", "æ", "n"], conf=0.05), ref, spans, l1_enabled=True)
+        d_hi = next(p for p in self._points(hi) if p.symbol == "d")
+        d_lo = next(p for p in self._points(lo) if p.symbol == "d")
+        assert d_hi.penalty_adjustment == d_lo.penalty_adjustment == 0.35
+        assert d_hi.penalty_reason == d_lo.penalty_reason == "l1_final_deletion"
+
+    def test_low_confidence_substitution_neutralized(self):
+        ref = ["f", "ɒ", "k", "s"]; spans = [WordSpan("fox", 0, 4)]
+        segs = self._segs(["f", "ɒ", "t", "s"])
+        segs[2] = PhonemeSegment(phoneme="t", start=2.0, end=3.0, confidence=0.2)  # < floor
+        on = compute_phoneme_score(segs, ref, spans, l1_enabled=True)
+        k_pt = next(p for p in self._points(on) if p.symbol == "k")
+        assert k_pt.penalty_reason == "low_confidence_neutralized"
+        assert k_pt.penalty_adjustment == 0.0
+        assert on.low_conf_neutralized_count == 1
+
+    def test_mid_confidence_substitution_normal(self):
+        ref = ["f", "ɒ", "k", "s"]; spans = [WordSpan("fox", 0, 4)]
+        segs = self._segs(["f", "ɒ", "t", "s"])
+        segs[2] = PhonemeSegment(phoneme="t", start=2.0, end=3.0, confidence=0.55)  # in [0.40,0.70]
+        on = compute_phoneme_score(segs, ref, spans, l1_enabled=True)
+        k_pt = next(p for p in self._points(on) if p.symbol == "k")
+        assert k_pt.penalty_reason == "hard_error"
+        assert on.low_conf_neutralized_count == 0
+
+    def test_l1_disabled_is_default_and_unchanged(self):
+        ref = ["h", "æ", "n", "d"]; spans = [WordSpan("hand", 0, 4)]
+        segs = self._segs(["h", "æ", "n"])
+        default = compute_phoneme_score(segs, ref, spans)
+        explicit_off = compute_phoneme_score(segs, ref, spans, l1_enabled=False)
+        assert default.overall_accuracy == explicit_off.overall_accuracy
+        assert default.l1_adjusted_count == 0
+        d_pt = next(p for p in self._points(default) if p.symbol == "d")
+        assert d_pt.penalty_reason is None and d_pt.penalty_adjustment == 1.0
+
+    def test_determinism(self):
+        ref = ["h", "æ", "n", "d"]; spans = [WordSpan("hand", 0, 4)]
+        segs = self._segs(["h", "æ", "n"])
+        a = compute_phoneme_score(segs, ref, spans, l1_enabled=True)
+        b = compute_phoneme_score(segs, ref, spans, l1_enabled=True)
+        assert a.to_dict() == b.to_dict()
+
+    def test_multipliers_within_cap(self):
+        from src.phoneme.l1_vietnamese import (
+            L1_MULTIPLIER_CAP, _L1_FINAL_DELETION, match_l1_final_deletion,
+            register_l1_pattern,
+        )
+        assert all(m.multiplier <= L1_MULTIPLIER_CAP for m in _L1_FINAL_DELETION.values())
+        register_l1_pattern("final_test", "ʔ", 0.99)  # over cap → bị clamp
+        assert match_l1_final_deletion("ʔ").multiplier == L1_MULTIPLIER_CAP
+
+    def test_ref_is_coda_detection(self):
+        _, _, _, _, coda = _ref_metadata(["h", "æ", "n", "d"], [WordSpan("hand", 0, 4)], None)
+        assert coda == [False, False, True, True]
+        _, _, _, _, coda2 = _ref_metadata(["s", "k", "uː", "l"], [WordSpan("school", 0, 4)], None)
+        assert coda2 == [False, False, False, True]
+        _, _, _, _, coda3 = _ref_metadata(["t", "uː"], [WordSpan("to", 0, 2)], None)
+        assert coda3 == [False, False]
+
+    def test_correspondences_carry_l1_fields(self):
+        ref = ["h", "æ", "n", "d"]; spans = [WordSpan("hand", 0, 4)]
+        captured: list[list] = []
+        compute_phoneme_score(self._segs(["h", "æ", "n"]), ref, spans,
+                              diagnostics_sink=captured.append, l1_enabled=True)
+        cs = captured[0][0].correspondences
+        d_corr = next(c for c in cs if c["ref_symbol"] == "d")
+        assert d_corr["penalty_reason"] == "l1_final_deletion"
+        assert d_corr["penalty_adjustment"] == 0.35
+        assert d_corr["l1_rule_id"] == "vi.final_stop.d"
 
 
 # ── Model serialization tests ────────────────────────────────────────────────

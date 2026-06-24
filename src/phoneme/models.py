@@ -106,12 +106,19 @@ class PhonemePoint:
         severity: "high" | "medium" | "low" cho sub/del; None với "ok"
         stress: "primary" | "secondary" cho nguyên âm được nhấn; None nếu không
             nhấn hoặc từ đơn âm tiết. CHỈ để hiển thị — không tham gia alignment.
+        penalty_reason: lý do điều chỉnh penalty (L1-aware layer): "l1_final_deletion"
+            (nuốt phụ âm cuối kiểu L1 → "accent note"), "low_confidence_neutralized",
+            "hard_error", hoặc None (âm đúng / layer tắt). UI dùng để gắn nhãn accent.
+        penalty_adjustment: hệ số ĐÃ áp lên penalty gốc (1.0 = không đổi, <1 = giảm,
+            0.0 = trung hoà). TÁCH khỏi `penalty_reason` (why vs how-much).
     """
     symbol: str
     status: str
     heard: str | None = None
     severity: str | None = None
     stress: str | None = None
+    penalty_reason: str | None = None
+    penalty_adjustment: float = 1.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +127,8 @@ class PhonemePoint:
             "heard": self.heard,
             "severity": self.severity,
             "stress": self.stress,
+            "penalty_reason": self.penalty_reason,
+            "penalty_adjustment": round(self.penalty_adjustment, 4),
         }
 
 
@@ -179,6 +188,12 @@ class PhonemeScore:
     words: list[WordPronunciation] = field(default_factory=list)
     words_truncated: bool = False
     words_total: int = 0
+    # L1-aware layer metadata (PRD §8) — diagnostic/explainability, KHÔNG đổi math điểm.
+    raw_penalty: float = 0.0               # tổng penalty TRƯỚC L1 + neutralization
+    adjusted_penalty: float = 0.0          # tổng penalty SAU điều chỉnh (== nguồn accuracy)
+    l1_adjusted_count: int = 0             # số âm được L1 giảm penalty
+    low_conf_neutralized_count: int = 0    # số sub bị trung hoà do confidence rất thấp
+    l1_adjustment_ratio: float = 0.0       # (raw - adjusted) / raw (tỉ lệ penalty được giảm)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -193,6 +208,11 @@ class PhonemeScore:
             "words": [w.to_dict() for w in self.words],
             "words_truncated": self.words_truncated,
             "words_total": self.words_total,
+            "raw_penalty": round(self.raw_penalty, 4),
+            "adjusted_penalty": round(self.adjusted_penalty, 4),
+            "l1_adjusted_count": self.l1_adjusted_count,
+            "low_conf_neutralized_count": self.low_conf_neutralized_count,
+            "l1_adjustment_ratio": round(self.l1_adjustment_ratio, 4),
         }
 
 

@@ -178,6 +178,9 @@ def grade_response(
                 device=config.phoneme_device,
                 max_words=config.phoneme_max_words,
                 confidence_knee=config.phoneme_confidence_knee,
+                l1_enabled=config.phoneme_l1_enabled,
+                l1_min_confidence=config.phoneme_l1_min_confidence,
+                low_conf_floor=config.phoneme_l1_low_conf_floor,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về

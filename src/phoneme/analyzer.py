@@ -26,6 +26,8 @@ from .reliability import SkipDecision
 from .scoring import (
     MAX_WORDS_RETURNED,
     PHONEME_CONFIDENCE_KNEE,
+    PHONEME_L1_MIN_CONFIDENCE,
+    PHONEME_LOW_CONF_FLOOR,
     compute_phoneme_score,
 )
 from .wav2vec_backend import (
@@ -77,10 +79,16 @@ class HybridPhonemeAnalyzer:
         enable_phoneme_analysis: bool = True,
         max_words: int = MAX_WORDS_RETURNED,
         confidence_knee: float = PHONEME_CONFIDENCE_KNEE,
+        l1_enabled: bool = False,
+        l1_min_confidence: float = PHONEME_L1_MIN_CONFIDENCE,
+        low_conf_floor: float = PHONEME_LOW_CONF_FLOOR,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         self._max_words = max_words
         self._confidence_knee = confidence_knee
+        self._l1_enabled = l1_enabled
+        self._l1_min_confidence = l1_min_confidence
+        self._low_conf_floor = low_conf_floor
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
@@ -190,6 +198,9 @@ class HybridPhonemeAnalyzer:
                 confidence_knee=self._confidence_knee,
                 diagnostics_sink=diagnostics_sink,
                 word_windows=word_windows,
+                l1_enabled=self._l1_enabled,
+                l1_min_confidence=self._l1_min_confidence,
+                low_conf_floor=self._low_conf_floor,
             )
 
         logger.info(

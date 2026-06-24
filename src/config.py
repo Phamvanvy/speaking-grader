@@ -116,6 +116,14 @@ class Config:
     # corpus. Chỉ quan sát, KHÔNG ảnh hưởng điểm. Bật qua TOEIC_PHONEME_TELEMETRY=1.
     phoneme_telemetry_enabled: bool = False
     phoneme_telemetry_path: str = "outputs/phoneme_telemetry.jsonl"
+    # L1-aware scoring layer (Vietnamese). Mặc định TẮT → điểm giữ nguyên cho tới khi
+    # validate trên golden corpus. Bật qua TOEIC_PHONEME_L1_ENABLED. Giảm penalty nuốt
+    # phụ âm cuối kiểu L1 + trung hoà sub confidence rất thấp; vẫn hiển thị (accent note),
+    # KHÔNG skip (Recognition Reliability mới được skip).
+    phoneme_l1_enabled: bool = False
+    phoneme_l1_language: str = "vi"
+    phoneme_l1_min_confidence: float = 0.70
+    phoneme_l1_low_conf_floor: float = 0.40
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
@@ -229,6 +237,16 @@ def load_config() -> Config:
         ).strip().lower() in {"1", "true", "yes", "on"},
         phoneme_telemetry_path=(
             os.getenv("TOEIC_PHONEME_TELEMETRY_PATH", "outputs/phoneme_telemetry.jsonl")
+        ),
+        phoneme_l1_enabled=(
+            os.getenv("TOEIC_PHONEME_L1_ENABLED", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_l1_language=os.getenv("TOEIC_PHONEME_L1_LANGUAGE", "vi") or "vi",
+        phoneme_l1_min_confidence=float(
+            os.getenv("TOEIC_PHONEME_L1_MIN_CONFIDENCE", "0.70")
+        ),
+        phoneme_l1_low_conf_floor=float(
+            os.getenv("TOEIC_PHONEME_L1_LOW_CONF_FLOOR", "0.40")
         ),
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"

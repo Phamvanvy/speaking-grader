@@ -26,16 +26,21 @@ import logging
 import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .l1_vietnamese import PenaltyReason, match_l1_final_deletion
 from .models import PhonemePoint, WordSpan
 
 logger = logging.getLogger("toeic.phoneme.diagnostics")
 
 # Tăng khi đổi cấu trúc record. Parser downstream đọc field này để biết schema.
 # v2: thêm window_start/end + sub_inside_window/sub_outside_window (PR3-0 drift telemetry).
-TELEMETRY_SCHEMA_VERSION: int = 2
+# v3: thêm correspondences[] (ref↔pred từng phoneme + confidence + status + is_final) cho
+#     phân tích R-vs-S (hallucination vs L1 error) chi tiết theo từng âm.
+# v4: thêm penalty_reason / penalty_adjustment / l1_rule_id vào mỗi correspondence (L1-aware
+#     scoring layer) → đo l1_adjustment_ratio + đếm rule kích hoạt từ telemetry.
+TELEMETRY_SCHEMA_VERSION: int = 4
 
 # Đệm cửa sổ thời gian khi phân loại drift: predicted segment chạm mép window trong
 # khoảng này vẫn coi là "trong từ". Whisper word timestamps lệch ~±100–300ms; pad nhỏ
@@ -127,6 +132,10 @@ class WordDiagnostic:
     window_end: float | None = None
     sub_inside_window: int = 0          # sub có predicted segment TRONG window → hallucination
     sub_outside_window: int = 0         # sub có predicted segment NGOÀI window → drift
+    # PR3-0/pivot: 1 phần tử cho MỖI phoneme tham chiếu của từ (ok/sub/del/skipped). Mỗi phần
+    # tử: {ref_symbol, pred_symbol, confidence, status, is_final, sub_outside_window}. Cho phép
+    # phân tích R-vs-S theo từng âm (confidence của lỗi, deletion âm cuối). KHÔNG gồm insertion.
+    correspondences: list[dict] = field(default_factory=list)
 
 
 def percentile(values: list[float], p: float) -> float:
@@ -199,37 +208,62 @@ def build_word_diagnostics(
             continue
         preds = sorted(set(word_pred.get(k, [])))
         confs = [predicted_conf[pi] for pi in preds if pi < len(predicted_conf)]
+        win = word_windows.get(k) if word_windows else None
         matches = subs = dels = 0
         penalty = 0.0
+        sub_in = sub_out = 0
+        correspondences: list[dict] = []
+        final_idx = min(span.end_idx, n) - 1  # index âm cuối của từ (cho is_final)
+        # 1 lượt qua reference index của từ: đếm + drift + dựng correspondence từng âm.
         for i in idxs:
             point, pen = result[i]
-            if point.status == "ok":
+            status = point.status
+            if status == "ok":
                 matches += 1
-            elif point.status == "sub":
+            elif status == "sub":
                 subs += 1
-            elif point.status == "del":
+            elif status == "del":
                 dels += 1
             if pen is not None:
                 penalty += pen
 
-        # PR3-0 drift classification: chỉ khi có window cho từ + times cho predicted.
-        win = word_windows.get(k) if word_windows else None
-        sub_in = sub_out = 0
-        if win is not None and predicted_times is not None:
-            w_lo, w_hi = win
-            for i in idxs:
-                point, _pen = result[i]
-                if point.status != "sub":
-                    continue
-                pi = pred_for_ref.get(i)
-                if pi is None or pi >= len(predicted_times):
-                    continue
+            # predicted gắn với âm i (cặp diagonal); del/không gắn → None.
+            pi = pred_for_ref.get(i)
+            has_pred = status != "del" and pi is not None and pi < len(predicted)
+            pred_symbol = predicted[pi] if has_pred else None
+            conf = (
+                predicted_conf[pi]
+                if has_pred and pi is not None and pi < len(predicted_conf)
+                else None
+            )
+            outside = False
+            # PR3-0 drift: sub có window + times → trong/ngoài window.
+            if (status == "sub" and win is not None and predicted_times is not None
+                    and pi is not None and pi < len(predicted_times)):
                 ps, pe = predicted_times[pi]
-                # overlap với [w_lo - pad, w_hi + pad] → trong từ (hallucination).
-                if pe >= w_lo - pad and ps <= w_hi + pad:
+                if pe >= win[0] - pad and ps <= win[1] + pad:  # overlap → trong từ
                     sub_in += 1
                 else:
                     sub_out += 1
+                    outside = True
+            # L1-aware layer: lý do + mức điều chỉnh penalty (point đã ghi sẵn); rule_id
+            # suy từ phoneme khi reason là L1 (thuần hàm → deterministic).
+            reason = point.penalty_reason
+            l1_rule_id = None
+            if reason == PenaltyReason.L1_FINAL_DELETION.value:
+                m = match_l1_final_deletion(reference[i])
+                l1_rule_id = m.rule_id if m is not None else None
+            correspondences.append({
+                "ref_symbol": reference[i],
+                "pred_symbol": pred_symbol,
+                "confidence": round(conf, 4) if conf is not None else None,
+                "status": status,
+                "is_final": i == final_idx,
+                "sub_outside_window": outside,
+                "penalty_reason": reason,
+                "penalty_adjustment": round(point.penalty_adjustment, 4),
+                "l1_rule_id": l1_rule_id,
+            })
 
         diags.append(WordDiagnostic(
             word=span.word,
@@ -249,6 +283,7 @@ def build_word_diagnostics(
             window_end=round(win[1], 3) if win is not None else None,
             sub_inside_window=sub_in,
             sub_outside_window=sub_out,
+            correspondences=correspondences,
         ))
     return diags
 

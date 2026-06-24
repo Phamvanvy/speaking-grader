@@ -26,6 +26,7 @@ from .ipa import (
     phoneme_similarity,
     phonemes_match,
 )
+from .l1_vietnamese import PenaltyReason, match_l1_final_deletion
 from .reliability import SkipDecision
 from .models import (
     PhonemeError,
@@ -49,6 +50,13 @@ MAX_WORDS_RETURNED: Final[int] = 80
 # của lỗi sub bị hạ tỉ lệ (recognizer không chắc → ít khả năng là lỗi người đọc).
 # Mặc định 0.5; override qua Config.phoneme_confidence_knee (env TOEIC_PHONEME_CONFIDENCE_KNEE).
 PHONEME_CONFIDENCE_KNEE: Final[float] = 0.5
+
+# L1-aware scoring layer (default OFF — bật qua Config.phoneme_l1_*; xem l1_vietnamese.py).
+# l1_min_confidence: ngưỡng confidence để áp L1 *substitution* tolerance (chưa dùng ở v1).
+# low_conf_floor: sub có confidence < ngưỡng này → penalty bị TRUNG HOÀ về 0 (soften,
+# KHÔNG skip). Chỉ áp cho sub (âm được nhận diện); deletion KHÔNG đi qua confidence.
+PHONEME_L1_MIN_CONFIDENCE: Final[float] = 0.70
+PHONEME_LOW_CONF_FLOOR: Final[float] = 0.40
 
 # Xếp hạng để chọn status "tốt hơn" khi 1 reference index bị chạm nhiều lần.
 # "skipped" (từ ASR nghe nhầm) coi như tốt nhất — không phải lỗi, loại khỏi điểm.
@@ -168,8 +176,8 @@ def _ref_metadata(
     reference: list[str],
     spans: list[WordSpan] | None,
     stress: list[str | None] | None,
-) -> tuple[list[str | None], list[bool], list[str | None], list[bool]]:
-    """Trả (ref_word, ref_is_onset, ref_stress, ref_reducible) song song 1-1 với reference.
+) -> tuple[list[str | None], list[bool], list[str | None], list[bool], list[bool]]:
+    """Trả (ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda) song song reference.
 
     - ref_word[i]: từ chứa âm i (None nếu không có spans / âm rơi ngoài span).
     - ref_is_onset[i]: True nếu âm i là phụ âm thuộc cụm ĐẦU TỪ (từ start tới
@@ -180,6 +188,8 @@ def _ref_metadata(
       chính của từ) HOẶC nằm trong function word. Nhân chính = nguyên âm có nhấn
       primary; nếu từ không có âm nhấn (đơn âm tiết) thì nhân chính = nguyên âm DUY
       NHẤT/đầu tiên → bird /bɜːd/ ɜ KHÔNG reducible (giữ lỗi thật), water -er ɜ thì có.
+    - ref_is_coda[i]: True nếu âm i là phụ âm CUỐI TỪ (sau nguyên âm cuối cùng tới hết
+      từ) — bổ sung của onset; dùng cho L1 final-consonant tolerance (hand n,d; school l).
     """
     from .ipa import FUNCTION_WORDS
 
@@ -187,6 +197,7 @@ def _ref_metadata(
     ref_word: list[str | None] = [None] * n
     ref_is_onset: list[bool] = [False] * n
     ref_reducible: list[bool] = [False] * n
+    ref_is_coda: list[bool] = [False] * n
     ref_stress: list[str | None] = list(stress) if stress else [None] * n
     if len(ref_stress) < n:
         ref_stress += [None] * (n - len(ref_stress))
@@ -210,8 +221,12 @@ def _ref_metadata(
             for i in range(lo, hi):
                 if in_func or (is_vowel(reference[i]) and i != main):
                     ref_reducible[i] = True
+            # Coda = phụ âm sau nguyên âm CUỐI CÙNG của từ tới hết từ (bổ sung onset).
+            if vowels:
+                for i in range(vowels[-1] + 1, hi):
+                    ref_is_coda[i] = True
 
-    return ref_word, ref_is_onset, ref_stress, ref_reducible
+    return ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda
 
 
 def _resolve_skips(
@@ -309,6 +324,41 @@ def _build_word_details(
 # Main scoring function
 # ──────────────────────────────────────────────────────────────────────────────
 
+def _score_deletion(
+    ref_ph: str,
+    *,
+    is_onset: bool,
+    is_coda: bool,
+    stress: str | None,
+    l1_enabled: bool,
+) -> tuple[PhonemePoint, float, float]:
+    """1 âm reference bị THIẾU → (PhonemePoint, penalty đã điều chỉnh, penalty gốc).
+
+    Pipeline stage 1→3: base (deletion_penalty theo severity) → L1 (chỉ khi l1_enabled &
+    âm ở coda & khớp rule final-deletion). DELETION KHÔNG đi qua confidence (stage 4) —
+    không có predicted segment nên không có confidence. Dùng chung cho _align_points và
+    vòng bổ sung deletion trong compute_phoneme_score.
+    """
+    raw = deletion_penalty(ref_ph, is_onset=is_onset, stress=stress)
+    penalty = raw
+    reason: str | None = None
+    adjustment = 1.0
+    severity = deletion_severity(ref_ph, is_onset=is_onset, stress=stress)
+    if l1_enabled:
+        reason = PenaltyReason.HARD_ERROR.value
+        match = match_l1_final_deletion(ref_ph) if is_coda else None
+        if match is not None:
+            penalty = raw * match.multiplier
+            adjustment = match.multiplier
+            reason = PenaltyReason.L1_FINAL_DELETION.value
+            severity = _severity_from_penalty(penalty)  # severity khớp penalty đã giảm
+    point = PhonemePoint(
+        symbol=ref_ph, status="del", severity=severity, stress=stress,
+        penalty_reason=reason, penalty_adjustment=round(adjustment, 4),
+    )
+    return point, penalty, raw
+
+
 def _align_points(
     path: list[tuple[int, int]],
     predicted: list[str],
@@ -319,19 +369,27 @@ def _align_points(
     ref_stress: list[str | None],
     ref_reducible: list[bool],
     ref_skipped: list[bool],
+    ref_is_coda: list[bool],
     knee: float,
-) -> tuple[dict[int, tuple[PhonemePoint, float | None]], int]:
-    """Một lượt qua DTW path → (point+penalty cho mỗi reference index, số insertion).
+    *,
+    l1_enabled: bool = False,
+    low_conf_floor: float = PHONEME_LOW_CONF_FLOOR,
+) -> tuple[dict[int, tuple[PhonemePoint, float | None]], int, dict[int, float]]:
+    """Một lượt qua DTW path → (point+penalty mỗi ref index, số insertion, penalty gốc/ref).
 
-    - Từ bị skip (Recognition Reliability) → "skipped", penalty None — KIỂM TRA TRƯỚC
-      mọi thứ: cả từ không đáng tin thì KHÔNG chấm bất kỳ âm nào, kể cả âm tình cờ khớp
-      (nếu không, âm khớp ngẫu nhiên trong từ rác vẫn lọt vào mẫu số → skip không trọn).
-    - phonemes_match (allophone / vowel reduction / function word) → "ok", penalty 0.
-    - Substitution thật: penalty = (1 - similarity) * conf_factor (confidence thấp →
-      hạ penalty vì recognizer không chắc); severity suy từ penalty.
+    Penalty pipeline (THỨ TỰ CỐ ĐỊNH): base → recognizer cap → L1 (deletion) → confidence
+    (substitution). L1 layer chỉ tác động khi `l1_enabled`; khi tắt, hàm chạy y hệt trước
+    (bit-for-bit). Mỗi ref index ghi `penalty_reason` (why) + `penalty_adjustment` (how-much)
+    trên PhonemePoint, và penalty GỐC (trước L1/neutralization) vào raw_by_ref để tính metadata.
+
+    - Từ bị skip (Recognition Reliability) → "skipped", penalty None (kiểm tra TRƯỚC mọi thứ).
+    - phonemes_match → "ok", penalty 0.
+    - Substitution: base=(1-sim)*conf_factor [+ cap ð/h]; nếu l1_enabled & conf<low_conf_floor
+      → TRUNG HOÀ penalty về 0 (low_confidence_neutralized). Deletion: xem _score_deletion.
     - Mỗi ref index giữ point TỐT NHẤT nếu path chạm nhiều lần (_better_point).
     """
     result: dict[int, tuple[PhonemePoint, float | None]] = {}
+    raw_by_ref: dict[int, float] = {}
     insertion_count = 0
     for pred_idx, ref_idx in path:
         if ref_idx < 0:
@@ -341,6 +399,7 @@ def _align_points(
         ref_ph = reference[ref_idx]
         word = ref_word[ref_idx]
         stress = ref_stress[ref_idx]
+        iter_raw: float | None = None
         if ref_skipped[ref_idx]:
             # Cả từ bị skip → mọi âm "skipped" bất kể có khớp hay không.
             point = PhonemePoint(symbol=ref_ph, status="skipped", stress=stress)
@@ -356,24 +415,41 @@ def _align_points(
             else:
                 sim = phoneme_similarity(pred_ph, ref_ph)
                 conf_factor = min(1.0, conf / knee) if knee > 0 else 1.0
-                penalty = (1.0 - sim) * conf_factor
-                # ð/h "thay" bằng nguyên âm = recognizer nuốt phụ âm rồi lệch align
-                # (không phải lỗi người đọc) → hạ về low.
+                base_sub = (1.0 - sim) * conf_factor
+                # Stage 2 recognizer cap: ð/h "thay" bằng nguyên âm = recognizer nuốt phụ
+                # âm rồi lệch align (không phải lỗi người đọc) → hạ về low.
                 if normalize_ipa(ref_ph) in _RECOGNIZER_DROP_CONS and is_vowel(pred_ph):
-                    penalty = min(penalty, 0.1)
+                    base_sub = min(base_sub, 0.1)
+                penalty = base_sub
+                reason: str | None = None
+                adjustment = 1.0
+                if l1_enabled:
+                    reason = PenaltyReason.HARD_ERROR.value
+                    # Stage 4 confidence (chỉ substitution): conf rất thấp → trung hoà.
+                    if conf < low_conf_floor:
+                        penalty = 0.0
+                        reason = PenaltyReason.LOW_CONFIDENCE_NEUTRALIZED.value
+                        adjustment = 0.0
                 point = PhonemePoint(
                     symbol=ref_ph, status="sub", heard=pred_ph,
                     severity=_severity_from_penalty(penalty), stress=stress,
+                    penalty_reason=reason, penalty_adjustment=round(adjustment, 4),
                 )
+                iter_raw = base_sub
         else:
-            sev = deletion_severity(ref_ph, is_onset=ref_is_onset[ref_idx], stress=stress)
-            penalty = deletion_penalty(ref_ph, is_onset=ref_is_onset[ref_idx], stress=stress)
-            point = PhonemePoint(symbol=ref_ph, status="del", severity=sev, stress=stress)
+            point, penalty, iter_raw = _score_deletion(
+                ref_ph, is_onset=ref_is_onset[ref_idx], is_coda=ref_is_coda[ref_idx],
+                stress=stress, l1_enabled=l1_enabled,
+            )
 
         existing = result.get(ref_idx)
         if existing is None or _better_point(existing[0], point) is point:
             result[ref_idx] = (point, penalty)
-    return result, insertion_count
+            if iter_raw is not None:
+                raw_by_ref[ref_idx] = iter_raw
+            elif ref_idx in raw_by_ref:
+                del raw_by_ref[ref_idx]  # point được thay = ok/skipped → bỏ raw cũ
+    return result, insertion_count, raw_by_ref
 
 
 def compute_phoneme_score(
@@ -386,6 +462,9 @@ def compute_phoneme_score(
     confidence_knee: float = PHONEME_CONFIDENCE_KNEE,
     diagnostics_sink: Callable[[list[WordDiagnostic]], None] | None = None,
     word_windows: Mapping[int, tuple[float, float]] | None = None,
+    l1_enabled: bool = False,
+    l1_min_confidence: float = PHONEME_L1_MIN_CONFIDENCE,
+    low_conf_floor: float = PHONEME_LOW_CONF_FLOOR,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -406,6 +485,11 @@ def compute_phoneme_score(
         word_windows: optional (PR3-0) — cửa sổ thời gian Whisper theo CHỈ SỐ TỪ chuẩn
             (khớp reference_spans). CHỈ dùng cho telemetry drift-vs-hallucination; KHÔNG
             ảnh hưởng điểm. Bỏ qua nếu không có diagnostics_sink.
+        l1_enabled: bật L1-aware layer (Vietnamese). False (mặc định) = hành vi y hệt trước
+            (bit-for-bit). True = giảm penalty cho nuốt phụ âm cuối kiểu L1 + trung hoà sub
+            confidence rất thấp; vẫn hiển thị (accent note). KHÔNG skip (Reliability mới được skip).
+        l1_min_confidence: ngưỡng confidence để áp L1 *substitution* tolerance (chưa dùng ở v1).
+        low_conf_floor: sub có confidence < ngưỡng → penalty trung hoà về 0 (chỉ khi l1_enabled).
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -417,7 +501,7 @@ def compute_phoneme_score(
     avg_confidence = (
         sum(predicted_conf) / len(predicted_conf) if predicted_conf else 0.0
     )
-    ref_word, ref_is_onset, ref_stress, ref_reducible = _ref_metadata(
+    ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda = _ref_metadata(
         reference_phonemes, reference_spans, reference_stress
     )
     # Map quyết định skip (theo chỉ số span chuẩn) → cờ per-phoneme + lý do per-span.
@@ -430,12 +514,15 @@ def compute_phoneme_score(
         path: list[tuple[int, int]] = []
         result: dict[int, tuple[PhonemePoint, float | None]] = {}
         insertion_count = 0
+        raw_by_ref: dict[int, float] = {}
         empty_prediction = True
     else:
         path = _dtw_align(predicted_phonemes, reference_phonemes)
-        result, insertion_count = _align_points(
+        result, insertion_count, raw_by_ref = _align_points(
             path, predicted_phonemes, predicted_conf, reference_phonemes,
-            ref_word, ref_is_onset, ref_stress, ref_reducible, ref_skipped, confidence_knee,
+            ref_word, ref_is_onset, ref_stress, ref_reducible, ref_skipped,
+            ref_is_coda, confidence_knee,
+            l1_enabled=l1_enabled, low_conf_floor=low_conf_floor,
         )
         empty_prediction = False
 
@@ -448,15 +535,19 @@ def compute_phoneme_score(
             result[i] = (PhonemePoint(symbol=reference_phonemes[i], status="skipped",
                                       stress=stress), None)
         else:
-            sev = deletion_severity(reference_phonemes[i], is_onset=ref_is_onset[i], stress=stress)
-            pen = deletion_penalty(reference_phonemes[i], is_onset=ref_is_onset[i], stress=stress)
-            result[i] = (PhonemePoint(symbol=reference_phonemes[i], status="del",
-                                      severity=sev, stress=stress), pen)
+            point, pen, raw = _score_deletion(
+                reference_phonemes[i], is_onset=ref_is_onset[i],
+                is_coda=ref_is_coda[i], stress=stress, l1_enabled=l1_enabled,
+            )
+            result[i] = (point, pen)
+            raw_by_ref[i] = raw
 
     # Tổng hợp: errors + counts + penalty (một nguồn → không lệch nhau).
     errors: list[PhonemeError] = []
     matches = substitutions = deletions = 0
     total_penalty = 0.0
+    raw_penalty_sum = 0.0
+    l1_adjusted_count = low_conf_neutralized_count = 0
     scored = 0
     point_by_ref: dict[int, PhonemePoint] = {}
     for i in range(len(reference_phonemes)):
@@ -482,6 +573,12 @@ def compute_phoneme_score(
         if penalty is not None:
             total_penalty += penalty
             scored += 1
+            # L1 metadata: penalty GỐC (trước L1/neutralization) để tính tỉ lệ giảm.
+            raw_penalty_sum += raw_by_ref.get(i, penalty)
+        if point.penalty_reason == PenaltyReason.L1_FINAL_DELETION.value:
+            l1_adjusted_count += 1
+        elif point.penalty_reason == PenaltyReason.LOW_CONFIDENCE_NEUTRALIZED.value:
+            low_conf_neutralized_count += 1
 
     if empty_prediction:
         accuracy = 0.0
@@ -507,11 +604,17 @@ def compute_phoneme_score(
     severity_order = {"high": 0, "medium": 1, "low": 2}
     errors.sort(key=lambda e: severity_order.get(e.severity, 3))
 
+    l1_adjustment_ratio = (
+        (raw_penalty_sum - total_penalty) / raw_penalty_sum
+        if raw_penalty_sum > 0 else 0.0
+    )
+
     logger.info(
         "Phoneme score: accuracy=%.2f | matches=%d | subs=%d | del=%d | ins=%d | "
-        "skipped_words=%d | ref=%d | pred=%d",
+        "skipped_words=%d | ref=%d | pred=%d | l1_adj=%d | low_conf_neut=%d",
         accuracy, matches, substitutions, deletions, insertion_count,
         len(span_skip_reason), len(reference_phonemes), len(predicted_phonemes),
+        l1_adjusted_count, low_conf_neutralized_count,
     )
 
     return PhonemeScore(
@@ -526,6 +629,11 @@ def compute_phoneme_score(
         words=words,
         words_truncated=words_truncated,
         words_total=words_total,
+        raw_penalty=raw_penalty_sum,
+        adjusted_penalty=total_penalty,
+        l1_adjusted_count=l1_adjusted_count,
+        low_conf_neutralized_count=low_conf_neutralized_count,
+        l1_adjustment_ratio=l1_adjustment_ratio,
     )
 
 
