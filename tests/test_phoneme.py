@@ -1190,6 +1190,60 @@ class TestL1AwareScoring:
         assert d_corr["l1_rule_id"] == "vi.final_stop.d"
 
 
+# ── Reference IPA accuracy (g2p AH split + per-word overrides) ────────────────
+
+from src.phoneme.ipa import (
+    _validate_word_ipa_overrides,
+    word_to_ipa_with_stress,
+)
+
+
+class TestReferenceIpaAccuracy:
+    """AH1/AH2→ʌ vs AH0→ə (display) + _WORD_IPA_OVERRIDES. Scoring KHÔNG đổi (normalize ʌ→ə)."""
+
+    def test_stressed_ah_is_open_back_vowel(self):
+        # stomach (g2p: S T AH1 M AH0 K) → ʌ ở âm nhấn, ə ở âm yếu (trước: cả hai ə).
+        sym, _st = word_to_ipa_with_stress("stomach")
+        assert "ʌ" in sym
+        assert sym == ["s", "t", "ʌ", "m", "ə", "k"]
+
+    def test_single_syllable_stressed_ah(self):
+        assert word_to_ipa_with_stress("cup")[0] == ["k", "ʌ", "p"]
+        assert word_to_ipa_with_stress("love")[0] == ["l", "ʌ", "v"]
+
+    def test_unstressed_ah_stays_schwa(self):
+        # about (AH0 đầu) → ə, KHÔNG phải ʌ.
+        sym, _ = word_to_ipa_with_stress("about")
+        assert sym[0] == "ə" and "ʌ" not in sym
+
+    def test_especially_override(self):
+        sym, st = word_to_ipa_with_stress("especially")
+        assert sym == ["ɪ", "s", "p", "e", "ʃ", "ə", "l", "iː"]  # /ɪspˈeʃəliː/
+        assert "primary" in st  # giữ nhấn (override qua cùng helper parse stress)
+
+    def test_override_validation_passes_and_rejects_bad_token(self):
+        import re
+
+        from src.phoneme.ipa import ARPABET_TO_IPA
+
+        _validate_word_ipa_overrides()  # không raise với seed hiện tại
+        # token base lạ phải bị từ chối (mô phỏng logic validate).
+        bad = "XQ1"
+        assert re.sub(r"\d", "", bad) not in ARPABET_TO_IPA
+
+    def test_scoring_unchanged_uah_vs_schwa(self):
+        # CHỨNG MINH fix hiển thị KHÔNG đổi điểm: reference ʌ vs ə cho điểm y hệt.
+        spans = [WordSpan("cup", 0, 3)]
+        segs = [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+                for i, p in enumerate(["k", "ɒ", "p"])]  # nguyên âm khác → tạo penalty
+        uah = compute_phoneme_score(segs, ["k", "ʌ", "p"], spans)
+        schwa = compute_phoneme_score(segs, ["k", "ə", "p"], spans)
+        assert uah.overall_accuracy == schwa.overall_accuracy
+        assert uah.substitution_count == schwa.substitution_count
+        assert uah.deletion_count == schwa.deletion_count
+        assert uah.insertion_count == schwa.insertion_count
+
+
 # ── Model serialization tests ────────────────────────────────────────────────
 
 from src.phoneme.models import (

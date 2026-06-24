@@ -150,6 +150,31 @@ _COMMON_WORD_PRONUNCIATIONS: Final[dict[str, list[str]]] = {
     "over": ["OW", "V", "ER"], "through": ["TH", "R", "UW"],
 }
 
+# Per-word IPA corrections (ARPAbet KÈM stress digit) cho từ g2p_en cho kết quả sai hoặc
+# chọn biến thể lệch từ điển. Chạy qua _arpabet_tokens_to_ipa_stress → GIỮ nhấn âm + AH split.
+# ƯU TIÊN tra TRƯỚC _COMMON_WORD_PRONUNCIATIONS và g2p (override = sửa lỗi, phải thắng).
+# Mỗi token phải có base hợp lệ trong ARPABET_TO_IPA (validate lúc import bên dưới → fail-fast).
+_WORD_IPA_OVERRIDES: Final[dict[str, list[str]]] = {
+    # especially: g2p_en cho /əspeʃliː/ (thiếu cả ə trước l); Cambridge /ɪˈspeʃ.ᵊl.i/ →
+    # dùng biến thể CMU IH0 S P EH1 SH AH0 L IY0 → /ɪspˈeʃəliː/.
+    "especially": ["IH0", "S", "P", "EH1", "SH", "AH0", "L", "IY0"],
+}
+
+
+def _validate_word_ipa_overrides() -> None:
+    """Fail-fast lúc import: mọi token override phải strip về base có trong ARPABET_TO_IPA."""
+    for word, tokens in _WORD_IPA_OVERRIDES.items():
+        for tok in tokens:
+            base = re.sub(r"\d", "", tok)
+            if base not in ARPABET_TO_IPA:
+                raise ValueError(
+                    f"_WORD_IPA_OVERRIDES[{word!r}]: token {tok!r} (base {base!r}) "
+                    f"không có trong ARPABET_TO_IPA."
+                )
+
+
+_validate_word_ipa_overrides()
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Phoneme similarity — tính khoảng cách âm vị giữa 2 phonemes
 # ──────────────────────────────────────────────────────────────────────────────
@@ -448,6 +473,47 @@ def _get_g2p() -> object | None:
     return _g2p_instance or None
 
 
+def _arpabet_tokens_to_ipa_stress(
+    tokens: list[str],
+) -> tuple[list[str], list[StressType | None], int]:
+    """ARPAbet token (kèm/không kèm stress digit) → (IPA symbols, stresses, syllables).
+
+    THUẦN parsing/conversion — KHÔNG áp luật đơn-âm-tiết / length guard (để ở caller).
+    - AH split theo nhấn: AH1/AH2 → ʌ; AH0 hoặc thiếu/không hợp lệ digit → ə (fail-soft
+      CHỈ cho stress digit của AH, KHÔNG cho base lạ).
+    - Base không có trong ARPABET_TO_IPA → BỎ QUA (skip), KHÔNG bịa IPA.
+    """
+    symbols: list[str] = []
+    stresses: list[StressType | None] = []
+    syllables = 0
+    for raw in tokens:
+        if not raw.strip():
+            continue
+        digit = re.search(r"\d", raw)
+        base = re.sub(r"\d", "", raw)  # AH0 → AH
+        if base not in ARPABET_TO_IPA:
+            continue  # base lạ → không bịa (override validate lúc import; g2p tự lọc)
+        d = digit.group() if digit is not None else None
+        # AH split: chỉ nhấn rõ (1/2) mới là ʌ; còn lại (gồm thiếu digit) → ə.
+        symbol = ("ʌ" if d in ("1", "2") else "ə") if base == "AH" else ARPABET_TO_IPA[base]
+        symbols.append(symbol)
+        if digit is not None:
+            syllables += 1  # digit chỉ trên nguyên âm → đếm âm tiết
+        stresses.append("primary" if d == "1" else "secondary" if d == "2" else None)
+    return symbols, stresses, syllables
+
+
+def _finalize_stress(
+    symbols: list[str], stresses: list[StressType | None], syllables: int
+) -> tuple[list[str], list[StressType | None]]:
+    """Áp luật hiển thị nhấn: từ ≤1 âm tiết → bỏ ký hiệu nhấn; guard độ dài khớp."""
+    if syllables <= 1:
+        stresses = [None] * len(symbols)
+    if len(symbols) != len(stresses):
+        raise ValueError("IPA symbols and stress list length mismatch")
+    return symbols, stresses
+
+
 def word_to_ipa(word: str) -> list[str]:
     """Chuyển 1 từ tiếng Anh thành danh sách IPA phonemes.
 
@@ -484,48 +550,27 @@ def word_to_ipa_with_stress(
     if not key:
         return [], []
 
-    # Built-in dictionary first. Lọc theo ARPABET_TO_IPA (giống nhánh g2p) để
-    # token không hợp lệ không lọt vào chuỗi IPA tham chiếu thành "phoneme" rác.
-    # Dictionary lưu ARPAbet KHÔNG kèm stress digit → stress toàn None.
+    # Override sửa lỗi (ARPAbet KÈM stress) — tra TRƯỚC để luôn thắng common dict/g2p.
+    if key in _WORD_IPA_OVERRIDES:
+        return _finalize_stress(*_arpabet_tokens_to_ipa_stress(_WORD_IPA_OVERRIDES[key]))
+
+    # Built-in dictionary (chủ yếu function words; ARPAbet KHÔNG kèm stress → stress None).
+    # Lọc theo ARPABET_TO_IPA để token không hợp lệ không lọt vào chuỗi IPA tham chiếu.
     if key in _COMMON_WORD_PRONUNCIATIONS:
         symbols = [ARPABET_TO_IPA[a] for a in _COMMON_WORD_PRONUNCIATIONS[key]
                    if a in ARPABET_TO_IPA]
         return symbols, [None] * len(symbols)
 
-    # Try g2p if available (cached instance — KHÔNG khởi tạo lại mỗi từ)
+    # g2p (cached instance — KHÔNG khởi tạo lại mỗi từ). g2p_en trả flat list ARPAbet
+    # token kèm stress digit; helper parse digit + AH split + lọc base lạ.
     transcriber = _get_g2p()
     if transcriber is not None:
         try:
-            symbols: list[str] = []
-            stresses: list[StressType | None] = []
-            syllables = 0
-            # g2p_en trả về flat list các ARPAbet token (kèm stress digit + space).
-            # Parse digit TRƯỚC khi strip để giữ nhấn âm; build symbol+stress lockstep
-            # theo đúng filter `a in ARPABET_TO_IPA` → index khớp 1-1.
-            for raw in transcriber(key):
-                if not raw.strip():
-                    continue
-                digit = re.search(r"\d", raw)
-                base = re.sub(r"\d", "", raw)  # AH0 → AH
-                if base not in ARPABET_TO_IPA:
-                    continue
-                symbols.append(ARPABET_TO_IPA[base])
-                if digit is not None:
-                    syllables += 1  # digit chỉ trên nguyên âm → đếm âm tiết
-                stresses.append(
-                    "primary" if (digit and digit.group() == "1")
-                    else "secondary" if (digit and digit.group() == "2")
-                    else None
-                )
+            symbols, stresses, syllables = _arpabet_tokens_to_ipa_stress(
+                list(transcriber(key))
+            )
             if symbols:
-                # Từ đơn âm tiết: không ký hiệu nhấn.
-                if syllables <= 1:
-                    stresses = [None] * len(symbols)
-                if len(symbols) != len(stresses):
-                    raise ValueError(
-                        "IPA symbols and stress list length mismatch"
-                    )
-                return symbols, stresses
+                return _finalize_stress(symbols, stresses, syllables)
         except ValueError:
             raise  # guard alignment — không nuốt
         except Exception:  # noqa: BLE001 - lỗi runtime g2p
