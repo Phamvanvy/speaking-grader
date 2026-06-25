@@ -168,6 +168,8 @@ _WORD_IPA_OVERRIDES: Final[dict[str, list[str]]] = {
     "relationship": ["R", "IH0", "L", "EY1", "SH", "AH0", "N", "SH", "IH0", "P"],
     # g2p ER0→ɜː (nguyên âm NURSE nhấn) sai cho -or- KHÔNG nhấn; AH0+R = ə+r (r-màu) → /ˈfeɪvərɪt/.
     "favorite": ["F", "EY1", "V", "AH0", "R", "IH0", "T"],
+    # g2p chèn W lạ giữa ZH và AH → /ˈjuːʒəwəliː/; CMU đúng Y UW1 ZH UH0 AH0 L IY0 → /ˈjuːʒʊəliː/.
+    "usually": ["Y", "UW1", "ZH", "UH0", "AH0", "L", "IY0"],
 }
 
 

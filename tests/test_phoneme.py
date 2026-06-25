@@ -84,6 +84,12 @@ class TestWordToIpa:
         result_upper = word_to_ipa("THE")
         assert result_lower == result_upper
 
+    def test_usually_override_no_spurious_w(self):
+        # g2p_en inserts a spurious W → /ˈjuːʒəwəliː/; override pins CMU sequence.
+        result = word_to_ipa("usually")
+        assert "w" not in result, f"spurious /w/ in usually: {result}"
+        assert result == ["j", "uː", "ʒ", "ʊ", "ə", "l", "iː"]
+
 
 class TestWordStress:
     """Word stress (nhấn âm) song song với IPA — chỉ hiển thị, không vào DTW."""
