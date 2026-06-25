@@ -633,6 +633,34 @@ details.phoneme-detail[open] > summary.phoneme-detail__title {
     margin-bottom: 0.5rem;
 }
 
+/* Chọn giọng IPA tham chiếu (Anh-Anh / Anh-Mỹ) ngay trong Pronunciation detail. */
+.accent-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.6rem;
+    margin-bottom: 0.6rem;
+}
+
+.accent-label {
+    font-size: 0.82rem;
+    color: #555;
+    font-weight: 600;
+}
+
+/* Override global select width:100% — control cỡ nhỏ gọn cạnh nhãn. */
+.accent-select {
+    width: auto;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.82rem;
+    margin-left: 0.3rem;
+}
+
+.accent-note {
+    font-size: 0.78rem;
+    color: #9ca3af;
+}
+
 .phoneme-words {
     display: flex;
     flex-wrap: wrap;
@@ -732,6 +760,10 @@ body.dark .phoneme-detail__title,
 body.dark .phoneme-table__word,
 body.dark .phoneme-word__text {
     color: #f1f5f9;
+}
+
+body.dark .accent-label {
+    color: #cbd5e1;
 }
 
 body.dark .phoneme-word {

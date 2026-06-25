@@ -44,6 +44,30 @@ function examConfig(exam) {
     return EXAM_CONFIG[exam] || EXAM_CONFIG.toeic;
 }
 
+// Accent của IPA tham chiếu hiển thị ở Pronunciation detail: 'gb' = Anh-Anh (mặc
+// định), 'us' = Anh-Mỹ. CHỈ ảnh hưởng hiển thị (biến đổi rule-based từ IPA Mỹ gốc),
+// KHÔNG đổi điểm số. Lưu localStorage để nhớ giữa các lần mở trang.
+const ACCENT_KEY = 'pron_accent';
+let currentAccent = localStorage.getItem(ACCENT_KEY) === 'us' ? 'us' : 'gb';
+
+// Đổi accent rồi render lại KẾT QUẢ HIỆN CÓ từ dữ liệu gốc (không chấm lại). Vì
+// transform tạo bản clone, lastSingleData/lastBatchData luôn nguyên vẹn.
+function setAccent(v) {
+    currentAccent = v === 'us' ? 'us' : 'gb';
+    localStorage.setItem(ACCENT_KEY, currentAccent);
+    if (lastSingleData) showSingleResult(lastSingleData);
+    if (lastBatchData) showBatchResult(lastBatchData);
+}
+
+// Delegated: bắt mọi <select class="accent-select"> (panel dựng lại mỗi lần render,
+// có thể lồng trong <details>), gắn 1 lần ở document.
+document.addEventListener('change', e => {
+    const t = e.target;
+    if (t instanceof HTMLSelectElement && t.classList.contains('accent-select')) {
+        setAccent(t.value);
+    }
+});
+
 // Holds the most recent /grade-batch response so "Print / PDF" can rebuild a report.
 let lastBatchData = null;
 
@@ -709,6 +733,35 @@ function correctionsHtml(corrections) {
 const sevColor = s => (s === 'high' ? '#b91c1c' : s === 'medium' ? '#b45309' : '#6b7280');
 const sevLabel = s => (s === 'high' ? 'cao' : s === 'medium' ? 'trung bình' : s === 'low' ? 'thấp' : '');
 
+// ── British (RP) display transform ────────────────────────────────────
+// Reference IPA do g2p_en/CMUdict sinh ra là giọng MỸ. Khi accent = 'gb' ta áp vài
+// quy tắc gần đúng Mỹ→Anh CHỈ ĐỂ HIỂN THỊ (điểm số dùng dữ liệu gốc, không đổi).
+// Hạn chế đã biết: không xử lý Linking R qua biên từ, chưa map LOT/BATH (ɑː/æ).
+const GB_VOWELS = new Set([
+    'iː', 'ɪ', 'e', 'æ', 'ɑː', 'ɒ', 'ɔː', 'ʌ', 'ʊ', 'uː', 'ə', 'ɜː',
+    'eɪ', 'aɪ', 'ɔɪ', 'oʊ', 'əʊ', 'aʊ', 'ɪə', 'eə', 'ʊə',
+]);
+const isRhotic = s => s === 'r' || s === 'ɹ';
+const toBritishSymbol = sym =>
+    sym === 'oʊ' ? 'əʊ' : sym === 'ɝ' ? 'ɜː' : sym === 'ɚ' ? 'ə' : sym;
+
+// Clone từ + clone TỪNG phoneme (không mutate dữ liệu gốc), rồi biến đổi `symbol`.
+// Coda /r/ (r/ɹ không đứng trước nguyên âm trong cùng từ, hoặc cuối từ) → đánh dấu
+// `_hidden` (GIỮ nguyên độ dài mảng/index), renderer tự bỏ qua khi dựng HTML.
+function toBritishWord(w) {
+    const src = w.phonemes || [];
+    const phonemes = src.map((p, i) => {
+        const np = { ...p };
+        if (isRhotic(p.symbol)) {
+            const next = src[i + 1];
+            if (!next || !GB_VOWELS.has(next.symbol)) { np._hidden = true; return np; }
+        }
+        np.symbol = toBritishSymbol(p.symbol);
+        return np;
+    });
+    return { ...w, phonemes };
+}
+
 // ELSA-style phoneme detail fed by data.phoneme.score.words: every word shows its
 // full reference IPA with mispronounced sounds bolded/red in place, followed by a
 // detail table (Từ / IPA đúng / Bạn đọc / Âm sai / Mức độ) for the words with errors.
@@ -719,6 +772,10 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     const words = Array.isArray(score.words) ? score.words : null;
     if (!words) return phonemeErrorsLegacyHtml(phoneme);   // older payloads
     if (!words.length) return '';
+
+    // Anh-Anh: bản clone đã biến đổi IPA hiển thị (dữ liệu gốc `words` giữ nguyên).
+    // Mọi chỗ dựng IPA tham chiếu dùng `dispWords` và bỏ qua phoneme `_hidden`.
+    const dispWords = currentAccent === 'gb' ? words.map(toBritishWord) : words;
 
     // CHỈ tô đỏ lỗi THẬT (sub/del severity medium|high). Âm severity 'low' (nhiều
     // khả năng do recognizer nuốt / biến thể) và 'skipped' (ASR nghe nhầm cả từ)
@@ -749,11 +806,12 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         return `${stressMark(p)}<span class="${cls}">${escapeHtml(p.symbol)}</span>`;
     };
     // Full reference IPA, wrapped in /…/ here (backend stores symbols without slashes).
-    const ipaHtml = w => `<span class="phoneme-ipa">/${(w.phonemes || []).map(symHtml).join('')}/</span>`;
+    // `_hidden` (coda /r/ ở chế độ Anh-Anh) bị bỏ qua nhưng KHÔNG đổi chiều dài mảng gốc.
+    const ipaHtml = w => `<span class="phoneme-ipa">/${(w.phonemes || []).filter(p => !p._hidden).map(symHtml).join('')}/</span>`;
     // Heard transcription: ok→symbol, sub significant→heard (bold+red), sub low→heard
     // neutral, del→omitted.
     const heardHtml = w => {
-        const parts = (w.phonemes || []).filter(p => p.status !== 'del').map(p =>
+        const parts = (w.phonemes || []).filter(p => p.status !== 'del' && !p._hidden).map(p =>
             isSignificant(p) && p.status === 'sub'
                 ? `<span class="phoneme-sym phoneme-sym--bad">${escapeHtml(p.heard ?? '')}</span>`
                 : `<span class="phoneme-sym">${escapeHtml(p.status === 'sub' ? (p.heard ?? '') : p.symbol)}</span>`);
@@ -762,24 +820,24 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
 
     // ── Per-word cards (all words) ──
     const cardHtml = w => {
-        const hasErr = (w.phonemes || []).some(isSignificant);
+        const hasErr = (w.phonemes || []).some(p => !p._hidden && isSignificant(p));
         return `<div class="phoneme-word${hasErr ? ' phoneme-word--err' : ''}">
             <span class="phoneme-word__text">${escapeHtml(w.word)}</span>
             ${ipaHtml(w)}
         </div>`;
     };
     const CAP = 12;
-    const head = words.slice(0, CAP).map(cardHtml).join('');
-    const rest = words.slice(CAP);
+    const head = dispWords.slice(0, CAP).map(cardHtml).join('');
+    const rest = dispWords.slice(CAP);
     const moreCards = rest.length
         ? `<details style="margin-top:0.3rem;"><summary style="cursor:pointer;color:#4338ca;font-size:0.85rem;">hiện ${rest.length} từ nữa</summary><div class="phoneme-words">${rest.map(cardHtml).join('')}</div></details>`
         : '';
 
     // ── Detail table (only words with a significant error: medium|high) ──
     const sevRank = { high: 2, medium: 1, low: 0 };
-    const errWords = words.filter(w => (w.phonemes || []).some(isSignificant));
+    const errWords = dispWords.filter(w => (w.phonemes || []).some(p => !p._hidden && isSignificant(p)));
     const tableRows = errWords.map(w => {
-        const bad = (w.phonemes || []).filter(isSignificant);
+        const bad = (w.phonemes || []).filter(p => !p._hidden && isSignificant(p));
         const pairs = bad.map(p => {
             const heard = p.status === 'del' ? '∅' : escapeHtml(p.heard ?? '');
             return `<span style="color:${sevColor(p.severity)};">${escapeHtml(p.symbol)} → ${heard}</span>`;
@@ -837,7 +895,20 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         : '';
 
     const titleText = `Pronunciation detail (phoneme)${accLine}`;
+    // Chọn giọng IPA tham chiếu. `selected` set theo currentAccent để sau khi
+    // re-render UI không nhảy về mặc định. Wire bằng delegated listener (1 lần).
+    const accentRow = `
+        <div class="accent-row">
+            <label class="accent-label">Giọng:
+                <select class="accent-select">
+                    <option value="gb"${currentAccent === 'gb' ? ' selected' : ''}>Anh-Anh (British)</option>
+                    <option value="us"${currentAccent === 'us' ? ' selected' : ''}>Anh-Mỹ (American)</option>
+                </select>
+            </label>
+            <span class="accent-note">Giọng Anh là bản chuyển đổi gần đúng</span>
+        </div>`;
     const body = `
+        ${accentRow}
         <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm</div>
         <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ.</div>
         ${truncLine}
@@ -1247,6 +1318,7 @@ function reportStyles() {
   .overview .col-fb { font-weight: 400; color: #4b5563; font-size: 0.85rem; }
   .overview .err { color: #b91c1c; font-weight: 600; }
   .file-head { background: #4f46e5; color: #fff; border-radius: 8px; padding: 0.6rem 1rem; margin: 0 0 0.5rem; font-weight: 700; font-size: 1.15rem; }
+  .accent-row { display: none; }
   @media print { body { margin: 1rem; } h2 { break-after: avoid; } .crit, .tile, .phoneme-word, .phoneme-table tr { break-inside: avoid; }
     section.file { break-before: page; } section.file:first-of-type { break-before: auto; } }`;
 }
