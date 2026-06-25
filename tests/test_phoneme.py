@@ -1192,6 +1192,108 @@ class TestL1AwareScoring:
         assert d_corr["l1_rule_id"] == "vi.final_stop.d"
 
 
+class TestRecognizerNoiseGate:
+    """Gate ẩn substitution bất khả thi về âm học + confidence thấp (wav2vec hallucinate).
+
+    Bảo vệ: near-pair (sim ≥ 0.2) và lỗi VN thật trong _REAL_ERROR_SUBS (th-stopping ð→d,
+    v→b...) — KHÔNG bao giờ bị gate dù conf thấp. Ngưỡng conf TÁCH nguyên âm/phụ âm.
+    """
+
+    def _segs(self, phs_conf):
+        # phs_conf: list[(phoneme, confidence)]
+        return [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=c)
+                for i, (p, c) in enumerate(phs_conf)]
+
+    def _pts(self, score):
+        pts = []
+        for w in score.words:
+            pts.extend(w.phonemes)
+        return pts
+
+    def test_implausible_low_conf_sub_gated(self):
+        # 'f' (onset) đọc thành 'l' (sim 0, không bảo vệ) ở conf 0.45 < 0.6 → recognizer noise.
+        ref = ["f", "ɒ", "k", "s"]; spans = [WordSpan("fox", 0, 4)]
+        segs = self._segs([("l", 0.45), ("ɒ", 0.9), ("k", 0.9), ("s", 0.9)])
+        sc = compute_phoneme_score(segs, ref, spans)
+        f_pt = next(p for p in self._pts(sc) if p.symbol == "f")
+        assert f_pt.status == "sub"
+        assert f_pt.penalty_reason == "recognizer_noise"
+        assert f_pt.severity == "low"  # → rơi vào "Hidden recognizer noise", không tô đỏ
+        assert f_pt.penalty_adjustment == 0.0
+        assert sc.recognizer_noise_count == 1
+        assert sc.to_dict()["recognizer_noise_count"] == 1
+
+    def test_protected_real_errors_stay_red_even_low_conf(self):
+        # th-stopping ð→d, θ→t, v→b ở conf thấp VẪN là lỗi thật → KHÔNG gate.
+        cases = [
+            (["ð", "ɪ", "s"], "ð", "d", WordSpan("this", 0, 3)),
+            (["θ", "ɪ", "n"], "θ", "t", WordSpan("thin", 0, 3)),
+            (["v", "æ", "n"], "v", "b", WordSpan("van", 0, 3)),
+        ]
+        for ref, exp, heard, span in cases:
+            segs = self._segs([(heard, 0.45), (ref[1], 0.9), (ref[2], 0.9)])
+            sc = compute_phoneme_score(segs, ref, [span])
+            ph = next(p for p in self._pts(sc) if p.symbol == exp)
+            assert ph.status == "sub", f"{exp}->{heard}"
+            assert ph.penalty_reason != "recognizer_noise", f"{exp}->{heard} bị gate oan"
+            assert ph.severity in ("medium", "high"), f"{exp}->{heard}"
+            assert sc.recognizer_noise_count == 0
+
+    def test_near_pair_protected_by_similarity(self):
+        # θ→s (sim 0.4 ≥ 0.2) → ngưỡng sim bảo vệ dù conf thấp, dù không liệt kê trong bảng.
+        ref = ["θ", "ɪ", "n"]; spans = [WordSpan("thin", 0, 3)]
+        segs = self._segs([("s", 0.45), ("ɪ", 0.9), ("n", 0.9)])
+        sc = compute_phoneme_score(segs, ref, spans)
+        ph = next(p for p in self._pts(sc) if p.symbol == "θ")
+        assert ph.penalty_reason != "recognizer_noise"
+        assert sc.recognizer_noise_count == 0
+
+    def test_confident_wild_sub_not_gated(self):
+        # f→l nhưng conf 0.9 ≥ 0.6 → recognizer chắc → giữ là lỗi (hiếm, không giấu).
+        ref = ["f", "ɒ", "k", "s"]; spans = [WordSpan("fox", 0, 4)]
+        segs = self._segs([("l", 0.9), ("ɒ", 0.9), ("k", 0.9), ("s", 0.9)])
+        sc = compute_phoneme_score(segs, ref, spans)
+        f_pt = next(p for p in self._pts(sc) if p.symbol == "f")
+        assert f_pt.penalty_reason != "recognizer_noise"
+        assert f_pt.severity == "high"
+        assert sc.recognizer_noise_count == 0
+
+    def test_vowel_threshold_lower_than_consonant(self):
+        # Cùng conf 0.5 + sub cross-class bất khả thi: nguyên âm (ngưỡng 0.45) KHÔNG bị gate,
+        # phụ âm (ngưỡng 0.6) bị gate → tránh gate oan nguyên âm (confidence nền vốn thấp).
+        v_segs = self._segs([("b", 0.9), ("v", 0.5), ("t", 0.9)])  # ɒ (vowel) → v
+        v_sc = compute_phoneme_score(v_segs, ["b", "ɒ", "t"], [WordSpan("bot", 0, 3)])
+        v_pt = next(p for p in self._pts(v_sc) if p.symbol == "ɒ")
+        assert v_pt.penalty_reason != "recognizer_noise"  # 0.5 ≥ 0.45 vowel-threshold
+
+        c_segs = self._segs([("ə", 0.5), ("ɒ", 0.9), ("k", 0.9), ("s", 0.9)])  # f (cons) → ə
+        c_sc = compute_phoneme_score(c_segs, ["f", "ɒ", "k", "s"], [WordSpan("fox", 0, 4)])
+        c_pt = next(p for p in self._pts(c_sc) if p.symbol == "f")
+        assert c_pt.penalty_reason == "recognizer_noise"  # 0.5 < 0.6 cons-threshold
+
+    def test_gate_disabled_matches_legacy(self):
+        # conf=0 tắt gate → hành vi như cũ (sub giữ penalty đầy đủ).
+        ref = ["f", "ɒ", "k", "s"]; spans = [WordSpan("fox", 0, 4)]
+        segs = self._segs([("l", 0.45), ("ɒ", 0.9), ("k", 0.9), ("s", 0.9)])
+        on = compute_phoneme_score(segs, ref, spans)
+        off = compute_phoneme_score(segs, ref, spans,
+                                    recognizer_noise_conf=0.0, recognizer_noise_conf_vowel=0.0)
+        assert off.recognizer_noise_count == 0
+        f_off = next(p for p in self._pts(off) if p.symbol == "f")
+        assert f_off.penalty_reason != "recognizer_noise"
+        assert on.overall_accuracy > off.overall_accuracy  # gate bỏ penalty → on cao hơn
+
+    def test_deletion_never_gated(self):
+        # Deletion KHÔNG đi qua gate (không có predicted/conf) → giữ nguyên reason.
+        ref = ["f", "ɒ", "k", "s"]; spans = [WordSpan("fox", 0, 4)]
+        segs = self._segs([("f", 0.9), ("ɒ", 0.9), ("s", 0.9)])  # 'k' bị nuốt
+        sc = compute_phoneme_score(segs, ref, spans)
+        k_pt = next(p for p in self._pts(sc) if p.symbol == "k")
+        assert k_pt.status == "del"
+        assert k_pt.penalty_reason != "recognizer_noise"
+        assert sc.recognizer_noise_count == 0
+
+
 # ── Reference IPA accuracy (g2p AH split + per-word overrides) ────────────────
 
 from src.phoneme.ipa import (

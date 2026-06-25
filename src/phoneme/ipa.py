@@ -295,6 +295,41 @@ _NEAR_PAIRS: Final[dict[frozenset[str], float]] = dict([
 ])
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Recognizer-noise gate: cặp substitution là LỖI HỌC VIÊN THẬT (được bảo vệ) hay
+# ARTIFACT của recognizer (wav2vec hallucinate)? — xem scoring._align_points.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Các cặp substitution CÙNG LOẠI nhưng similarity < ngưỡng bảo vệ (sim<0.2) mà VẪN là
+# lỗi phát âm THẬT của người Việt → KHÔNG được gate thành "recognizer noise". Bảng này
+# là CHÍNH SÁCH dựa-trên-bằng-chứng (không phải danh sách ngoại lệ phình mãi): chỉ thêm
+# cặp khi telemetry cho thấy NHẤT QUÁN là lỗi học viên thật (xem gated-candidate log).
+# Các cặp similarity ≥ 0.2 (θ↔s, ð↔z, v↔f, z↔s, ʃ↔s, r↔l, ŋ↔n, æ↔e, k↔p...) đã được
+# ngưỡng sim bảo vệ sẵn → KHÔNG cần liệt kê ở đây.
+#   th-stopping ð→d, θ→t (high-freq trong tel3) · deaffrication tʃ→ʃ · dʒ→z/j ·
+#   l↔n (lẫn l/n) · v→b/w (tiếng Việt thiếu /v/) · f→p (fricative→stop).
+_REAL_ERROR_SUBS: Final[frozenset[frozenset[str]]] = frozenset(
+    frozenset({normalize_ipa(a), normalize_ipa(b)})
+    for a, b in [
+        ("ð", "d"), ("θ", "t"), ("tʃ", "ʃ"), ("dʒ", "z"), ("dʒ", "j"),
+        ("l", "n"), ("v", "b"), ("v", "w"), ("f", "p"),
+    ]
+)
+
+
+def is_real_error_substitution(expected: str, predicted: str, *, sim_floor: float) -> bool:
+    """True nếu cặp sub (expected→predicted) là lỗi học viên THẬT → KHÔNG gate thành noise.
+
+    Được bảo vệ khi: (a) similarity ≥ sim_floor (đủ gần → near-pair/cùng class+place, vd
+    θ→s, æ→e), HOẶC (b) nằm trong `_REAL_ERROR_SUBS` (lỗi VN cùng-loại nhưng sim thấp,
+    vd th-stopping ð→d). Mọi cặp khác (sim thấp & không trong bảng — vd f→l, b→f, phụ-âm→
+    nguyên-âm) là ứng viên recognizer-noise.
+    """
+    if phoneme_similarity(predicted, expected) >= sim_floor:
+        return True
+    return frozenset({normalize_ipa(expected), normalize_ipa(predicted)}) in _REAL_ERROR_SUBS
+
+
 @functools.lru_cache(maxsize=8192)
 def phoneme_similarity(p1: str, p2: str) -> float:
     """Tính độ tương đồng giữa 2 phonemes (0.0 = hoàn toàn khác, 1.0 = giống hệt).

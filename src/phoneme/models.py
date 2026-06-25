@@ -199,6 +199,7 @@ class PhonemeScore:
     adjusted_penalty: float = 0.0          # tổng penalty SAU điều chỉnh (== nguồn accuracy)
     l1_adjusted_count: int = 0             # số âm được L1 giảm penalty
     low_conf_neutralized_count: int = 0    # số sub bị trung hoà do confidence rất thấp
+    recognizer_noise_count: int = 0        # số sub bị gate thành recognizer-noise (hallucinate)
     l1_adjustment_ratio: float = 0.0       # (raw - adjusted) / raw (tỉ lệ penalty được giảm)
 
     def to_dict(self) -> dict[str, Any]:
@@ -218,6 +219,7 @@ class PhonemeScore:
             "adjusted_penalty": round(self.adjusted_penalty, 4),
             "l1_adjusted_count": self.l1_adjusted_count,
             "low_conf_neutralized_count": self.low_conf_neutralized_count,
+            "recognizer_noise_count": self.recognizer_noise_count,
             "l1_adjustment_ratio": round(self.l1_adjustment_ratio, 4),
         }
 

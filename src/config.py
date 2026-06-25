@@ -124,6 +124,14 @@ class Config:
     phoneme_l1_language: str = "vi"
     phoneme_l1_min_confidence: float = 0.70
     phoneme_l1_low_conf_floor: float = 0.40
+    # Recognizer-noise gate (ĐỘC LẬP với L1): sub bất khả thi về âm học (sim < _sim &
+    # không nằm trong _REAL_ERROR_SUBS) + recognizer không chắc (conf < ngưỡng theo loại
+    # âm) → coi là wav2vec hallucinate → ẩn khỏi đỏ + bỏ penalty. Ngưỡng conf TÁCH nguyên
+    # âm/phụ âm vì nguyên âm vốn confidence thấp hơn (hiệu chỉnh từ telemetry). Đặt conf=0
+    # để TẮT. Đặt qua TOEIC_PHONEME_RECOGNIZER_NOISE_SIM/CONF/CONF_VOWEL.
+    phoneme_recognizer_noise_sim: float = 0.2
+    phoneme_recognizer_noise_conf: float = 0.6
+    phoneme_recognizer_noise_conf_vowel: float = 0.45
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
@@ -247,6 +255,15 @@ def load_config() -> Config:
         ),
         phoneme_l1_low_conf_floor=float(
             os.getenv("TOEIC_PHONEME_L1_LOW_CONF_FLOOR", "0.40")
+        ),
+        phoneme_recognizer_noise_sim=float(
+            os.getenv("TOEIC_PHONEME_RECOGNIZER_NOISE_SIM", "0.2")
+        ),
+        phoneme_recognizer_noise_conf=float(
+            os.getenv("TOEIC_PHONEME_RECOGNIZER_NOISE_CONF", "0.6")
+        ),
+        phoneme_recognizer_noise_conf_vowel=float(
+            os.getenv("TOEIC_PHONEME_RECOGNIZER_NOISE_CONF_VOWEL", "0.45")
         ),
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"

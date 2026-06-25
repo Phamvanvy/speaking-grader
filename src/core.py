@@ -181,6 +181,9 @@ def grade_response(
                 l1_enabled=config.phoneme_l1_enabled,
                 l1_min_confidence=config.phoneme_l1_min_confidence,
                 low_conf_floor=config.phoneme_l1_low_conf_floor,
+                recognizer_noise_sim=config.phoneme_recognizer_noise_sim,
+                recognizer_noise_conf=config.phoneme_recognizer_noise_conf,
+                recognizer_noise_conf_vowel=config.phoneme_recognizer_noise_conf_vowel,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về

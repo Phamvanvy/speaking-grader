@@ -21,6 +21,7 @@ from .diagnostics import WordDiagnostic, build_word_diagnostics
 from .ipa import (
     deletion_penalty,
     deletion_severity,
+    is_real_error_substitution,
     is_vowel,
     normalize_ipa,
     phoneme_similarity,
@@ -57,6 +58,28 @@ PHONEME_CONFIDENCE_KNEE: Final[float] = 0.5
 # KHÔNG skip). Chỉ áp cho sub (âm được nhận diện); deletion KHÔNG đi qua confidence.
 PHONEME_L1_MIN_CONFIDENCE: Final[float] = 0.70
 PHONEME_LOW_CONF_FLOOR: Final[float] = 0.40
+
+# Recognizer-noise gate (ĐỘC LẬP với L1): 1 sub bị coi là wav2vec hallucinate (KHÔNG
+# phải lỗi học viên) khi cặp (ref→pred) BẤT KHẢ THI về âm học (sim < SIM, và không nằm
+# trong _REAL_ERROR_SUBS) VÀ recognizer KHÔNG chắc (conf < CONF). Khi đó penalty về 0 +
+# severity "low" → rơi vào nhóm "Hidden recognizer noise" (không tô đỏ), giống cơ chế
+# LOW_CONFIDENCE_NEUTRALIZED nhưng có điều kiện bất-khả-thi nên KHÔNG giấu lỗi near-pair.
+#
+# Ngưỡng conf THEO LOẠI ÂM (hiệu chỉnh từ telemetry tel3.jsonl): nguyên âm wav2vec/espeak
+# vốn confidence thấp hơn nhiều dù ĐÚNG (median ~0.67 vs phụ âm ~0.91) → 1 ngưỡng chung
+# sẽ gate oan nguyên âm. CONF=0 → tắt gate (conf < 0 không bao giờ đúng → bit-for-bit như cũ).
+#
+# GIỚI HẠN ĐÃ BIẾT (sprint này, có chủ đích): gate này CHỈ bắt sub bất khả thi + CONFIDENCE
+# THẤP. Nó KHÔNG xử lý "whole-word hallucination" CONFIDENCE CAO — khi wav2vec tự tin nhả
+# sai cả từ (vd famous /feɪməs/→/leɪmz/ f→l @0.98) hoặc Whisper chép nhầm từ (blood→"floods"
+# nên reference IPA sai). Confidence KHÔNG bắt được các ca này (đang cao), và word-accuracy
+# KHÔNG tách được chúng khỏi lỗi phát âm THẬT (vd Vietnam v→b, nuốt cụm cuối first/most) → ẩn
+# theo accuracy sẽ giấu lỗi thật. Hướng tương lai: "Word Reliability Gate" thiết kế TỪ DỮ
+# LIỆU telemetry per-word (diagnostics.py đã ghi đủ: ref/pred IPA + alignment + per-phone
+# confidence), KHÔNG bake heuristic conf/sim ở production.
+PHONEME_RECOGNIZER_NOISE_SIM: Final[float] = 0.2
+PHONEME_RECOGNIZER_NOISE_CONF: Final[float] = 0.6        # phụ âm
+PHONEME_RECOGNIZER_NOISE_CONF_VOWEL: Final[float] = 0.45  # nguyên âm (confidence nền thấp hơn)
 
 # Xếp hạng để chọn status "tốt hơn" khi 1 reference index bị chạm nhiều lần.
 # "skipped" (từ ASR nghe nhầm) coi như tốt nhất — không phải lỗi, loại khỏi điểm.
@@ -377,6 +400,9 @@ def _align_points(
     *,
     l1_enabled: bool = False,
     low_conf_floor: float = PHONEME_LOW_CONF_FLOOR,
+    recognizer_noise_sim: float = PHONEME_RECOGNIZER_NOISE_SIM,
+    recognizer_noise_conf: float = PHONEME_RECOGNIZER_NOISE_CONF,
+    recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
 ) -> tuple[dict[int, tuple[PhonemePoint, float | None]], int, dict[int, float]]:
     """Một lượt qua DTW path → (point+penalty mỗi ref index, số insertion, penalty gốc/ref).
 
@@ -429,7 +455,20 @@ def _align_points(
                 penalty = base_sub
                 reason: str | None = None
                 adjustment = 1.0
-                if l1_enabled:
+                # Stage 2.5 recognizer-noise gate (ĐỘC LẬP với L1): sub bất khả thi về
+                # âm học + recognizer không chắc → wav2vec hallucinate, KHÔNG phải lỗi
+                # người đọc. Bảo vệ near-pair (sim cao) và lỗi VN thật (_REAL_ERROR_SUBS).
+                noise_conf = (
+                    recognizer_noise_conf_vowel if is_vowel(ref_ph)
+                    else recognizer_noise_conf
+                )
+                if conf < noise_conf and not is_real_error_substitution(
+                    ref_ph, pred_ph, sim_floor=recognizer_noise_sim
+                ):
+                    penalty = 0.0
+                    reason = PenaltyReason.RECOGNIZER_NOISE.value
+                    adjustment = 0.0
+                elif l1_enabled:
                     reason = PenaltyReason.HARD_ERROR.value
                     # Stage 4 confidence (chỉ substitution): conf rất thấp → trung hoà.
                     if conf < low_conf_floor:
@@ -473,6 +512,9 @@ def compute_phoneme_score(
     l1_enabled: bool = False,
     l1_min_confidence: float = PHONEME_L1_MIN_CONFIDENCE,
     low_conf_floor: float = PHONEME_LOW_CONF_FLOOR,
+    recognizer_noise_sim: float = PHONEME_RECOGNIZER_NOISE_SIM,
+    recognizer_noise_conf: float = PHONEME_RECOGNIZER_NOISE_CONF,
+    recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -502,6 +544,11 @@ def compute_phoneme_score(
             confidence rất thấp; vẫn hiển thị (accent note). KHÔNG skip (Reliability mới được skip).
         l1_min_confidence: ngưỡng confidence để áp L1 *substitution* tolerance (chưa dùng ở v1).
         low_conf_floor: sub có confidence < ngưỡng → penalty trung hoà về 0 (chỉ khi l1_enabled).
+        recognizer_noise_sim: ngưỡng similarity BẢO VỆ — sub có sim ≥ ngưỡng (hoặc nằm trong
+            _REAL_ERROR_SUBS) KHÔNG bao giờ bị gate noise (xem PHONEME_RECOGNIZER_NOISE_SIM).
+        recognizer_noise_conf / recognizer_noise_conf_vowel: ngưỡng confidence (phụ âm / nguyên âm)
+            của recognizer-noise gate. Sub bất khả thi + conf dưới ngưỡng → recognizer hallucinate →
+            penalty 0 + severity low. ĐỘC LẬP với l1_enabled. Đặt 0 để tắt gate (bit-for-bit như cũ).
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -543,6 +590,9 @@ def compute_phoneme_score(
             ref_word, ref_is_onset, ref_stress, ref_reducible, ref_skipped,
             ref_is_coda, confidence_knee, ref_display_stress,
             l1_enabled=l1_enabled, low_conf_floor=low_conf_floor,
+            recognizer_noise_sim=recognizer_noise_sim,
+            recognizer_noise_conf=recognizer_noise_conf,
+            recognizer_noise_conf_vowel=recognizer_noise_conf_vowel,
         )
         empty_prediction = False
 
@@ -569,7 +619,7 @@ def compute_phoneme_score(
     matches = substitutions = deletions = 0
     total_penalty = 0.0
     raw_penalty_sum = 0.0
-    l1_adjusted_count = low_conf_neutralized_count = 0
+    l1_adjusted_count = low_conf_neutralized_count = recognizer_noise_count = 0
     scored = 0
     point_by_ref: dict[int, PhonemePoint] = {}
     for i in range(len(reference_phonemes)):
@@ -601,6 +651,8 @@ def compute_phoneme_score(
             l1_adjusted_count += 1
         elif point.penalty_reason == PenaltyReason.LOW_CONFIDENCE_NEUTRALIZED.value:
             low_conf_neutralized_count += 1
+        elif point.penalty_reason == PenaltyReason.RECOGNIZER_NOISE.value:
+            recognizer_noise_count += 1
 
     if empty_prediction:
         accuracy = 0.0
@@ -633,10 +685,10 @@ def compute_phoneme_score(
 
     logger.info(
         "Phoneme score: accuracy=%.2f | matches=%d | subs=%d | del=%d | ins=%d | "
-        "skipped_words=%d | ref=%d | pred=%d | l1_adj=%d | low_conf_neut=%d",
+        "skipped_words=%d | ref=%d | pred=%d | l1_adj=%d | low_conf_neut=%d | recog_noise=%d",
         accuracy, matches, substitutions, deletions, insertion_count,
         len(span_skip_reason), len(reference_phonemes), len(predicted_phonemes),
-        l1_adjusted_count, low_conf_neutralized_count,
+        l1_adjusted_count, low_conf_neutralized_count, recognizer_noise_count,
     )
 
     return PhonemeScore(
@@ -655,6 +707,7 @@ def compute_phoneme_score(
         adjusted_penalty=total_penalty,
         l1_adjusted_count=l1_adjusted_count,
         low_conf_neutralized_count=low_conf_neutralized_count,
+        recognizer_noise_count=recognizer_noise_count,
         l1_adjustment_ratio=l1_adjustment_ratio,
     )
 

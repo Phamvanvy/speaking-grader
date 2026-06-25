@@ -28,6 +28,9 @@ from .scoring import (
     PHONEME_CONFIDENCE_KNEE,
     PHONEME_L1_MIN_CONFIDENCE,
     PHONEME_LOW_CONF_FLOOR,
+    PHONEME_RECOGNIZER_NOISE_CONF,
+    PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
+    PHONEME_RECOGNIZER_NOISE_SIM,
     compute_phoneme_score,
 )
 from .wav2vec_backend import (
@@ -82,6 +85,9 @@ class HybridPhonemeAnalyzer:
         l1_enabled: bool = False,
         l1_min_confidence: float = PHONEME_L1_MIN_CONFIDENCE,
         low_conf_floor: float = PHONEME_LOW_CONF_FLOOR,
+        recognizer_noise_sim: float = PHONEME_RECOGNIZER_NOISE_SIM,
+        recognizer_noise_conf: float = PHONEME_RECOGNIZER_NOISE_CONF,
+        recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         self._max_words = max_words
@@ -89,6 +95,9 @@ class HybridPhonemeAnalyzer:
         self._l1_enabled = l1_enabled
         self._l1_min_confidence = l1_min_confidence
         self._low_conf_floor = low_conf_floor
+        self._recognizer_noise_sim = recognizer_noise_sim
+        self._recognizer_noise_conf = recognizer_noise_conf
+        self._recognizer_noise_conf_vowel = recognizer_noise_conf_vowel
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
@@ -203,6 +212,9 @@ class HybridPhonemeAnalyzer:
                 l1_enabled=self._l1_enabled,
                 l1_min_confidence=self._l1_min_confidence,
                 low_conf_floor=self._low_conf_floor,
+                recognizer_noise_sim=self._recognizer_noise_sim,
+                recognizer_noise_conf=self._recognizer_noise_conf,
+                recognizer_noise_conf_vowel=self._recognizer_noise_conf_vowel,
             )
 
         logger.info(
