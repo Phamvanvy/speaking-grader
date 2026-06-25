@@ -81,7 +81,9 @@ WAV2VEC_LABEL_TO_IPA: dict[str, str] = {
     "EY": "eɪ",
     "IH": "ɪ",
     "IY": "iː",
-    "OW": "əʊ",
+    "OW": "əʊ",  # cố ý GIỮ əʊ (≠ reference oʊ): bảng predicted-side, CHỈ cho model ARPAbet
+                 # không-mặc-định; model mặc định (espeak) output IPA trực tiếp. normalize_ipa
+                 # gộp oʊ↔əʊ nên scoring không đổi — không cần đồng bộ với ARPABET_TO_IPA["OW"].
     "OY": "ɔɪ",
     "UH": "ʊ",
     "UW": "uː",

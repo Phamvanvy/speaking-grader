@@ -16,7 +16,9 @@ from src.phoneme.ipa import (
     ENGLISH_IPA_PHONEMES,
     error_severity,
     phoneme_similarity,
+    place_stress_at_onset,
     text_to_ipa_sequence,
+    text_to_ipa_sequence_with_spans,
     word_to_ipa,
     word_to_ipa_with_stress,
 )
@@ -158,7 +160,7 @@ class TestTextToIpaSequenceWithSpans:
     def test_spans_cover_phonemes_contiguously(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        phonemes, spans, _stress = text_to_ipa_sequence_with_spans("the brown fox")
+        phonemes, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the brown fox")
         assert spans  # at least some words mapped
         # First span starts at 0; each span continues from the previous end.
         assert spans[0].start_idx == 0
@@ -170,7 +172,7 @@ class TestTextToIpaSequenceWithSpans:
     def test_wrapper_returns_same_phonemes(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        phonemes, _spans, _stress = text_to_ipa_sequence_with_spans("the brown fox")
+        phonemes, _spans, _stress, _disp = text_to_ipa_sequence_with_spans("the brown fox")
         assert text_to_ipa_sequence("the brown fox") == phonemes
 
     def test_dropped_word_keeps_alignment(self, monkeypatch):
@@ -188,7 +190,7 @@ class TestTextToIpaSequenceWithSpans:
             ipa_mod, "word_to_ipa_with_stress", fake_word_to_ipa_with_stress
         )
 
-        phonemes, spans, _stress = ipa_mod.text_to_ipa_sequence_with_spans("the drop fox")
+        phonemes, spans, _stress, _disp = ipa_mod.text_to_ipa_sequence_with_spans("the drop fox")
         words = [s.word for s in spans]
         assert "drop" not in words  # dropped word contributes no span
         assert words == ["the", "fox"]
@@ -370,7 +372,7 @@ class TestComputePhonemeScore:
     def test_substitution_gets_word_from_spans(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the brown fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the brown fox")
         pred = list(ref)
         pred[-1] = "x"  # corrupt last phoneme (in "fox") → substitution there
         segs = self._make_segments(pred)
@@ -383,7 +385,7 @@ class TestComputePhonemeScore:
     def test_insertion_word_is_none_even_with_spans(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         pred = [ref[0]] + ["x"] + ref[1:]  # extra "x" → insertion (position=pred idx)
         segs = self._make_segments(pred)
         score = compute_phoneme_score(segs, ref, spans)
@@ -394,7 +396,7 @@ class TestComputePhonemeScore:
     def test_word_propagates_to_dict(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         pred = list(ref)
         pred[-1] = "x"
         segs = self._make_segments(pred)
@@ -414,7 +416,7 @@ class TestWordDetails:
     def test_all_correct_word_is_ok(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         segs = self._make_segments(list(ref))
         score = compute_phoneme_score(segs, ref, spans)
         assert score.words
@@ -428,7 +430,7 @@ class TestWordDetails:
     def test_ipa_reconstructs_reference_span_without_slashes(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         segs = self._make_segments(list(ref))
         score = compute_phoneme_score(segs, ref, spans)
         for w, span in zip(score.words, spans):
@@ -438,7 +440,7 @@ class TestWordDetails:
     def test_substitution_point_has_heard_and_severity(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         pred = list(ref)
         pred[-1] = "x"  # corrupt last phoneme (in "fox") → substitution
         segs = self._make_segments(pred)
@@ -452,7 +454,7 @@ class TestWordDetails:
     def test_deletion_point_marked(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         pred = list(ref)[:-1]  # drop last reference phoneme → deletion
         segs = self._make_segments(pred)
         score = compute_phoneme_score(segs, ref, spans)
@@ -467,7 +469,7 @@ class TestWordDetails:
         # thể xếp thành sub hoặc del tuỳ alignment — điều quan trọng là nó nặng.
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("think")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("think")
         pred = list(ref)[1:]  # bỏ phoneme đầu (θ)
         segs = self._make_segments(pred)
         score = compute_phoneme_score(segs, ref, spans)
@@ -478,7 +480,7 @@ class TestWordDetails:
     def test_no_prediction_all_deletions(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         score = compute_phoneme_score([], ref, spans)
         # "Said nothing" → 0% và mọi âm là deletion (severity nay đa dạng).
         assert score.overall_accuracy == 0.0
@@ -491,7 +493,7 @@ class TestWordDetails:
         # predicted phoneme must not add/drop per-word points or shift indices.
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         pred = [ref[0]] + ["x"] + ref[1:]  # extra "x" insertion after first phoneme
         segs = self._make_segments(pred)
         score = compute_phoneme_score(segs, ref, spans)
@@ -509,14 +511,14 @@ class TestWordDetails:
     def test_words_serialize_in_to_dict(self):
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         segs = self._make_segments(list(ref))
         d = compute_phoneme_score(segs, ref, spans).to_dict()
         assert "words" in d and "words_truncated" in d and "words_total" in d
         assert d["words"]
         assert set(d["words"][0]) == {"word", "ipa", "phonemes", "accuracy", "skip_reason"}
         assert set(d["words"][0]["phonemes"][0]) == {
-            "symbol", "status", "heard", "severity", "stress",
+            "symbol", "status", "heard", "severity", "stress", "display_stress",
             "penalty_reason", "penalty_adjustment",
         }
 
@@ -1242,6 +1244,152 @@ class TestReferenceIpaAccuracy:
         assert uah.substitution_count == schwa.substitution_count
         assert uah.deletion_count == schwa.deletion_count
         assert uah.insertion_count == schwa.insertion_count
+
+    # ── OW diphthong: hiển thị US oʊ (≠ RP əʊ); scoring KHÔNG đổi (normalize oʊ→əʊ) ──
+
+    def test_ow_maps_to_us_diphthong(self):
+        # Bảng ARPAbet→IPA: OW hiển thị oʊ (US) thay vì əʊ (RP).
+        assert ARPABET_TO_IPA["OW"] == "oʊ"
+        assert "oʊ" in ENGLISH_IPA_PHONEMES and "əʊ" not in ENGLISH_IPA_PHONEMES
+
+    def test_common_dict_ow_words_show_us(self):
+        # Path từ điển nội bộ (đọc ARPABET_TO_IPA trực tiếp): go/know/show/over → oʊ.
+        for w in ("go", "know", "show", "over"):
+            sym = word_to_ipa(w)
+            assert "oʊ" in sym and "əʊ" not in sym, w
+
+    def test_folktales_reference_uses_oh(self):
+        # g2p path: folktales bắt đầu f, oʊ, k... (trước: əʊ). Skip nếu g2p vắng.
+        sym, _st = word_to_ipa_with_stress("folktales")
+        if not sym:
+            pytest.skip("g2p_en không khả dụng")
+        assert "oʊ" in sym and "əʊ" not in sym
+        assert sym[:2] == ["f", "oʊ"]
+
+    def test_oh_is_vowel(self):
+        from src.phoneme.ipa import is_vowel
+        assert is_vowel("oʊ") is True
+
+    def test_scoring_unchanged_oh_vs_schwa_diphthong(self):
+        # CHỨNG MINH fix OW hiển thị KHÔNG đổi điểm: reference oʊ vs əʊ cho điểm y hệt.
+        spans = [WordSpan("go", 0, 2)]
+        segs = [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+                for i, p in enumerate(["ɡ", "ɔ"])]  # nguyên âm khác → tạo penalty
+        us = compute_phoneme_score(segs, ["ɡ", "oʊ"], spans)
+        rp = compute_phoneme_score(segs, ["ɡ", "əʊ"], spans)
+        assert us.overall_accuracy == rp.overall_accuracy
+        assert us.substitution_count == rp.substitution_count
+        assert us.deletion_count == rp.deletion_count
+        assert us.insertion_count == rp.insertion_count
+
+    # ── AO: hiển thị THOUGHT ɔː (≠ ɒ); scoring KHÔNG đổi (normalize ɔː==ɒ→ɔ) ──
+
+    def test_ao_maps_to_thought_vowel(self):
+        assert ARPABET_TO_IPA["AO"] == "ɔː"
+
+    def test_according_vowel_is_thought(self):
+        # AO→ɔː + giữ r (rhotic/US) → /əˈkɔːrdɪŋ/ (không override).
+        sym, _st = word_to_ipa_with_stress("according")
+        if not sym:
+            pytest.skip("g2p_en không khả dụng")
+        assert sym == ["ə", "k", "ɔː", "r", "d", "ɪ", "ŋ"]
+
+    def test_scoring_unchanged_ao_thought_vs_lot(self):
+        from src.phoneme.ipa import normalize_ipa
+        assert normalize_ipa("ɔː") == normalize_ipa("ɒ")
+        spans = [WordSpan("your", 0, 3)]
+        segs = [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+                for i, p in enumerate(["j", "ə", "r"])]
+        thought = compute_phoneme_score(segs, ["j", "ɔː", "r"], spans)
+        lot = compute_phoneme_score(segs, ["j", "ɒ", "r"], spans)
+        assert thought.overall_accuracy == lot.overall_accuracy
+        assert thought.substitution_count == lot.substitution_count
+
+    # ── Per-word overrides khớp từ điển chuẩn (qua helper: AH-split + onset relocation) ──
+
+    def test_word_overrides_match_dictionary(self):
+        # symbols + nhấn-hiển-thị (dời onset) → đúng IPA mong đợi.
+        cases = {
+            "vietnamese": (["v","iː","e","t","n","ə","m","iː","z"], "ˌviːetnəˈmiːz"),
+            "vietnam":    (["v","iː","e","t","n","ɑː","m"], "ˌviːetˈnɑːm"),
+            "resilient":  (["r","ɪ","z","ɪ","l","iː","ə","n","t"], "rɪˈzɪliːənt"),
+            "relationship": (["r","ɪ","l","eɪ","ʃ","ə","n","ʃ","ɪ","p"], "rɪˈleɪʃənʃɪp"),
+            "favorite":   (["f","eɪ","v","ə","r","ɪ","t"], "ˈfeɪvərɪt"),
+        }
+        for word, (exp_sym, exp_render) in cases.items():
+            sym, _st = word_to_ipa_with_stress(word)
+            assert sym == exp_sym, word
+            ph, _spans, _stress, disp = text_to_ipa_sequence_with_spans(word)
+            rendered = "".join(
+                ("ˈ" if d == "primary" else "ˌ" if d == "secondary" else "") + s
+                for s, d in zip(ph, disp)
+            )
+            assert rendered == exp_render, (word, rendered)
+
+    def test_overrides_validate(self):
+        _validate_word_ipa_overrides()  # không raise với seed hiện tại
+
+
+class TestStressOnsetPlacement:
+    """place_stress_at_onset: dời dấu nhấn từ nguyên âm về đầu âm tiết (CHỈ hiển thị)."""
+
+    @staticmethod
+    def _render(word):
+        ph, _spans, _stress, disp = text_to_ipa_sequence_with_spans(word)
+        if not ph:
+            pytest.skip("g2p_en không khả dụng")
+        return "".join(
+            ("ˈ" if d == "primary" else "ˌ" if d == "secondary" else "") + s
+            for s, d in zip(ph, disp)
+        )
+
+    def test_mark_before_single_onset(self):
+        for word, exp in [("legend", "ˈledʒənd"), ("mountain", "ˈmaʊntən"),
+                          ("traditional", "trəˈdɪʃənəl")]:
+            assert self._render(word) == exp, word
+
+    def test_mark_before_cluster_onset(self):
+        # Cụm onset hợp lệ đi cùng nguyên âm: pr.
+        assert self._render("princess") == "ˈprɪnses"
+
+    def test_splits_illegal_medial_cluster(self):
+        # 'tn'/'kt' KHÔNG phải onset hợp lệ → chỉ phụ âm cuối theo nguyên âm nhấn.
+        assert self._render("vietnam") == "ˌviːetˈnɑːm"      # tn → n
+        assert self._render("folktales") == "ˈfoʊkˌteɪlz"    # kt → t (secondary)
+
+    def test_pure_function_relocates_not_mutates(self):
+        # Đầu vào nhấn trên nguyên âm; đầu ra dời sang phụ âm onset, list gốc bất biến.
+        symbols = ["p", "r", "ɪ", "n", "s", "e", "s"]
+        stresses = [None, None, "primary", None, None, None, None]
+        disp = place_stress_at_onset(symbols, stresses)
+        assert disp == ["primary", None, None, None, None, None, None]  # dời về 'p'
+        assert stresses == [None, None, "primary", None, None, None, None]  # bất biến
+
+    def test_vowel_initial_syllable_keeps_mark_on_vowel(self):
+        # Âm tiết nhấn KHÔNG có onset (hiatus: nguyên âm ngay sau nguyên âm) → giữ trên nguyên âm.
+        disp = place_stress_at_onset(["r", "i", "æ", "k", "t"], [None, None, "primary", None, None])
+        assert disp == [None, None, "primary", None, None]  # 'æ' đứng ngay sau 'i' → không dời
+
+    def test_scoring_ignores_display_stress(self):
+        # display_stress chỉ gắn lên PhonemePoint — KHÔNG đổi điểm/severity/counts.
+        spans = [WordSpan("legend", 0, 6)]
+        ref = ["l", "e", "dʒ", "ə", "n", "d"]
+        segs = [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+                for i, p in enumerate(["l", "e", "dʒ", "ə", "n", "d"])]
+        stress = [None, "primary", None, None, None, None]
+        disp = place_stress_at_onset(ref, stress)
+        with_disp = compute_phoneme_score(segs, ref, spans, stress,
+                                          reference_display_stress=disp)
+        without = compute_phoneme_score(segs, ref, spans, stress)
+        assert with_disp.overall_accuracy == without.overall_accuracy
+        assert with_disp.substitution_count == without.substitution_count
+        assert with_disp.deletion_count == without.deletion_count
+        # scoring stress (trên nguyên âm) bất biến; display_stress dời về onset 'l'.
+        pts_with = with_disp.words[0].phonemes
+        pts_without = without.words[0].phonemes
+        assert [p.stress for p in pts_with] == [p.stress for p in pts_without]
+        assert pts_with[0].display_stress == "primary"  # 'l'
+        assert pts_with[1].display_stress is None        # 'e' (nguyên âm)
 
 
 # ── Model serialization tests ────────────────────────────────────────────────

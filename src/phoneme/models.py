@@ -106,6 +106,10 @@ class PhonemePoint:
         severity: "high" | "medium" | "low" cho sub/del; None với "ok"
         stress: "primary" | "secondary" cho nguyên âm được nhấn; None nếu không
             nhấn hoặc từ đơn âm tiết. CHỈ để hiển thị — không tham gia alignment.
+            Đặt TRÊN nguyên âm (nguồn cho severity/nhân chính phía scoring).
+        display_stress: như `stress` nhưng dấu nhấn ĐÃ dời về đầu âm tiết (onset) để
+            render `/ˈledʒənd/` thay vì `/lˈedʒənd/`. CHỈ để hiển thị; None nếu không có
+            (payload cũ) — UI fallback về `stress`.
         penalty_reason: lý do điều chỉnh penalty (L1-aware layer): "l1_final_deletion"
             (nuốt phụ âm cuối kiểu L1 → "accent note"), "low_confidence_neutralized",
             "hard_error", hoặc None (âm đúng / layer tắt). UI dùng để gắn nhãn accent.
@@ -117,6 +121,7 @@ class PhonemePoint:
     heard: str | None = None
     severity: str | None = None
     stress: str | None = None
+    display_stress: str | None = None
     penalty_reason: str | None = None
     penalty_adjustment: float = 1.0
 
@@ -127,6 +132,7 @@ class PhonemePoint:
             "heard": self.heard,
             "severity": self.severity,
             "stress": self.stress,
+            "display_stress": self.display_stress,
             "penalty_reason": self.penalty_reason,
             "penalty_adjustment": round(self.penalty_adjustment, 4),
         }

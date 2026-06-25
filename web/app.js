@@ -729,13 +729,18 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     const isNoise = p =>
         p.status === 'skipped' ||
         ((p.status === 'sub' || p.status === 'del') && p.severity === 'low');
-    // Dấu nhấn âm (nhấn âm) — span riêng, render trước nguyên âm. Backend đã
-    // suppress nhấn cho từ đơn âm tiết nên UI chỉ cần đọc p.stress (có thể vắng
-    // ở payload cũ → bỏ qua).
-    const stressMark = p =>
-        p.stress === 'primary' ? '<span class="phoneme-stress">ˈ</span>'
-      : p.stress === 'secondary' ? '<span class="phoneme-stress">ˌ</span>'
-      : '';
+    // Dấu nhấn âm (nhấn âm) — span riêng, render trước âm mang dấu. Ưu tiên
+    // display_stress (đã dời về đầu âm tiết → /ˈledʒənd/); payload cũ không có
+    // field này thì fallback về p.stress (nằm trên nguyên âm). Backend đã suppress
+    // nhấn cho từ đơn âm tiết.
+    const stressMark = p => {
+        // Chỉ fallback khi field VẮNG (payload cũ). Nếu có field nhưng null nghĩa là
+        // "âm này không mang dấu" (dấu đã dời sang phụ âm onset) → KHÔNG fallback.
+        const s = (p.display_stress !== undefined) ? p.display_stress : p.stress;
+        return s === 'primary' ? '<span class="phoneme-stress">ˈ</span>'
+             : s === 'secondary' ? '<span class="phoneme-stress">ˌ</span>'
+             : '';
+    };
     const symHtml = p => {
         const sig = isSignificant(p);
         const cls = sig && p.status === 'del' ? 'phoneme-sym phoneme-sym--missing'

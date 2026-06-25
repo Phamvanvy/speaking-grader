@@ -353,7 +353,7 @@ class TestCompactPhonemeOutput:
         from src.phoneme.ipa import text_to_ipa_sequence_with_spans
         from src.phoneme.scoring import compute_phoneme_score
 
-        ref, spans, _stress = text_to_ipa_sequence_with_spans("the fox")
+        ref, spans, _stress, _disp = text_to_ipa_sequence_with_spans("the fox")
         pred = list(ref)
         pred[-1] = "x"  # corrupt the last phoneme in "fox"
         segs = self._make_segments(pred)

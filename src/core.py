@@ -197,7 +197,7 @@ def grade_response(
             # → transcript (free-speech, đo phát âm của chính từ thí sinh đã nói).
             phoneme_reference_text = reference_script or transcription.text
             if reference_script:
-                _ph, ref_spans, _st = text_to_ipa_sequence_with_spans(reference_script)
+                _ph, ref_spans, _st, _ds = text_to_ipa_sequence_with_spans(reference_script)
                 reference_words = [s.word for s in ref_spans]
                 evidence = RecognizerEvidence.from_transcript(transcription.text)
                 skips = dict(assess_reliability(
@@ -209,7 +209,7 @@ def grade_response(
             # traditional/Vietnam/folktales/blood) nằm ở đường free-speech. Dùng cùng kỹ
             # thuật difflib với Recognition Reliability; DIAGNOSTIC ONLY, không đụng điểm/skip.
             if config.phoneme_telemetry_enabled and phoneme_reference_text.strip():
-                _wph, win_spans, _wst = text_to_ipa_sequence_with_spans(
+                _wph, win_spans, _wst, _wds = text_to_ipa_sequence_with_spans(
                     phoneme_reference_text
                 )
                 word_windows = map_reference_words_to_windows(

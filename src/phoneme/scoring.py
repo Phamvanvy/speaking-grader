@@ -331,6 +331,7 @@ def _score_deletion(
     is_coda: bool,
     stress: str | None,
     l1_enabled: bool,
+    display_stress: str | None = None,
 ) -> tuple[PhonemePoint, float, float]:
     """1 âm reference bị THIẾU → (PhonemePoint, penalty đã điều chỉnh, penalty gốc).
 
@@ -354,6 +355,7 @@ def _score_deletion(
             severity = _severity_from_penalty(penalty)  # severity khớp penalty đã giảm
     point = PhonemePoint(
         symbol=ref_ph, status="del", severity=severity, stress=stress,
+        display_stress=display_stress,
         penalty_reason=reason, penalty_adjustment=round(adjustment, 4),
     )
     return point, penalty, raw
@@ -371,6 +373,7 @@ def _align_points(
     ref_skipped: list[bool],
     ref_is_coda: list[bool],
     knee: float,
+    ref_display_stress: list[str | None],
     *,
     l1_enabled: bool = False,
     low_conf_floor: float = PHONEME_LOW_CONF_FLOOR,
@@ -399,10 +402,12 @@ def _align_points(
         ref_ph = reference[ref_idx]
         word = ref_word[ref_idx]
         stress = ref_stress[ref_idx]
+        disp = ref_display_stress[ref_idx]  # nhấn-hiển-thị (onset) — chỉ gắn lên point
         iter_raw: float | None = None
         if ref_skipped[ref_idx]:
             # Cả từ bị skip → mọi âm "skipped" bất kể có khớp hay không.
-            point = PhonemePoint(symbol=ref_ph, status="skipped", stress=stress)
+            point = PhonemePoint(symbol=ref_ph, status="skipped", stress=stress,
+                                 display_stress=disp)
             penalty: float | None = None
         elif pred_idx >= 0:
             pred_ph = predicted[pred_idx]
@@ -410,7 +415,8 @@ def _align_points(
             if phonemes_match(
                 ref_ph, pred_ph, word=word, reducible=ref_reducible[ref_idx]
             ):
-                point = PhonemePoint(symbol=ref_ph, status="ok", stress=stress)
+                point = PhonemePoint(symbol=ref_ph, status="ok", stress=stress,
+                                     display_stress=disp)
                 penalty = 0.0
             else:
                 sim = phoneme_similarity(pred_ph, ref_ph)
@@ -433,13 +439,14 @@ def _align_points(
                 point = PhonemePoint(
                     symbol=ref_ph, status="sub", heard=pred_ph,
                     severity=_severity_from_penalty(penalty), stress=stress,
+                    display_stress=disp,
                     penalty_reason=reason, penalty_adjustment=round(adjustment, 4),
                 )
                 iter_raw = base_sub
         else:
             point, penalty, iter_raw = _score_deletion(
                 ref_ph, is_onset=ref_is_onset[ref_idx], is_coda=ref_is_coda[ref_idx],
-                stress=stress, l1_enabled=l1_enabled,
+                stress=stress, display_stress=disp, l1_enabled=l1_enabled,
             )
 
         existing = result.get(ref_idx)
@@ -457,6 +464,7 @@ def compute_phoneme_score(
     reference_phonemes: list[str],
     reference_spans: list[WordSpan] | None = None,
     reference_stress: list[str | None] | None = None,
+    reference_display_stress: list[str | None] | None = None,
     max_words: int = MAX_WORDS_RETURNED,
     skips: Mapping[int, SkipDecision] | None = None,
     confidence_knee: float = PHONEME_CONFIDENCE_KNEE,
@@ -474,7 +482,11 @@ def compute_phoneme_score(
     Args:
         reference_spans: map reference index → từ (WordSpan) để gắn `word` cho lỗi
             và xác định onset; None thì lỗi giữ word=None (tương thích ngược).
-        reference_stress: nhấn âm song song 1-1 với reference_phonemes.
+        reference_stress: nhấn âm song song 1-1 với reference_phonemes (TRÊN nguyên âm —
+            scoring đọc để xác định nhân chính/severity).
+        reference_display_stress: nhấn âm ĐÃ dời về onset (chỉ HIỂN THỊ) song song 1-1 với
+            reference_phonemes. CHỈ gắn vào PhonemePoint.display_stress cho UI — KHÔNG tham gia
+            alignment/severity/điểm. None = không có (PhonemePoint.display_stress = None).
         skips: quyết định bỏ qua từ Recognition Reliability (tầng TRÊN), keyed theo
             CHỈ SỐ SPAN chuẩn (vị trí trong reference_spans). Scorer CHỈ tiêu thụ —
             KHÔNG tự quyết định reliability (không suy từ match-ratio/similarity/penalty).
@@ -504,6 +516,14 @@ def compute_phoneme_score(
     ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda = _ref_metadata(
         reference_phonemes, reference_spans, reference_stress
     )
+    # Nhấn-hiển-thị (dời về onset) song song reference — CHỈ để gắn PhonemePoint.display_stress.
+    # Pad/cắt về đúng len(reference) như ref_stress; không tham gia bất kỳ tính toán điểm nào.
+    n_ref = len(reference_phonemes)
+    ref_display_stress: list[str | None] = (
+        list(reference_display_stress) if reference_display_stress else [None] * n_ref
+    )
+    if len(ref_display_stress) < n_ref:
+        ref_display_stress += [None] * (n_ref - len(ref_display_stress))
     # Map quyết định skip (theo chỉ số span chuẩn) → cờ per-phoneme + lý do per-span.
     ref_skipped, span_skip_reason = _resolve_skips(
         reference_phonemes, reference_spans, skips
@@ -521,7 +541,7 @@ def compute_phoneme_score(
         result, insertion_count, raw_by_ref = _align_points(
             path, predicted_phonemes, predicted_conf, reference_phonemes,
             ref_word, ref_is_onset, ref_stress, ref_reducible, ref_skipped,
-            ref_is_coda, confidence_knee,
+            ref_is_coda, confidence_knee, ref_display_stress,
             l1_enabled=l1_enabled, low_conf_floor=low_conf_floor,
         )
         empty_prediction = False
@@ -531,13 +551,15 @@ def compute_phoneme_score(
         if i in result:
             continue
         stress = ref_stress[i]
+        disp = ref_display_stress[i]
         if ref_skipped[i]:
             result[i] = (PhonemePoint(symbol=reference_phonemes[i], status="skipped",
-                                      stress=stress), None)
+                                      stress=stress, display_stress=disp), None)
         else:
             point, pen, raw = _score_deletion(
                 reference_phonemes[i], is_onset=ref_is_onset[i],
-                is_coda=ref_is_coda[i], stress=stress, l1_enabled=l1_enabled,
+                is_coda=ref_is_coda[i], stress=stress, display_stress=disp,
+                l1_enabled=l1_enabled,
             )
             result[i] = (point, pen)
             raw_by_ref[i] = raw

@@ -30,7 +30,7 @@ ENGLISH_IPA_PHONEMES: Final[list[str]] = [
     # 20 vowels (monophthong + diphthong)
     "iː", "ɪ", "e", "æ", "ɑː", "ɒ", "ɔː", "ʌ", "ʊ", "uː",
     "ə", "ɜː",
-    "eɪ", "aɪ", "ɔɪ", "əʊ", "aʊ", "ɪə", "eə", "ʊə",
+    "eɪ", "aɪ", "ɔɪ", "oʊ", "aʊ", "ɪə", "eə", "ʊə",
     # 24 consonants
     "p", "b",
     "t", "d",
@@ -49,9 +49,9 @@ ENGLISH_IPA_PHONEMES: Final[list[str]] = [
 # ARPAbet → IPA mapping (tiếng Anh, dựa trên CMUdict phoneme set)
 ARPABET_TO_IPA: Final[dict[str, str]] = {
     # Vowels
-    "AA": "ɑː", "AE": "æ", "AH": "ə", "AO": "ɒ", "AW": "aʊ",
+    "AA": "ɑː", "AE": "æ", "AH": "ə", "AO": "ɔː", "AW": "aʊ",
     "AY": "aɪ", "EH": "e", "ER": "ɜː", "EY": "eɪ", "IH": "ɪ",
-    "IY": "iː", "OW": "əʊ", "OY": "ɔɪ", "UH": "ʊ", "UW": "uː",
+    "IY": "iː", "OW": "oʊ", "OY": "ɔɪ", "UH": "ʊ", "UW": "uː",
     # Consonants
     "B": "b", "CH": "tʃ", "D": "d", "DH": "ð", "F": "f",
     "G": "ɡ", "HH": "h", "JH": "dʒ", "K": "k", "L": "l",
@@ -158,6 +158,16 @@ _WORD_IPA_OVERRIDES: Final[dict[str, list[str]]] = {
     # especially: g2p_en cho /əspeʃliː/ (thiếu cả ə trước l); Cambridge /ɪˈspeʃ.ᵊl.i/ →
     # dùng biến thể CMU IH0 S P EH1 SH AH0 L IY0 → /ɪspˈeʃəliː/.
     "especially": ["IH0", "S", "P", "EH1", "SH", "AH0", "L", "IY0"],
+    # g2p cho AA0→ɑː (nên rút gọn ə) + đuôi S (nên Z); nhấn phụ ở âm tiết đầu → /ˌviːetnəˈmiːz/.
+    "vietnamese": ["V", "IY2", "EH0", "T", "N", "AH0", "M", "IY1", "Z"],
+    # nhấn phụ về âm tiết đầu (g2p đặt EH2 lệch) → /ˌviːetˈnɑːm/.
+    "vietnam": ["V", "IY2", "EH0", "T", "N", "AA1", "M"],
+    # g2p "L Y AH0" (l j ə) → dùng IY0 cho biến thể nguyên âm /-liːənt/ → /rɪˈzɪliːənt/.
+    "resilient": ["R", "IH0", "Z", "IH1", "L", "IY0", "AH0", "N", "T"],
+    # g2p IY0→iː ở âm tiết đầu KHÔNG nhấn (nên ɪ); dùng IH0 → /rɪˈleɪʃənʃɪp/.
+    "relationship": ["R", "IH0", "L", "EY1", "SH", "AH0", "N", "SH", "IH0", "P"],
+    # g2p ER0→ɜː (nguyên âm NURSE nhấn) sai cho -or- KHÔNG nhấn; AH0+R = ə+r (r-màu) → /ˈfeɪvərɪt/.
+    "favorite": ["F", "EY1", "V", "AH0", "R", "IH0", "T"],
 }
 
 
@@ -181,7 +191,7 @@ _validate_word_ipa_overrides()
 
 # Phân loại phonemes theo manner/place cho similarity scoring
 _VOWELS = {"iː", "ɪ", "e", "æ", "ɑː", "ɒ", "ɔː", "ʌ", "ʊ", "uː", "ə", "ɜː",
-           "eɪ", "aɪ", "ɔɪ", "əʊ", "aʊ", "ɪə", "eə", "ʊə"}
+           "eɪ", "aɪ", "ɔɪ", "oʊ", "aʊ", "ɪə", "eə", "ʊə"}
 _PLOSIVES = {"p", "b", "t", "d", "k", "ɡ", "tʃ", "dʒ"}
 _FRICATIVES = {"s", "z", "ʃ", "ʒ", "f", "v", "θ", "ð", "h"}
 _NASALS = {"m", "n", "ŋ"}
@@ -514,6 +524,79 @@ def _finalize_stress(
     return symbols, stresses
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Dời ký hiệu nhấn về ĐẦU âm tiết (onset) — CHỈ để HIỂN THỊ
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Onset clusters tiếng Anh hợp lệ (2–3 phụ âm), ký hiệu IPA hiển thị. Đây là BẢNG
+# HEURISTIC cho việc đặt dấu nhấn — KHÔNG phải syllabifier sonority đầy đủ; có thể
+# chia sai vài cụm hiếm/ngoại lai. Hệ quả DUY NHẤT của chia sai là vị trí dấu nhấn
+# lệch về mặt hiển thị — KHÔNG bao giờ đổi chuỗi phoneme, alignment hay điểm số.
+# (Affricate tʃ/dʒ là 1 token → tự động là onset đơn hợp lệ; đừng dùng bảng này để
+# syllabify cho mục đích chấm điểm.)
+_LEGAL_ONSETS: Final[frozenset[tuple[str, ...]]] = frozenset({
+    # stop + approximant
+    ("p", "l"), ("p", "r"), ("p", "j"),
+    ("b", "l"), ("b", "r"), ("b", "j"),
+    ("t", "r"), ("t", "w"), ("t", "j"),
+    ("d", "r"), ("d", "w"), ("d", "j"),
+    ("k", "l"), ("k", "r"), ("k", "w"), ("k", "j"),
+    ("ɡ", "l"), ("ɡ", "r"), ("ɡ", "w"), ("ɡ", "j"),
+    # fricative + approximant
+    ("f", "l"), ("f", "r"), ("f", "j"),
+    ("v", "j"),
+    ("θ", "r"), ("θ", "w"), ("θ", "j"),
+    ("ʃ", "r"),
+    ("h", "j"),
+    # s + consonant
+    ("s", "p"), ("s", "t"), ("s", "k"), ("s", "m"), ("s", "n"),
+    ("s", "l"), ("s", "w"), ("s", "f"), ("s", "j"),
+    # nasal/lateral + j
+    ("m", "j"), ("n", "j"), ("l", "j"),
+    # s + stop + approximant (3 phụ âm)
+    ("s", "p", "l"), ("s", "p", "r"), ("s", "p", "j"),
+    ("s", "t", "r"), ("s", "t", "j"),
+    ("s", "k", "l"), ("s", "k", "r"), ("s", "k", "w"), ("s", "k", "j"),
+})
+
+
+def place_stress_at_onset(
+    symbols: list[str], stresses: list[StressType | None]
+) -> list[StressType | None]:
+    """Dời mỗi dấu nhấn từ NGUYÊN ÂM sang ĐẦU âm tiết (onset) — trả list song song MỚI.
+
+    CHỈ để HIỂN THỊ. Từ điển đặt dấu nhấn trước cả âm tiết (`/ˈledʒənd/`) chứ không
+    trước nguyên âm (`/lˈedʒənd/`). CMU/g2p gắn nhấn trên nguyên âm; hàm này dời dấu
+    về phụ âm đầu của onset hợp lệ DÀI NHẤT của âm tiết đó.
+
+    KHÔNG được dùng cho chấm điểm: danh sách `stresses` gốc (trên nguyên âm) mới là
+    nguồn cho scoring (severity/reducible/nhân chính). Hàm này tạo kênh hiển thị TÁCH
+    BIỆT, không đụng tới list gốc.
+
+    Thuật toán (cho mỗi i có nhấn): gom phụ âm liền trước i lùi tới nguyên âm trước /
+    đầu từ → run R; chọn k∈{3,2,1} LỚN NHẤT sao cho k phụ âm cuối của R là onset hợp lệ
+    (đơn phụ âm luôn hợp lệ trừ ŋ); đặt dấu trước phụ âm đó (phụ âm trước nó là coda âm
+    tiết trước). R rỗng (âm tiết mở đầu nguyên âm) hoặc không có onset hợp lệ → giữ trên
+    nguyên âm. `_LEGAL_ONSETS` là heuristic hiển thị, không phải syllabifier đầy đủ.
+    """
+    display: list[StressType | None] = [None] * len(symbols)
+    for i, st in enumerate(stresses):
+        if st is None:
+            continue
+        j = i
+        while j > 0 and not is_vowel(symbols[j - 1]):
+            j -= 1
+        run = symbols[j:i]  # phụ âm liền trước nguyên âm nhấn
+        target = i  # mặc định: giữ trên nguyên âm (âm tiết mở đầu nguyên âm / không có onset)
+        for k in range(min(3, len(run)), 0, -1):
+            cluster = tuple(run[len(run) - k:])
+            if (k == 1 and cluster[0] != "ŋ") or (k >= 2 and cluster in _LEGAL_ONSETS):
+                target = i - k
+                break
+        display[target] = st
+    return display
+
+
 def word_to_ipa(word: str) -> list[str]:
     """Chuyển 1 từ tiếng Anh thành danh sách IPA phonemes.
 
@@ -582,30 +665,36 @@ def word_to_ipa_with_stress(
 
 def text_to_ipa_sequence_with_spans(
     text: str,
-) -> tuple[list[str], list[WordSpan], list[StressType | None]]:
-    """Chuyển text → (phonemes tham chiếu, WordSpan, nhấn âm song song).
+) -> tuple[list[str], list[WordSpan], list[StressType | None], list[StressType | None]]:
+    """Chuyển text → (phonemes tham chiếu, WordSpan, nhấn âm, nhấn-hiển-thị) song song.
 
     Input:  "The quick brown fox"
     Output: (["ð", "ə", "k", "w", "ɪ", "k", ...],
              [WordSpan("The", 0, 2), WordSpan("quick", 2, 6), ...],
-             [None, None, None, None, "primary", None, ...])
+             [None, None, None, None, "primary", None, ...],   # nhấn TRÊN nguyên âm (scoring)
+             [None, None, None, "primary", None, None, ...])    # nhấn dời về ONSET (hiển thị)
 
     Phonemes, spans và stress được build trong CÙNG vòng lặp tokenize/
     word_to_ipa_with_stress, nên luôn khớp 1-1 theo index: từ nào không tra được
     IPA (dropped) sẽ KHÔNG sinh span và KHÔNG đẩy phoneme/stress nào → index của
     các từ sau không bị lệch. `stress` song song 1-1 với `phonemes`.
 
+    `display_stress`: dấu nhấn ĐÃ dời về đầu âm tiết (onset) qua place_stress_at_onset,
+    tính theo TỪNG TỪ → CHỈ để render `/ˈledʒənd/`. Scoring vẫn dùng `stress` (trên
+    nguyên âm). Hai list cùng độ dài, song song 1-1 với `phonemes`.
+
     Span dùng để map ngược lỗi phoneme (theo position trong reference sequence)
     về đúng từ. `word` giữ nguyên dạng token (re.findall đã loại dấu câu) và giữ
     nguyên hoa/thường để hiển thị; word_to_ipa tự lower() khi tra từ điển.
     """
     if not text:
-        return [], [], []
+        return [], [], [], []
 
     words = re.findall(r"[a-zA-Z'-]+", text)
     phonemes: list[str] = []
     spans: list[WordSpan] = []
     stress: list[StressType | None] = []
+    display_stress: list[StressType | None] = []
     dropped: list[str] = []
     for word in words:
         word_phones, word_stress = word_to_ipa_with_stress(word)
@@ -613,6 +702,8 @@ def text_to_ipa_sequence_with_spans(
             start = len(phonemes)
             phonemes.extend(word_phones)
             stress.extend(word_stress)
+            # Nhấn-hiển-thị dời về onset, tính theo PHẠM VI TỪ (onset không vượt biên từ).
+            display_stress.extend(place_stress_at_onset(word_phones, word_stress))
             spans.append(WordSpan(word, start, len(phonemes)))
         else:
             # Word không tra được IPA (không có trong dict & g2p) — bỏ qua, ghi log.
@@ -629,7 +720,7 @@ def text_to_ipa_sequence_with_spans(
             " ..." if len(dropped) > 10 else "",
         )
 
-    return phonemes, spans, stress
+    return phonemes, spans, stress, display_stress
 
 
 def text_to_ipa_sequence(text: str) -> list[str]:
@@ -641,5 +732,5 @@ def text_to_ipa_sequence(text: str) -> list[str]:
     Thin wrapper của text_to_ipa_sequence_with_spans() — giữ chữ ký cũ cho các
     caller chỉ cần phoneme list (không cần word mapping).
     """
-    phonemes, _spans, _stress = text_to_ipa_sequence_with_spans(text)
+    phonemes, _spans, _stress, _disp = text_to_ipa_sequence_with_spans(text)
     return phonemes

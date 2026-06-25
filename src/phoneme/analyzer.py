@@ -159,11 +159,12 @@ class HybridPhonemeAnalyzer:
 
         # Build reference phoneme sequence + word spans (để map lỗi → từ)
         if reference_text:
-            reference_phonemes, reference_spans, reference_stress = (
+            reference_phonemes, reference_spans, reference_stress, reference_display_stress = (
                 text_to_ipa_sequence_with_spans(reference_text)
             )
         else:
             reference_phonemes, reference_spans, reference_stress = [], [], []
+            reference_display_stress = []
 
         # ── Phase 1: wav2vec only ─────────────────────────────────────────
         segments, warning = self._wav2vec.predict(audio_path)
@@ -193,6 +194,7 @@ class HybridPhonemeAnalyzer:
         if reference_phonemes and segments:
             score = compute_phoneme_score(
                 segments, reference_phonemes, reference_spans, reference_stress,
+                reference_display_stress=reference_display_stress,
                 max_words=self._max_words,
                 skips=skips,
                 confidence_knee=self._confidence_knee,
