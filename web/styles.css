@@ -648,8 +648,9 @@ details.phoneme-detail[open] > summary.phoneme-detail__title {
     font-weight: 600;
 }
 
-/* Override global select width:100% — control cỡ nhỏ gọn cạnh nhãn. */
-.accent-select {
+/* Trong panel Pronunciation detail: override global select width:100% — control
+   cỡ nhỏ gọn cạnh nhãn. Selector trên form chính giữ full-width như các select khác. */
+.accent-row .accent-select {
     width: auto;
     padding: 0.2rem 0.4rem;
     font-size: 0.82rem;

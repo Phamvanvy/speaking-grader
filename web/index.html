@@ -96,8 +96,15 @@
                     </select>
                     <p class="mode-note" id="mode-note"></p>
                 </div>
+
+                <div class="form-group">
+                    <label for="expected-duration">Expected Duration (sec)</label>
+                    <input type="number" id="expected-duration" placeholder="e.g. 60" min="1">
+                </div>
             </div>
 
+            <!-- Hai tùy chọn trình bày kết quả đi cùng hàng: ngôn ngữ nhận xét +
+                 giọng IPA tham chiếu (chỉ ảnh hưởng hiển thị, không đổi điểm). -->
             <div class="row">
                 <div class="form-group">
                     <label for="feedback-lang">Feedback Language</label>
@@ -109,8 +116,12 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="expected-duration">Expected Duration (sec)</label>
-                    <input type="number" id="expected-duration" placeholder="e.g. 60" min="1">
+                    <label for="accent">Pronunciation Reference</label>
+                    <select id="accent" class="accent-select">
+                        <option value="gb">Anh-Anh (British)</option>
+                        <option value="us">Anh-Mỹ (American)</option>
+                    </select>
+                    <p class="mode-note">Giọng IPA hiển thị ở Pronunciation detail (Anh = bản chuyển đổi gần đúng, không đổi điểm).</p>
                 </div>
             </div>
 

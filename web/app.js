@@ -55,9 +55,16 @@ let currentAccent = localStorage.getItem(ACCENT_KEY) === 'us' ? 'us' : 'gb';
 function setAccent(v) {
     currentAccent = v === 'us' ? 'us' : 'gb';
     localStorage.setItem(ACCENT_KEY, currentAccent);
+    // Đồng bộ MỌI selector accent đang có (form chính + panel) để hai chỗ không lệch.
+    document.querySelectorAll('.accent-select').forEach(s => { s.value = currentAccent; });
     if (lastSingleData) showSingleResult(lastSingleData);
     if (lastBatchData) showBatchResult(lastBatchData);
 }
+
+// Đồng bộ giá trị ban đầu cho selector trên form chính theo lựa chọn đã lưu.
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.accent-select').forEach(s => { s.value = currentAccent; });
+});
 
 // Delegated: bắt mọi <select class="accent-select"> (panel dựng lại mỗi lần render,
 // có thể lồng trong <details>), gắn 1 lần ở document.
@@ -905,7 +912,7 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
                     <option value="us"${currentAccent === 'us' ? ' selected' : ''}>Anh-Mỹ (American)</option>
                 </select>
             </label>
-            <span class="accent-note">Giọng Anh là bản chuyển đổi gần đúng</span>
+            <span class="accent-note">Anh = bản chuyển đổi gần đúng</span>
         </div>`;
     const body = `
         ${accentRow}
