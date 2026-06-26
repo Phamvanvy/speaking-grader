@@ -81,6 +81,7 @@ def grade_response(
     phoneme_analysis: bool | None = None,
     question_id: str = "adhoc",
     save: bool = True,
+    accent: str = "default",
 ) -> dict[str, Any]:
     """Chạy toàn bộ pipeline cho 1 audio và trả về dict kết quả (build_output).
 
@@ -98,6 +99,8 @@ def grade_response(
       để gắn wav2vec theo mode: mock_test → True, practice → None (theo config),
       và True khi practice tự leo lên mock_test.
     - save: ghi JSON ra outputs/ (CLI cần; API có thể tắt).
+    - accent: giọng tham chiếu phát âm ("default" | "gb" | "us"). CHỈ truyền xuống phoneme
+      analyzer; "default" chấp nhận coda /r/ non-rhotic (Anh-Anh), không trừ điểm.
     """
     phoneme_enabled = (
         config.phoneme_analysis_enabled
@@ -237,6 +240,7 @@ def grade_response(
                 skips=skips,
                 diagnostics_sink=diagnostics_sink,
                 word_windows=word_windows,
+                accent=accent,
             )
         except Exception:  # noqa: BLE001 - phoneme là phụ trợ, lỗi không fatal
             logger.exception("Phoneme | question=%s | analyzer crashed", question_id)

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Speaking Grader</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=accent-default-1">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
@@ -118,10 +118,11 @@
                 <div class="form-group">
                     <label for="accent">Pronunciation Reference</label>
                     <select id="accent" class="accent-select">
+                        <option value="default">Tự động (default)</option>
                         <option value="gb">Anh-Anh (British)</option>
                         <option value="us">Anh-Mỹ (American)</option>
                     </select>
-                    <p class="mode-note">Giọng IPA hiển thị ở Pronunciation detail (Anh = bản chuyển đổi gần đúng, không đổi điểm).</p>
+                    <p class="mode-note">Default: tự chấp nhận cả Anh-Anh lẫn Anh-Mỹ (vd nuốt /r/ cuối kiểu Anh-Anh không bị trừ điểm). Anh/Mỹ chỉ đổi cách hiển thị IPA. Lưu ý: accent áp dụng lúc CHẤM — đổi sau khi có kết quả chỉ đổi hiển thị.</p>
                 </div>
             </div>
 
@@ -203,6 +204,6 @@
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=accent-default-1"></script>
 </body>
 </html>

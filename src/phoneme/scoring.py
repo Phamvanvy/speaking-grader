@@ -355,6 +355,7 @@ def _score_deletion(
     stress: str | None,
     l1_enabled: bool,
     display_stress: str | None = None,
+    accept_accent_variants: bool = False,
 ) -> tuple[PhonemePoint, float, float]:
     """1 âm reference bị THIẾU → (PhonemePoint, penalty đã điều chỉnh, penalty gốc).
 
@@ -362,7 +363,19 @@ def _score_deletion(
     âm ở coda & khớp rule final-deletion). DELETION KHÔNG đi qua confidence (stage 4) —
     không có predicted segment nên không có confidence. Dùng chung cho _align_points và
     vòng bổ sung deletion trong compute_phoneme_score.
+
+    `accept_accent_variants` (chế độ accent "default"): coda /r/ bị THIẾU = giọng Anh-Anh
+    non-rhotic (car /kɑr/→/kɑ/) → KHÔNG phải lỗi → trả "ok" (penalty 0), tag ACCENT_VARIANT.
+    LƯU Ý: đây CHƯA phải "union" đầy đủ GB/US — chỉ chấp nhận nuốt coda /r/. Các khác biệt
+    hệ thống GB/US còn lại (oʊ↔əʊ, ɒ/ɑ↔ɔ, ɚ/ɝ↔ə, ɛ↔e) đã được normalize_ipa() gộp sẵn nên
+    tự khớp. BATH split (æ↔ɑ) CỐ Ý không gộp (sau normalize thành æ↔ɔ, lẫn với lỗi thật).
     """
+    if accept_accent_variants and is_coda and normalize_ipa(ref_ph) == "r":
+        point = PhonemePoint(
+            symbol=ref_ph, status="ok", stress=stress, display_stress=display_stress,
+            penalty_reason=PenaltyReason.ACCENT_VARIANT.value, penalty_adjustment=0.0,
+        )
+        return point, 0.0, 0.0
     raw = deletion_penalty(ref_ph, is_onset=is_onset, stress=stress)
     penalty = raw
     reason: str | None = None
@@ -403,6 +416,7 @@ def _align_points(
     recognizer_noise_sim: float = PHONEME_RECOGNIZER_NOISE_SIM,
     recognizer_noise_conf: float = PHONEME_RECOGNIZER_NOISE_CONF,
     recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
+    accept_accent_variants: bool = False,
 ) -> tuple[dict[int, tuple[PhonemePoint, float | None]], int, dict[int, float]]:
     """Một lượt qua DTW path → (point+penalty mỗi ref index, số insertion, penalty gốc/ref).
 
@@ -443,6 +457,21 @@ def _align_points(
             ):
                 point = PhonemePoint(symbol=ref_ph, status="ok", stress=stress,
                                      display_stress=disp)
+                penalty = 0.0
+            elif (
+                accept_accent_variants
+                and ref_is_coda[ref_idx]
+                and normalize_ipa(ref_ph) == "r"
+                and is_vowel(pred_ph)
+            ):
+                # Accent "default": coda /r/ non-rhotic (Anh-Anh) — predicted là NGUYÊN ÂM
+                # (r-coloring residue / schwa lệch align lên /r/), KHÔNG phải lỗi. CHỈ khoan
+                # dung khi predicted là vowel; phụ âm thay /r/ (l/w/j/n...) VẪN là lỗi thật.
+                point = PhonemePoint(
+                    symbol=ref_ph, status="ok", stress=stress, display_stress=disp,
+                    penalty_reason=PenaltyReason.ACCENT_VARIANT.value,
+                    penalty_adjustment=0.0,
+                )
                 penalty = 0.0
             else:
                 sim = phoneme_similarity(pred_ph, ref_ph)
@@ -486,6 +515,7 @@ def _align_points(
             point, penalty, iter_raw = _score_deletion(
                 ref_ph, is_onset=ref_is_onset[ref_idx], is_coda=ref_is_coda[ref_idx],
                 stress=stress, display_stress=disp, l1_enabled=l1_enabled,
+                accept_accent_variants=accept_accent_variants,
             )
 
         existing = result.get(ref_idx)
@@ -515,6 +545,7 @@ def compute_phoneme_score(
     recognizer_noise_sim: float = PHONEME_RECOGNIZER_NOISE_SIM,
     recognizer_noise_conf: float = PHONEME_RECOGNIZER_NOISE_CONF,
     recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
+    accept_accent_variants: bool = False,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -549,6 +580,10 @@ def compute_phoneme_score(
         recognizer_noise_conf / recognizer_noise_conf_vowel: ngưỡng confidence (phụ âm / nguyên âm)
             của recognizer-noise gate. Sub bất khả thi + conf dưới ngưỡng → recognizer hallucinate →
             penalty 0 + severity low. ĐỘC LẬP với l1_enabled. Đặt 0 để tắt gate (bit-for-bit như cũ).
+        accept_accent_variants: chế độ accent "default" (caller map từ accent=="default"). Chấp nhận
+            coda /r/ non-rhotic (Anh-Anh) — nuốt /r/ hoặc nguyên âm align lên /r/ → "ok" (ACCENT_VARIANT),
+            KHÔNG trừ điểm. False (mặc định) = bit-for-bit như cũ. CHƯA phải union GB/US đầy đủ: các khác
+            biệt còn lại đã được normalize_ipa() gộp; BATH (æ↔ɑ) cố ý không gộp (xem _score_deletion).
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -593,6 +628,7 @@ def compute_phoneme_score(
             recognizer_noise_sim=recognizer_noise_sim,
             recognizer_noise_conf=recognizer_noise_conf,
             recognizer_noise_conf_vowel=recognizer_noise_conf_vowel,
+            accept_accent_variants=accept_accent_variants,
         )
         empty_prediction = False
 
@@ -610,6 +646,7 @@ def compute_phoneme_score(
                 reference_phonemes[i], is_onset=ref_is_onset[i],
                 is_coda=ref_is_coda[i], stress=stress, display_stress=disp,
                 l1_enabled=l1_enabled,
+                accept_accent_variants=accept_accent_variants,
             )
             result[i] = (point, pen)
             raw_by_ref[i] = raw

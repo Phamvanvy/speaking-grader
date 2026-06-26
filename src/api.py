@@ -115,6 +115,16 @@ def _validate_exam(exam: str) -> str:
     return value
 
 
+_VALID_ACCENTS: frozenset[str] = frozenset({"default", "gb", "us"})
+
+
+def _validate_accent(accent: str) -> str:
+    """Chuẩn hoá accent giọng tham chiếu. Giá trị lạ → fallback "default" (không 400 —
+    accent chỉ điều biến tolerance phát âm, không nên chặn cả request)."""
+    value = (accent or "").strip().lower()
+    return value if value in _VALID_ACCENTS else "default"
+
+
 def _has_provided_info(provided_info: str | None) -> bool:
     """True nếu provided_info thực sự có nội dung.
 
@@ -300,6 +310,7 @@ def _grade_bytes(
     mode: str,
     user_requested_review: bool,
     provided_info: str | None = None,
+    accent: str = "default",
 ) -> dict:
     """Ghi audio ra file tạm rồi chạy pipeline (HÀM CHẶN — gọi qua threadpool).
 
@@ -340,6 +351,7 @@ def _grade_bytes(
                 phoneme_analysis=phoneme,
                 question_id=qt.key,
                 save=False,
+                accent=accent,
             )
 
         score_before_review = None
@@ -476,10 +488,14 @@ async def grade(
     user_requested_review: bool = Form(
         False, description="Ép review khi mode=auto"
     ),
+    accent: str = Form(
+        "default", description="Giọng tham chiếu phát âm: default | gb | us"
+    ),
 ) -> dict:
     """Chấm 1 bài nói. Trả về JSON {transcript, features, scores}."""
     has_image = image is not None
     exam = _validate_exam(exam)
+    accent = _validate_accent(accent)
     qt = _pick_question_type(text, has_image, provided_info, question_type, exam)
     image_b64, image_media_type = await _read_image(image)
 
@@ -505,6 +521,7 @@ async def grade(
             no_ai=no_ai,
             mode=mode,
             user_requested_review=user_requested_review,
+            accent=accent,
         )
     except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
         logger.exception("Lỗi khi chấm")
@@ -532,6 +549,9 @@ async def grade_batch(
     user_requested_review: bool = Form(
         False, description="Ép review khi mode=auto"
     ),
+    accent: str = Form(
+        "default", description="Giọng tham chiếu phát âm: default | gb | us"
+    ),
     max_concurrency: int = Form(
         0, description="Số bài chấm song song; 0 = tự (1 cho local, 4 cho cloud)"
     ),
@@ -556,6 +576,7 @@ async def grade_batch(
 
     has_image = image is not None
     exam = _validate_exam(exam)
+    accent = _validate_accent(accent)
     qt = _pick_question_type(text, has_image, provided_info, question_type, exam)
     requested_mode = _normalize_mode(mode)
     image_b64, image_media_type = await _read_image(image)
@@ -610,6 +631,7 @@ async def grade_batch(
                     no_ai=no_ai,
                     mode=requested_mode,
                     user_requested_review=user_requested_review,
+                    accent=accent,
                 )
                 return {"index": idx, "audio_filename": filename, "result": result}
             except Exception as e:  # noqa: BLE001 - lỗi 1 em không làm hỏng cả lớp

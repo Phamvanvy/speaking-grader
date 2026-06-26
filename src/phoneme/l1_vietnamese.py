@@ -27,6 +27,7 @@ class PenaltyReason(str, Enum):
     L1_FINAL_DELETION = "l1_final_deletion"    # nuốt phụ âm cuối kiểu L1 → giảm penalty
     LOW_CONFIDENCE_NEUTRALIZED = "low_confidence_neutralized"  # conf rất thấp → trung hoà
     RECOGNIZER_NOISE = "recognizer_noise"      # sub bất khả thi + conf thấp → wav2vec hallucinate
+    ACCENT_VARIANT = "accent_variant"          # biến thể giọng được chấp nhận (coda /r/ non-rhotic)
 
 
 @dataclass(frozen=True)

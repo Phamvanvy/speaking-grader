@@ -458,6 +458,77 @@ class TestComputePhonemeScore:
         assert all("word" in e for e in score.to_dict()["errors"])
 
 
+class TestAccentVariants:
+    """Accent "default" (accept_accent_variants): chấp nhận coda /r/ non-rhotic (Anh-Anh).
+
+    CHỈ áp dụng coda /r/; các khác biệt GB/US khác đã được normalize_ipa() gộp sẵn nên
+    không cần xử lý ở tầng này (xem compute_phoneme_score docstring).
+    """
+
+    def _make_segments(self, phonemes: list[str]) -> list[PhonemeSegment]:
+        return [
+            PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+            for i, p in enumerate(phonemes)
+        ]
+
+    def _ref(self, text: str):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        return text_to_ipa_sequence_with_spans(text)
+
+    def test_dropped_coda_r_accepted_in_default(self):
+        # "car" /k ɔ r/ — Anh-Anh nuốt /r/ cuối → predicted /k ɔ/.
+        ref, spans, stress, disp = self._ref("car")
+        segs = self._make_segments(["k", "ɔ"])  # /r/ bị nuốt
+        score = compute_phoneme_score(
+            segs, ref, spans, stress, reference_display_stress=disp,
+            accept_accent_variants=True,
+        )
+        assert score.deletion_count == 0
+        assert score.overall_accuracy == 1.0
+        r_point = score.words[0].phonemes[-1]
+        assert r_point.status == "ok"
+        assert r_point.penalty_reason == "accent_variant"
+
+    def test_dropped_coda_r_still_penalized_when_flag_off(self):
+        # Mặc định (us/gb) giữ nguyên: nuốt coda /r/ vẫn là deletion.
+        ref, spans, stress, disp = self._ref("car")
+        segs = self._make_segments(["k", "ɔ"])
+        score = compute_phoneme_score(
+            segs, ref, spans, stress, reference_display_stress=disp,
+            accept_accent_variants=False,
+        )
+        assert score.deletion_count >= 1
+        assert score.overall_accuracy < 1.0
+        assert score.words[0].phonemes[-1].status == "del"
+
+    def test_consonant_substituted_for_coda_r_stays_error(self):
+        # /l/ thay /r/ cuối KHÔNG phải biến thể giọng → vẫn là lỗi thật, kể cả default.
+        ref, spans, stress, disp = self._ref("car")
+        segs = self._make_segments(["k", "ɔ", "l"])  # r → l
+        score = compute_phoneme_score(
+            segs, ref, spans, stress, reference_display_stress=disp,
+            accept_accent_variants=True,
+        )
+        r_point = score.words[0].phonemes[-1]
+        assert r_point.status == "sub"
+        assert r_point.penalty_reason != "accent_variant"
+
+    def test_onset_r_not_exempted(self):
+        # "red" /r e d/ — /r/ là onset (không phải coda) → không khoan dung dù bật flag.
+        ref, spans, stress, disp = self._ref("red")
+        segs = self._make_segments(["e", "d"])  # bỏ /r/ đầu
+        score = compute_phoneme_score(
+            segs, ref, spans, stress, reference_display_stress=disp,
+            accept_accent_variants=True,
+        )
+        # /r/ onset không được tag accent_variant (vẫn vào lỗi sub/del).
+        assert all(
+            p.penalty_reason != "accent_variant" for p in score.words[0].phonemes
+        )
+        assert score.overall_accuracy < 1.0
+
+
 class TestWordDetails:
     """Per-word IPA detail (score.words) for ELSA-style display."""
 

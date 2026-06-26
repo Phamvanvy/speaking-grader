@@ -44,16 +44,20 @@ function examConfig(exam) {
     return EXAM_CONFIG[exam] || EXAM_CONFIG.toeic;
 }
 
-// Accent của IPA tham chiếu hiển thị ở Pronunciation detail: 'gb' = Anh-Anh (mặc
-// định), 'us' = Anh-Mỹ. CHỈ ảnh hưởng hiển thị (biến đổi rule-based từ IPA Mỹ gốc),
-// KHÔNG đổi điểm số. Lưu localStorage để nhớ giữa các lần mở trang.
+// Accent tham chiếu phát âm: 'default' (mặc định) = tự chấp nhận cả Anh-Anh lẫn Anh-Mỹ
+// (gửi lên backend lúc CHẤM → coda /r/ non-rhotic không bị trừ điểm); 'gb' = Anh-Anh,
+// 'us' = Anh-Mỹ. 'gb'/'us' chỉ đổi HIỂN THỊ IPA. Lưu localStorage để nhớ giữa các lần mở
+// trang. LƯU Ý: accent ảnh hưởng ĐIỂM ở thời điểm gửi /grade; đổi dropdown SAU khi có kết
+// quả chỉ render lại hiển thị (không chấm lại).
 const ACCENT_KEY = 'pron_accent';
-let currentAccent = localStorage.getItem(ACCENT_KEY) === 'us' ? 'us' : 'gb';
+const VALID_ACCENTS = ['default', 'gb', 'us'];
+let currentAccent = VALID_ACCENTS.includes(localStorage.getItem(ACCENT_KEY))
+    ? localStorage.getItem(ACCENT_KEY) : 'default';
 
 // Đổi accent rồi render lại KẾT QUẢ HIỆN CÓ từ dữ liệu gốc (không chấm lại). Vì
 // transform tạo bản clone, lastSingleData/lastBatchData luôn nguyên vẹn.
 function setAccent(v) {
-    currentAccent = v === 'us' ? 'us' : 'gb';
+    currentAccent = VALID_ACCENTS.includes(v) ? v : 'default';
     localStorage.setItem(ACCENT_KEY, currentAccent);
     // Đồng bộ MỌI selector accent đang có (form chính + panel) để hai chỗ không lệch.
     document.querySelectorAll('.accent-select').forEach(s => { s.value = currentAccent; });
@@ -591,6 +595,10 @@ function appendCommonFields(formData) {
 
     formData.append('mode', document.getElementById('mode').value);
 
+    // Accent tham chiếu phát âm — backend chỉ bật tolerance khi 'default' (accept cả
+    // Anh-Anh lẫn Anh-Mỹ). 'gb'/'us' chấm như chuẩn Mỹ, chỉ khác hiển thị.
+    formData.append('accent', currentAccent);
+
     const feedbackLang = document.getElementById('feedback-lang').value;
     if (feedbackLang) formData.append('feedback_lang', feedbackLang);
 
@@ -807,6 +815,11 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     };
     const symHtml = p => {
         const sig = isSignificant(p);
+        // Âm được chấp nhận như biến thể giọng (vd coda /r/ non-rhotic ở chế độ default):
+        // không tô đỏ, nhưng đánh dấu nhẹ + tooltip để người dùng hiểu vì sao /r/ vẫn hiện.
+        if (p.penalty_reason === 'accent_variant') {
+            return `${stressMark(p)}<span class="phoneme-sym phoneme-sym--accent" title="Biến thể giọng được chấp nhận (coda /r/ non-rhotic) — không tính lỗi">${escapeHtml(p.symbol)}</span>`;
+        }
         const cls = sig && p.status === 'del' ? 'phoneme-sym phoneme-sym--missing'
                   : sig && p.status === 'sub' ? 'phoneme-sym phoneme-sym--bad'
                   : 'phoneme-sym';
@@ -908,16 +921,17 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         <div class="accent-row">
             <label class="accent-label">Giọng:
                 <select class="accent-select">
+                    <option value="default"${currentAccent === 'default' ? ' selected' : ''}>Tự động (default)</option>
                     <option value="gb"${currentAccent === 'gb' ? ' selected' : ''}>Anh-Anh (British)</option>
                     <option value="us"${currentAccent === 'us' ? ' selected' : ''}>Anh-Mỹ (American)</option>
                 </select>
             </label>
-            <span class="accent-note">Anh = bản chuyển đổi gần đúng</span>
+            <span class="accent-note">đổi sau khi chấm chỉ đổi hiển thị, không chấm lại</span>
         </div>`;
     const body = `
         ${accentRow}
         <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm</div>
-        <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ.</div>
+        <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}</div>
         ${truncLine}
         <div class="phoneme-words">${head}</div>${moreCards}
         ${table}
@@ -925,7 +939,8 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     // Collapsible: lồng dưới tiêu chí Pronunciation — dùng <summary> làm tiêu đề
     // (giữ accuracy) thay cho .phoneme-detail__title để khỏi lặp tiêu đề.
     if (opts.collapsible) {
-        return `<details class="phoneme-detail phoneme-detail-wrapper">
+        // `open` mặc định: Pronunciation detail tự bung ra (người dùng vẫn thu gọn được).
+        return `<details class="phoneme-detail phoneme-detail-wrapper" open>
             <summary class="phoneme-detail__title">${titleText}</summary>
             ${body}
         </details>`;

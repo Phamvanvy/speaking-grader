@@ -727,6 +727,15 @@ details.phoneme-detail[open] > summary.phoneme-detail__title {
     text-decoration: line-through;
 }
 
+/* Biến thể giọng được chấp nhận (vd coda /r/ non-rhotic) — không phải lỗi: màu dịu +
+   gạch chấm để phân biệt với âm đúng thường, kèm tooltip giải thích. */
+.phoneme-sym--accent {
+    color: #6b7280;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    cursor: help;
+}
+
 .phoneme-table {
     width: 100%;
     border-collapse: collapse;
@@ -784,6 +793,10 @@ body.dark .phoneme-ipa {
 body.dark .phoneme-sym--bad,
 body.dark .phoneme-sym--missing {
     color: #f87171;
+}
+
+body.dark .phoneme-sym--accent {
+    color: #9ca3af;
 }
 
 body.dark .phoneme-stress {

@@ -124,6 +124,7 @@ class HybridPhonemeAnalyzer:
         skips: Mapping[int, SkipDecision] | None = None,
         diagnostics_sink: Callable[[list[WordDiagnostic]], None] | None = None,
         word_windows: Mapping[int, tuple[float, float]] | None = None,
+        accent: str = "default",
     ) -> PhonemeResult:
         """Phân tích phonemes trong audio, optional so với reference text.
 
@@ -138,6 +139,10 @@ class HybridPhonemeAnalyzer:
                 chỉ truyền xuống scorer, KHÔNG ảnh hưởng điểm.
             word_windows: optional (PR3-0) — cửa sổ thời gian Whisper theo chỉ số từ chuẩn,
                 cho telemetry drift-vs-hallucination; chỉ truyền xuống scorer, KHÔNG ảnh hưởng điểm.
+            accent: "default" | "gb" | "us" (giọng tham chiếu phát âm từ UI). CHỈ "default" bật
+                accept_accent_variants (chấp nhận coda /r/ non-rhotic — xem compute_phoneme_score).
+                "gb"/"us" giữ nguyên cách chấm cũ (chuẩn Mỹ). Map mode-name → bool Ở ĐÂY để scorer
+                không phụ thuộc tên mode của frontend.
 
         Returns:
             PhonemeResult với segments, reference_phonemes, score, warning.
@@ -199,6 +204,8 @@ class HybridPhonemeAnalyzer:
         backend_used = "wav2vec"
 
         # ── Scoring ────────────────────────────────────────────────────────
+        # Map mode-name accent → bool TẠI BIÊN analyzer; scorer chỉ thấy bool (decouple UI).
+        accept_accent_variants = accent == "default"
         score = None
         if reference_phonemes and segments:
             score = compute_phoneme_score(
@@ -215,6 +222,7 @@ class HybridPhonemeAnalyzer:
                 recognizer_noise_sim=self._recognizer_noise_sim,
                 recognizer_noise_conf=self._recognizer_noise_conf,
                 recognizer_noise_conf_vowel=self._recognizer_noise_conf_vowel,
+                accept_accent_variants=accept_accent_variants,
             )
 
         logger.info(
