@@ -345,6 +345,47 @@ def _word_segment_times(
     return {k: (v[0], v[1]) for k, v in acc.items()}
 
 
+# Đệm phát lại (giây). Lead lớn hơn để bắt trọn onset (wav2vec hay cắt sát mép âm đầu);
+# trail nhỏ vì từ kế thường bắt đầu ngay sau coda. CẢ HAI đều bị CLAMP theo từ liền kề
+# nên không bao giờ lẹm sang từ khác — đây là chỗ DUY NHẤT tinh chỉnh đệm (không phải FE).
+_WORD_PLAY_LEAD: float = 0.10
+_WORD_PLAY_TRAIL: float = 0.04
+
+
+def _pad_and_clamp_windows(
+    times: dict[int, tuple[float, float]],
+    lead: float = _WORD_PLAY_LEAD,
+    trail: float = _WORD_PLAY_TRAIL,
+) -> dict[int, tuple[float, float]]:
+    """Đệm cửa sổ phát lại từng từ rồi CLAMP theo từ liền kề → không từ nào lẹm sang từ khác.
+
+    `times`: {span_index: (start, end)} thô (từ segment/Whisper). Trả dict cùng key, mỗi
+    cửa sổ đã `start-lead .. end+trail` nhưng:
+      - start KHÔNG lùi qua `end` THÔ của từ k-1 (không nuốt coda từ trước);
+      - end   KHÔNG vượt `start` THÔ của từ k+1 (không lấn onset từ kế — chặn "in→order").
+    Đọc hàng xóm từ `times` GỐC (chưa đệm) để clamp đối xứng, không lan truyền sai số. Từ
+    không có hàng xóm trong dict (đầu/cuối hoặc hàng xóm thiếu timing) → chỉ đệm tự do
+    (start clamp về ≥0; end để playback tự dừng ở cuối file). Backend phát ra cửa sổ ĐÃ
+    sẵn sàng phát → frontend chỉ việc phát verbatim [start, end].
+    """
+    if not times:
+        return times
+    out: dict[int, tuple[float, float]] = {}
+    for k, (s, e) in times.items():
+        ns = max(0.0, s - lead)
+        prev = times.get(k - 1)
+        if prev is not None:
+            ns = max(ns, prev[1])      # không lùi qua coda từ trước
+        ne = e + trail
+        nxt = times.get(k + 1)
+        if nxt is not None:
+            ne = min(ne, nxt[0])       # không lấn onset từ kế
+        if ne < e:                     # hàng xóm chồng (Whisper fallback) → ưu tiên ranh giới
+            ne = nxt[0] if nxt is not None else e
+        out[k] = (round(ns, 3), round(ne, 3))
+    return out
+
+
 def _build_word_details(
     point_by_ref: dict[int, PhonemePoint],
     reference: list[str],
@@ -768,6 +809,9 @@ def compute_phoneme_score(
         playback_times: dict[int, tuple[float, float]] = {**word_windows, **seg_times}
     else:
         playback_times = seg_times
+    # Đệm + clamp theo từ liền kề → cửa sổ phát lại không lẹm sang từ khác (frontend phát
+    # verbatim). Backend là nơi DUY NHẤT biết ranh giới từ kề nên đệm phải nằm ở đây.
+    playback_times = _pad_and_clamp_windows(playback_times)
     words, words_truncated, words_total = _build_word_details(
         point_by_ref, reference_phonemes, reference_spans, max_words, span_skip_reason,
         word_times=playback_times,

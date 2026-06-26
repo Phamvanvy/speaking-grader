@@ -1210,63 +1210,76 @@ class TestWordPlaybackWindows:
     """start/end mỗi WordPronunciation (cho UI nghe lại từng từ).
 
     Nguồn CHÍNH: wav2vec segment (min start / max end các segment DTW gán cho từ — chính
-    xác ~20ms). Fallback: Whisper word_windows cho từ toàn deletion. timing surface thẳng
-    ra words để frontend phát đoạn audio của riêng từ đó (không cần diagnostics_sink)."""
+    xác ~20ms). Fallback: Whisper word_windows cho từ toàn deletion. Cửa sổ ĐÃ được đệm
+    (lead/trail) + CLAMP theo từ liền kề (_pad_and_clamp_windows) nên không lẹm sang từ
+    khác; frontend phát verbatim. (Không cần diagnostics_sink.)"""
 
     def _segs(self, pred):
         # segment i có start=i, end=i+1 (giây) — để assert min/max dễ đọc.
         return [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
                 for i, p in enumerate(pred)]
 
-    def test_segment_window_surfaced_to_word(self):
-        # 4 segment căn chéo vào "fox" → start=min(0.0), end=max(4.0).
+    def test_single_word_padded_no_neighbor(self):
+        # 1 từ, không hàng xóm → raw (0,4) được đệm: start clamp về 0, end += trail.
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
         ref = ["f", "ɒ", "k", "s"]
         spans = [WordSpan("fox", 0, 4)]
         score = compute_phoneme_score(self._segs(["f", "ɒ", "k", "s"]), ref, spans)
-        assert (score.words[0].start, score.words[0].end) == (0.0, 4.0)
+        assert score.words[0].start == max(0.0, 0.0 - _WORD_PLAY_LEAD)  # = 0.0
+        assert score.words[0].end == round(4.0 + _WORD_PLAY_TRAIL, 3)
 
     def test_segment_preferred_over_whisper_window(self):
-        # Có cả segment lẫn Whisper window cho cùng từ → segment THẮNG (chính xác hơn).
+        # Có cả segment lẫn Whisper window cho cùng từ → segment THẮNG (raw 0..4, đã đệm).
+        from src.phoneme.scoring import _WORD_PLAY_TRAIL
         ref = ["f", "ɒ", "k", "s"]
         spans = [WordSpan("fox", 0, 4)]
         score = compute_phoneme_score(
             self._segs(["f", "ɒ", "k", "s"]), ref, spans,
             word_windows={0: (10.0, 12.0)},  # chỉ dùng làm fallback — bị segment override
         )
-        assert (score.words[0].start, score.words[0].end) == (0.0, 4.0)
+        assert (score.words[0].start, score.words[0].end) == (0.0, round(4.0 + _WORD_PLAY_TRAIL, 3))
 
     def test_whisper_fallback_when_word_all_deletion(self):
         # predicted chỉ phủ "cat"; "dog" toàn deletion (không segment) → fallback Whisper.
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
         ref = ["k", "æ", "t", "d", "ɒ", "ɡ"]
         spans = [WordSpan("cat", 0, 3), WordSpan("dog", 3, 6)]
         score = compute_phoneme_score(
             self._segs(["k", "æ", "t"]), ref, spans,   # 3 segment → chỉ cat
             word_windows={1: (5.0, 6.5)},                # window cho dog (index 1)
         )
-        assert (score.words[0].start, score.words[0].end) == (0.0, 3.0)  # cat từ segment
-        assert (score.words[1].start, score.words[1].end) == (5.0, 6.5)  # dog fallback
+        # cat: raw (0,3); end += trail (không chạm dog raw start 5.0). dog: raw (5,6.5);
+        # start -= lead nhưng clamp ≥ cat raw end (3.0) → 4.9; end += trail.
+        assert (score.words[0].start, score.words[0].end) == (0.0, round(3.0 + _WORD_PLAY_TRAIL, 3))
+        assert (score.words[1].start, score.words[1].end) == (
+            round(5.0 - _WORD_PLAY_LEAD, 3), round(6.5 + _WORD_PLAY_TRAIL, 3))
 
     def test_no_segment_no_window_leaves_none(self):
         # "dog" toàn deletion + KHÔNG có Whisper window → start/end None (không có nút).
+        from src.phoneme.scoring import _WORD_PLAY_TRAIL
         ref = ["k", "æ", "t", "d", "ɒ", "ɡ"]
         spans = [WordSpan("cat", 0, 3), WordSpan("dog", 3, 6)]
         score = compute_phoneme_score(self._segs(["k", "æ", "t"]), ref, spans)
-        assert (score.words[0].start, score.words[0].end) == (0.0, 3.0)
+        assert (score.words[0].start, score.words[0].end) == (0.0, round(3.0 + _WORD_PLAY_TRAIL, 3))
         assert score.words[1].start is None and score.words[1].end is None
 
-    def test_consecutive_words_do_not_overlap(self):
-        # 2 từ, segment xếp theo thời gian → cửa sổ KHÔNG chồng lấn (end[0] <= start[1]).
+    def test_consecutive_words_clamped_no_bleed(self):
+        # 2 từ liền kề (cat 0-3, dog 3-6): trail của cat KHÔNG lấn dog → cat.end == dog.start
+        # (== ranh giới 3.0). Đây là cú chặn "in→order".
         ref = ["k", "æ", "t", "d", "ɒ", "ɡ"]
         spans = [WordSpan("cat", 0, 3), WordSpan("dog", 3, 6)]
         score = compute_phoneme_score(self._segs(["k", "æ", "t", "d", "ɒ", "ɡ"]), ref, spans)
         w0, w1 = score.words[0], score.words[1]
-        assert w0.end <= w1.start
+        assert w0.end <= w1.start          # không chồng lấn
+        assert w0.end == 3.0 and w1.start == 3.0  # clamp đúng ranh giới từ
 
     def test_start_end_in_to_dict(self):
+        from src.phoneme.scoring import _WORD_PLAY_TRAIL
         ref = ["f", "ɒ", "k", "s"]
         spans = [WordSpan("fox", 0, 4)]
         d = compute_phoneme_score(self._segs(["f", "ɒ", "k", "s"]), ref, spans).to_dict()
-        assert d["words"][0]["start"] == 0.0 and d["words"][0]["end"] == 4.0
+        assert d["words"][0]["start"] == 0.0
+        assert d["words"][0]["end"] == round(4.0 + _WORD_PLAY_TRAIL, 3)
 
 
 # ── L1-aware scoring layer (Vietnamese) ──────────────────────────────────────

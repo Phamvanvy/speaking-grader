@@ -115,11 +115,8 @@ function playbackUrl() {
 // timer cũ thành no-op). Dừng bằng setTimeout chứ KHÔNG timeupdate: timeupdate chỉ
 // ~4 lần/giây nên với đoạn từ 300–700ms dễ phát lố; audio từ Blob cục bộ không
 // buffering nên setTimeout theo độ dài cố định ổn định + chính xác trên mọi trình duyệt.
-// Đệm phát lại BẤT ĐỐI XỨNG (giây). Lead lớn để bắt trọn âm đầu (onset hay bị wav2vec
-// cắt sát); trail NHỎ vì từ kế thường bắt đầu ngay sau coda → trail lớn sẽ lẹm sang
-// từ sau (vd "in" lẹm sang "order"). Tham số tinh chỉnh — benchmark thêm nếu cần.
-const WORD_PLAY_LEAD_PAD = 0.12;
-const WORD_PLAY_TRAIL_PAD = 0.02;
+// `start/end` từ backend ĐÃ đệm + clamp theo từ liền kề (xem _pad_and_clamp_windows) →
+// FE phát VERBATIM, KHÔNG tự đệm (đệm là việc của backend vì chỉ nó biết ranh giới từ kề).
 let wordAudio = null;
 let wordPlayToken = 0;
 let wordStopTimer = null;
@@ -132,8 +129,8 @@ function playWordSegment(start, end) {
     if (wordStopTimer) { clearTimeout(wordStopTimer); wordStopTimer = null; }
     wordAudio.pause();
     if (wordAudio.src !== url) wordAudio.src = url;
-    const from = Math.max(0, start - WORD_PLAY_LEAD_PAD);
-    const stopMs = Math.max(0, (end - start + WORD_PLAY_LEAD_PAD + WORD_PLAY_TRAIL_PAD)) * 1000;
+    const from = Math.max(0, start);
+    const stopMs = Math.max(0, end - start) * 1000;
     const begin = () => {
         wordAudio.currentTime = from;
         const p = wordAudio.play();
