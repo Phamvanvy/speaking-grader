@@ -147,6 +147,48 @@ class TestPhonemeInUserPrompt:
         assert "reference_phonemes" not in payload["phoneme_data"]
         assert "audio_path" not in payload["phoneme_data"]
 
+    def test_prompt_excludes_per_word_breakdown(self):
+        """Prompt LLM KHÔNG kèm `words` (per-word ELSA) — đó là khối phình prompt
+        (~95% kích thước) mà model không dùng; bằng chứng per-word đã có ở errors[].word.
+
+        Allowlist: chỉ summary + errors lọt vào prompt; words / penalty-metadata bị loại
+        kể cả khi score có populate chúng (chống regression khi PhonemeScore thêm field UI).
+        """
+        from src.phoneme.models import PhonemePoint, WordPronunciation
+        from src.rubrics.toeic import get_question_type
+
+        phoneme = self._build_phoneme_result()
+        # Populate words + penalty metadata để chắc chắn allowlist loại chúng khỏi prompt.
+        object.__setattr__(phoneme.score, "words", [
+            WordPronunciation(
+                word="hello", ipa="hɛloʊ",
+                phonemes=[PhonemePoint(symbol="h", status="ok")],
+                accuracy=1.0, start=0.0, end=0.5,
+            ),
+        ])
+        object.__setattr__(phoneme.score, "words_total", 1)
+        object.__setattr__(phoneme.score, "raw_penalty", 1.23)
+
+        prompt = _build_user_prompt(
+            qt=get_question_type("read_aloud"),
+            prompt_text="Read this aloud",
+            reference_script="Hello world",
+            transcription=self._build_transcription(),
+            features=self._build_features(),
+            gating=self._build_gating(),
+            phoneme_result=phoneme,
+        )
+        payload = json.loads(prompt[prompt.index("{"):])
+        score_block = payload["phoneme_data"]["score"]
+        # Allowlist: summary + errors có; per-word + penalty metadata KHÔNG.
+        assert "errors" in score_block
+        assert "overall_accuracy" in score_block
+        for leaked in ("words", "words_total", "words_truncated", "raw_penalty",
+                       "l1_adjustment_ratio", "recognizer_noise_count"):
+            assert leaked not in score_block, f"{leaked} không được lọt vào prompt"
+        # `word` của từng lỗi VẪN còn (ngữ cảnh per-word mà model thực sự dùng).
+        assert all("word" in e for e in score_block["errors"])
+
     def test_phoneme_data_absent_when_none(self):
         """phoneme_data key NOT in payload when phoneme_result is None."""
         from src.rubrics.toeic import get_question_type
@@ -372,7 +414,8 @@ class TestCompactPhonemeOutput:
         assert s["words"]
         # Per-word contract the frontend relies on.
         w0 = s["words"][0]
-        assert set(w0) == {"word", "ipa", "phonemes", "accuracy", "skip_reason"}
+        assert set(w0) == {
+            "word", "ipa", "phonemes", "accuracy", "skip_reason", "start", "end"}
         assert "/" not in w0["ipa"]
         bad = [
             p for w in s["words"] for p in w["phonemes"]

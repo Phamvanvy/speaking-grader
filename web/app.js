@@ -87,6 +87,76 @@ let lastBatchData = null;
 let lastSingleData = null;
 let lastSingleFilename = '';
 
+// File audio của lần chấm single gần nhất + object URL phát lại (lazy). Giữ lại để
+// nút "nghe lại" ở Pronunciation detail phát đúng đoạn audio của từng từ — Blob nằm
+// sẵn ở client nên không cần server lưu audio. URL cũ được revoke khi chấm file mới.
+let lastSingleFile = null;
+let lastSinglePlaybackUrl = null;
+
+// Tạo (1 lần) object URL cho file đang xét → dùng phát lại đoạn audio từng từ.
+// Revoke URL của file trước để không rò Blob khi đổi file chấm.
+function setPlaybackFile(file) {
+    if (lastSinglePlaybackUrl) {
+        URL.revokeObjectURL(lastSinglePlaybackUrl);
+        lastSinglePlaybackUrl = null;
+    }
+    lastSingleFile = file || null;
+}
+
+function playbackUrl() {
+    if (!lastSingleFile) return null;
+    if (!lastSinglePlaybackUrl) lastSinglePlaybackUrl = URL.createObjectURL(lastSingleFile);
+    return lastSinglePlaybackUrl;
+}
+
+// ── Phát lại đoạn audio của 1 TỪ (nút ▶ ở Pronunciation detail) ────────
+// 1 thẻ <audio> ẩn dùng chung + generation token: mỗi lần bấm tăng token, huỷ timer
+// dừng cũ, pause→seek→play đoạn mới, rồi đặt setTimeout dừng (guard bằng token để
+// timer cũ thành no-op). Dừng bằng setTimeout chứ KHÔNG timeupdate: timeupdate chỉ
+// ~4 lần/giây nên với đoạn từ 300–700ms dễ phát lố; audio từ Blob cục bộ không
+// buffering nên setTimeout theo độ dài cố định ổn định + chính xác trên mọi trình duyệt.
+// Đệm phát lại BẤT ĐỐI XỨNG (giây). Lead lớn để bắt trọn âm đầu (onset hay bị wav2vec
+// cắt sát); trail NHỎ vì từ kế thường bắt đầu ngay sau coda → trail lớn sẽ lẹm sang
+// từ sau (vd "in" lẹm sang "order"). Tham số tinh chỉnh — benchmark thêm nếu cần.
+const WORD_PLAY_LEAD_PAD = 0.12;
+const WORD_PLAY_TRAIL_PAD = 0.02;
+let wordAudio = null;
+let wordPlayToken = 0;
+let wordStopTimer = null;
+
+function playWordSegment(start, end) {
+    const url = playbackUrl();
+    if (!url) return;
+    if (!wordAudio) wordAudio = new Audio();
+    const myToken = ++wordPlayToken;
+    if (wordStopTimer) { clearTimeout(wordStopTimer); wordStopTimer = null; }
+    wordAudio.pause();
+    if (wordAudio.src !== url) wordAudio.src = url;
+    const from = Math.max(0, start - WORD_PLAY_LEAD_PAD);
+    const stopMs = Math.max(0, (end - start + WORD_PLAY_LEAD_PAD + WORD_PLAY_TRAIL_PAD)) * 1000;
+    const begin = () => {
+        wordAudio.currentTime = from;
+        const p = wordAudio.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+        wordStopTimer = setTimeout(() => {
+            if (myToken === wordPlayToken) wordAudio.pause();
+        }, stopMs);
+    };
+    // currentTime chỉ set được khi metadata đã sẵn sàng (file mới load lần đầu).
+    if (wordAudio.readyState >= 1) begin();
+    else wordAudio.addEventListener('loadedmetadata', begin, { once: true });
+}
+
+// Delegated: bắt mọi nút .phoneme-play (panel dựng lại mỗi lần render), gắn 1 lần.
+document.addEventListener('click', e => {
+    const btn = e.target instanceof Element ? e.target.closest('.phoneme-play') : null;
+    if (!btn) return;
+    e.preventDefault();
+    const start = parseFloat(btn.dataset.start);
+    const end = parseFloat(btn.dataset.end);
+    if (Number.isFinite(start) && Number.isFinite(end)) playWordSegment(start, end);
+});
+
 // Load saved API URL, or pick a sensible default.
 // - Saved value always wins.
 // - Served from a real host (not file:// or localhost) → default the API to the
@@ -659,6 +729,7 @@ async function grade() {
     } else {
         formData.append('audio', files[0]);
         lastSingleFilename = files[0].name;
+        setPlaybackFile(files[0]);   // giữ Blob cho nút "nghe lại" từng từ
     }
     appendCommonFields(formData);
 
@@ -788,6 +859,14 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     if (!words) return phonemeErrorsLegacyHtml(phoneme);   // older payloads
     if (!words.length) return '';
 
+    // Nút "nghe lại" từng từ ở bảng lỗi — chỉ bật cho kết quả single (opts.playback) khi
+    // từ có cửa sổ thời gian (start/end từ Whisper word timestamp). Từ bị skip / không map
+    // được window → không có nút (không phát được thì không hiện).
+    const playback = !!opts.playback;
+    const playBtn = w => (playback && w.start != null && w.end != null)
+        ? `<button type="button" class="phoneme-play" data-start="${w.start}" data-end="${w.end}" title="Nghe lại từ này" aria-label="Nghe lại từ ${escapeHtml(w.word)}">▶</button>`
+        : '';
+
     // Anh-Anh: bản clone đã biến đổi IPA hiển thị (dữ liệu gốc `words` giữ nguyên).
     // Mọi chỗ dựng IPA tham chiếu dùng `dispWords` và bỏ qua phoneme `_hidden`.
     const dispWords = currentAccent === 'gb' ? words.map(toBritishWord) : words;
@@ -865,7 +944,7 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         const worst = bad.reduce((acc, p) =>
             (sevRank[p.severity] ?? 0) > (sevRank[acc] ?? -1) ? p.severity : acc, 'low');
         return `<tr>
-            <td class="phoneme-table__word">${escapeHtml(w.word)}</td>
+            <td class="phoneme-table__word">${playBtn(w)}${escapeHtml(w.word)}</td>
             <td>${ipaHtml(w)}</td>
             <td>${heardHtml(w)}</td>
             <td>${pairs}</td>
@@ -985,6 +1064,9 @@ function phonemeErrorsLegacyHtml(phoneme) {
 }
 
 function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
+    // `playback`: cho phép nút "nghe lại" từng từ (chỉ kết quả single — nơi lastSingleFile
+    // khớp audio đang xem). Batch/print không bật để khỏi phát nhầm audio file khác.
+    const pb = !!opts.playback;
     if (!scores) {
         // pronunciation-only: thiếu đề bài → backend chủ động bỏ chấm điểm tổng,
         // chỉ trả phoneme. KHÔNG suy ra trạng thái này từ (scores == null) vì còn
@@ -995,10 +1077,10 @@ function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
             return `<div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:0.85rem;color:#854d0e;line-height:1.5;">
                     ⚠️ ${escapeHtml(msg)}
                 </div>`
-                + phonemeErrorsHtml(phoneme);
+                + phonemeErrorsHtml(phoneme, { playback: pb });
         }
         return '<p style="color:#666;">No AI scoring (ASR-only or skipped by gating).</p>'
-             + phonemeErrorsHtml(phoneme);
+             + phonemeErrorsHtml(phoneme, { playback: pb });
     }
     const cfg = examConfig(exam);
     const overall = scores[cfg.scoreField];
@@ -1025,7 +1107,7 @@ function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
             const isPronunciation = key === 'pronunciation' || key.includes('pronun');
             let phonemeBlock = '';
             if (isPronunciation && !renderedPhoneme) {
-                const detail = phonemeErrorsHtml(phoneme, { collapsible: true });
+                const detail = phonemeErrorsHtml(phoneme, { collapsible: true, playback: pb });
                 if (detail) {
                     phonemeBlock = detail;
                     renderedPhoneme = true;
@@ -1052,7 +1134,7 @@ function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
     }
     // Fallback: không có tiêu chí phát âm nào khớp (vd exam khác) → render rời ở
     // cuối như cũ, tránh mất dữ liệu. renderedPhoneme chặn render trùng.
-    if (!renderedPhoneme) html += phonemeErrorsHtml(phoneme);
+    if (!renderedPhoneme) html += phonemeErrorsHtml(phoneme, { playback: pb });
     return html;
 }
 
@@ -1104,7 +1186,7 @@ function showSingleResult(data) {
     document.getElementById('features-grid').innerHTML = featureGridHtml(data.features || {});
     document.getElementById('scores-breakdown').innerHTML = scoresBreakdownHtml(
         data.scores, data.exam, data.phoneme,
-        { pronunciationOnly, notice: data.notice });
+        { pronunciationOnly, notice: data.notice, playback: !!lastSingleFile });
     document.getElementById('feedback').textContent =
         data.scores?.summary_feedback
         || (pronunciationOnly ? (data.notice || '') : 'No feedback available');

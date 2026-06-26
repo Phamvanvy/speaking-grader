@@ -149,12 +149,18 @@ class WordPronunciation:
         accuracy: tỉ lệ âm đúng trong từ (ok_count / len(phonemes))
         skip_reason: nếu từ bị Recognition Reliability bỏ qua (không chấm phoneme),
             đây là lý do (vd "whisper_mismatch"); None nếu từ được chấm bình thường.
+        start, end: cửa sổ thời gian (giây) của từ trong audio, lấy từ Whisper word
+            timestamp (xem map_reference_words_to_windows). Cho UI phát lại đoạn audio
+            của RIÊNG từ này. None nếu từ không map được sang transcript word (vd từ bị
+            skip / thí sinh không đọc) hoặc payload cũ — UI khi đó không hiện nút nghe lại.
     """
     word: str
     ipa: str
     phonemes: list[PhonemePoint] = field(default_factory=list)
     accuracy: float = 0.0
     skip_reason: str | None = None
+    start: float | None = None
+    end: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -163,6 +169,8 @@ class WordPronunciation:
             "phonemes": [p.to_dict() for p in self.phonemes],
             "accuracy": round(self.accuracy, 4),
             "skip_reason": self.skip_reason,
+            "start": self.start,
+            "end": self.end,
         }
 
 

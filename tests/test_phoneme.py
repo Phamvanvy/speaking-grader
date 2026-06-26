@@ -641,7 +641,8 @@ class TestWordDetails:
         d = compute_phoneme_score(segs, ref, spans).to_dict()
         assert "words" in d and "words_truncated" in d and "words_total" in d
         assert d["words"]
-        assert set(d["words"][0]) == {"word", "ipa", "phonemes", "accuracy", "skip_reason"}
+        assert set(d["words"][0]) == {
+            "word", "ipa", "phonemes", "accuracy", "skip_reason", "start", "end"}
         assert set(d["words"][0]["phonemes"][0]) == {
             "symbol", "status", "heard", "severity", "stress", "display_stress",
             "penalty_reason", "penalty_adjustment",
@@ -1203,6 +1204,69 @@ class TestDriftClassification:
             word_windows={0: (10.0, 12.0)},
         )
         assert base.overall_accuracy == withwin.overall_accuracy
+
+
+class TestWordPlaybackWindows:
+    """start/end mỗi WordPronunciation (cho UI nghe lại từng từ).
+
+    Nguồn CHÍNH: wav2vec segment (min start / max end các segment DTW gán cho từ — chính
+    xác ~20ms). Fallback: Whisper word_windows cho từ toàn deletion. timing surface thẳng
+    ra words để frontend phát đoạn audio của riêng từ đó (không cần diagnostics_sink)."""
+
+    def _segs(self, pred):
+        # segment i có start=i, end=i+1 (giây) — để assert min/max dễ đọc.
+        return [PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+                for i, p in enumerate(pred)]
+
+    def test_segment_window_surfaced_to_word(self):
+        # 4 segment căn chéo vào "fox" → start=min(0.0), end=max(4.0).
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        score = compute_phoneme_score(self._segs(["f", "ɒ", "k", "s"]), ref, spans)
+        assert (score.words[0].start, score.words[0].end) == (0.0, 4.0)
+
+    def test_segment_preferred_over_whisper_window(self):
+        # Có cả segment lẫn Whisper window cho cùng từ → segment THẮNG (chính xác hơn).
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        score = compute_phoneme_score(
+            self._segs(["f", "ɒ", "k", "s"]), ref, spans,
+            word_windows={0: (10.0, 12.0)},  # chỉ dùng làm fallback — bị segment override
+        )
+        assert (score.words[0].start, score.words[0].end) == (0.0, 4.0)
+
+    def test_whisper_fallback_when_word_all_deletion(self):
+        # predicted chỉ phủ "cat"; "dog" toàn deletion (không segment) → fallback Whisper.
+        ref = ["k", "æ", "t", "d", "ɒ", "ɡ"]
+        spans = [WordSpan("cat", 0, 3), WordSpan("dog", 3, 6)]
+        score = compute_phoneme_score(
+            self._segs(["k", "æ", "t"]), ref, spans,   # 3 segment → chỉ cat
+            word_windows={1: (5.0, 6.5)},                # window cho dog (index 1)
+        )
+        assert (score.words[0].start, score.words[0].end) == (0.0, 3.0)  # cat từ segment
+        assert (score.words[1].start, score.words[1].end) == (5.0, 6.5)  # dog fallback
+
+    def test_no_segment_no_window_leaves_none(self):
+        # "dog" toàn deletion + KHÔNG có Whisper window → start/end None (không có nút).
+        ref = ["k", "æ", "t", "d", "ɒ", "ɡ"]
+        spans = [WordSpan("cat", 0, 3), WordSpan("dog", 3, 6)]
+        score = compute_phoneme_score(self._segs(["k", "æ", "t"]), ref, spans)
+        assert (score.words[0].start, score.words[0].end) == (0.0, 3.0)
+        assert score.words[1].start is None and score.words[1].end is None
+
+    def test_consecutive_words_do_not_overlap(self):
+        # 2 từ, segment xếp theo thời gian → cửa sổ KHÔNG chồng lấn (end[0] <= start[1]).
+        ref = ["k", "æ", "t", "d", "ɒ", "ɡ"]
+        spans = [WordSpan("cat", 0, 3), WordSpan("dog", 3, 6)]
+        score = compute_phoneme_score(self._segs(["k", "æ", "t", "d", "ɒ", "ɡ"]), ref, spans)
+        w0, w1 = score.words[0], score.words[1]
+        assert w0.end <= w1.start
+
+    def test_start_end_in_to_dict(self):
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        d = compute_phoneme_score(self._segs(["f", "ɒ", "k", "s"]), ref, spans).to_dict()
+        assert d["words"][0]["start"] == 0.0 and d["words"][0]["end"] == 4.0
 
 
 # ── L1-aware scoring layer (Vietnamese) ──────────────────────────────────────

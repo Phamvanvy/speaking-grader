@@ -306,28 +306,51 @@ enum values for task_completion / content_relevance (very_low/low/medium/high) \
 stay as-is. Only the explanatory prose is translated."""
 
 
+#: Số lỗi phoneme tối đa nhúng vào prompt (đã sort theo severity high→low). Khớp cap
+#: của PhonemeScore.to_dict() — model chỉ cần các lỗi nặng nhất, không cần toàn bộ.
+_PROMPT_MAX_ERRORS: int = 20
+
+
 def _compact_phoneme_data(phoneme_result: PhonemeResult) -> dict:
     """Bản gọn của phoneme_result để nhúng vào prompt LLM.
 
-    Vì sao: PhonemeResult.to_dict() kèm `segments` thô (164–259 frame, mỗi frame
-    {phoneme,start,end,confidence,backend}) + danh sách `reference_phonemes` đầy
-    đủ + `audio_path`. Khối này chiếm ~95% kích thước phoneme_data trong prompt
-    (~40k ký tự) nhưng VÔ DỤNG với model text: timestamp/khung thời gian không
-    giúp chấm phát âm. Chỉ giữ bằng chứng model thực sự dùng — điểm tổng hợp +
-    top lỗi (score.to_dict() đã cap errors ở 20) + metadata backend. Cắt phần này
-    giảm prompt mạnh → prefill nhanh hơn hẳn, và tăng tỉ trọng system prompt
-    (được prefix-cache) trong tổng prompt.
+    Vì sao: PhonemeResult.to_dict() kèm `segments` thô (mỗi frame {phoneme,start,end,
+    confidence,backend}) + `reference_phonemes` + `audio_path`; và score.to_dict() còn
+    kèm `words` — phát âm CHI TIẾT từng từ × từng phoneme (tới MAX_WORDS_RETURNED từ),
+    dữ liệu phục vụ UI kiểu ELSA. Riêng `words` chiếm ~95% kích thước phoneme_data
+    (~136k ký tự cho 1 bài Part 2) và VÔ DỤNG với model text: nó đã có `errors[:20]`
+    (kèm `word` của từng lỗi) + điểm tổng hợp để chấm. Nhồi `words` vào prompt ăn hết
+    context window của model local → output JSON bị cắt (finish_reason=length).
 
-    Lưu ý: chỉ ảnh hưởng prompt chấm điểm. to_dict() đầy đủ (gồm segments) vẫn
-    được dùng nguyên vẹn cho report/JSON output ở core.py.
+    Vì thế ở đây dựng score gọn bằng ALLOWLIST (liệt kê tường minh field model dùng)
+    thay vì to_dict()+pop(): nếu sau này PhonemeScore thêm field UI/diagnostic lớn,
+    nó KHÔNG vô tình lọt vào prompt. Field model thực sự dùng (xem system prompt
+    `_build_system_prompt`): overall_accuracy (tín hiệu mạnh) + các *_count (độ lớn lỗi)
+    + avg_confidence + errors[:20] (đã sort severity, mỗi lỗi kèm `word`). KHÔNG gồm
+    `words` per-word, cũng KHÔNG gồm penalty/L1 metadata nội bộ (raw_penalty,
+    l1_adjustment_ratio…) — prompt không tham chiếu tới chúng.
+
+    Lưu ý: chỉ ảnh hưởng prompt chấm điểm. UI/report vẫn dùng đường riêng
+    (`_compact_phoneme_output` ở core.py) có đủ `words` (kèm start/end) để hiển thị.
     """
+    score = phoneme_result.score
+    compact_score = None
+    if score is not None:
+        compact_score = {
+            "overall_accuracy": round(score.overall_accuracy, 4),
+            "substitution_count": score.substitution_count,
+            "deletion_count": score.deletion_count,
+            "insertion_count": score.insertion_count,
+            "reference_count": score.reference_count,
+            "predicted_count": score.predicted_count,
+            "avg_confidence": round(score.avg_confidence, 4),
+            "errors": [e.to_dict() for e in score.errors[:_PROMPT_MAX_ERRORS]],
+        }
     return {
         "backend_used": phoneme_result.backend_used,
         "backend_available": phoneme_result.backend_available,
         "warning": phoneme_result.warning,
-        # score.to_dict() đã gồm overall_accuracy, *_count, reference_count,
-        # predicted_count, avg_confidence và errors[:20] (đã sort theo severity).
-        "score": phoneme_result.score.to_dict() if phoneme_result.score else None,
+        "score": compact_score,
     }
 
 

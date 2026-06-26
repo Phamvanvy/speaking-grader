@@ -209,12 +209,12 @@ def grade_response(
                 skips = dict(assess_reliability(
                     reference_words, evidence, skip_ratio=config.phoneme_skip_ratio
                 ))
-            # PR3-0 drift telemetry: map TỪ THAM CHIẾU → cửa sổ thời gian Whisper (CHỈ khi
-            # telemetry bật → zero overhead). Áp dụng cho CẢ Read Aloud (có script) lẫn
-            # free-speech (reference = transcript) — vì các false positive cần đo (vd
-            # traditional/Vietnam/folktales/blood) nằm ở đường free-speech. Dùng cùng kỹ
-            # thuật difflib với Recognition Reliability; DIAGNOSTIC ONLY, không đụng điểm/skip.
-            if config.phoneme_telemetry_enabled and phoneme_reference_text.strip():
+            # Map TỪ THAM CHIẾU → cửa sổ thời gian Whisper (start,end mỗi từ). Áp dụng cho
+            # CẢ Read Aloud (có script) lẫn free-speech (reference = transcript). Dùng cùng
+            # kỹ thuật difflib với Recognition Reliability (hàm THUẦN, không side-effect) →
+            # LUÔN tính khi có từ + transcript word: (a) UI phát lại đoạn audio từng từ, và
+            # (b) telemetry drift-vs-hallucination (PR3-0). KHÔNG đụng điểm/skip.
+            if phoneme_reference_text.strip() and transcription.words:
                 _wph, win_spans, _wst, _wds = text_to_ipa_sequence_with_spans(
                     phoneme_reference_text
                 )

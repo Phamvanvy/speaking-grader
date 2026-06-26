@@ -295,12 +295,63 @@ def _better_point(a: PhonemePoint, b: PhonemePoint) -> PhonemePoint:
     return a if sa <= sb else b
 
 
+def _word_segment_times(
+    path: list[tuple[int, int]],
+    segments: list[PhonemeSegment],
+    spans: list[WordSpan] | None,
+) -> dict[int, tuple[float, float]]:
+    """Cửa sổ thời gian PHÁT LẠI của từng từ, suy từ wav2vec phoneme segment.
+
+    Vì sao: wav2vec chạy 1 forward pass trên toàn waveform nên mỗi `PhonemeSegment.
+    start/end` là timestamp TUYỆT ĐỐI (~20ms) — chính xác và đúng "cái wav2vec nghe"
+    hơn hẳn Whisper word window (±100–300ms, đôi khi rỗng → playback bị bíp/lẹm từ kế).
+
+    Cách gán: CHỈ lấy cặp ĐƯỜNG CHÉO của DTW path (`pred_idx>=0 AND ref_idx>=0`) — mỗi
+    segment ghép tối đa MỘT ref index (xem backtrace `_dtw_align`) nên thuộc đúng MỘT từ;
+    bỏ insertion (`ref_idx<0`) để không nới biên sang từ kế. Cửa sổ từ = (min start, max
+    end) các segment của nó. Path đơn điệu + segment xếp theo thời gian ⇒ cửa sổ các từ
+    liên tiếp không chồng lấn.
+
+    Trả {span_index: (start, end)} — CHỈ chứa key của từ có ≥1 segment (không bao giờ gọi
+    min/max trên rỗng). Từ toàn deletion ⇒ không có key ⇒ caller fallback Whisper window.
+    """
+    if not spans or not segments or not path:
+        return {}
+    n = max((s.end_idx for s in spans), default=0)
+    if n <= 0:
+        return {}
+    ref_to_span = [-1] * n
+    for k, s in enumerate(spans):
+        for i in range(s.start_idx, min(s.end_idx, n)):
+            ref_to_span[i] = k
+
+    acc: dict[int, list[float]] = {}  # span k → [min_start, max_end]
+    for pred_idx, ref_idx in path:
+        # Chỉ cặp đường chéo có segment + ref hợp lệ. Bound-check pred_idx phòng vệ
+        # (pipeline hiện tại luôn hợp lệ vì path dựng từ [s.phoneme for s in segments]).
+        if ref_idx < 0 or ref_idx >= n or not (0 <= pred_idx < len(segments)):
+            continue
+        k = ref_to_span[ref_idx]
+        if k < 0:
+            continue
+        seg = segments[pred_idx]
+        if k not in acc:
+            acc[k] = [seg.start, seg.end]
+        else:
+            if seg.start < acc[k][0]:
+                acc[k][0] = seg.start
+            if seg.end > acc[k][1]:
+                acc[k][1] = seg.end
+    return {k: (v[0], v[1]) for k, v in acc.items()}
+
+
 def _build_word_details(
     point_by_ref: dict[int, PhonemePoint],
     reference: list[str],
     spans: list[WordSpan] | None,
     max_words: int = MAX_WORDS_RETURNED,
     span_skip_reason: dict[int, str] | None = None,
+    word_times: Mapping[int, tuple[float, float]] | None = None,
 ) -> tuple[list[WordPronunciation], bool, int]:
     """Từ point_by_ref (đã align đủ cho MỌI reference index) → chi tiết từng từ.
 
@@ -309,6 +360,11 @@ def _build_word_details(
     từ (không bao giờ cắt giữa từ). accuracy của từ = ok / (số âm KHÔNG skip);
     từ toàn skip → accuracy 1.0 (không tính là sai). `span_skip_reason` (theo CHỈ SỐ
     span chuẩn) gắn `skip_reason` cho từ bị Recognition Reliability bỏ qua.
+
+    `word_times` (optional): cửa sổ thời gian PHÁT LẠI (start, end giây) theo CHỈ SỐ TỪ
+    chuẩn (khớp `spans`). Caller dựng sẵn từ wav2vec segment (chính xác ~20ms), fallback
+    Whisper window — xem `compute_phoneme_score`. Có → gắn start/end cho WordPronunciation
+    để UI phát lại đoạn audio của riêng từ đó. Thiếu cho 1 từ → start/end = None.
 
     Returns (words, truncated, total_words).
     """
@@ -328,12 +384,15 @@ def _build_word_details(
             continue
         scored = [p for p in points if p.status != "skipped"]
         ok = sum(1 for p in scored if p.status == "ok")
+        win = word_times.get(k) if word_times else None
         words.append(WordPronunciation(
             word=span.word,
             ipa="".join(p.symbol for p in points),
             phonemes=points,
             accuracy=(ok / len(scored)) if scored else 1.0,
             skip_reason=span_skip_reason.get(k),
+            start=win[0] if win else None,
+            end=win[1] if win else None,
         ))
 
     if truncated:
@@ -567,9 +626,12 @@ def compute_phoneme_score(
         confidence_knee: ngưỡng confidence để hạ penalty lỗi sub (xem PHONEME_CONFIDENCE_KNEE).
         diagnostics_sink: optional — nhận list[WordDiagnostic] để ghi telemetry (PR2).
             CHỈ để quan sát; KHÔNG ảnh hưởng điểm. None = không tính telemetry (zero overhead).
-        word_windows: optional (PR3-0) — cửa sổ thời gian Whisper theo CHỈ SỐ TỪ chuẩn
-            (khớp reference_spans). CHỈ dùng cho telemetry drift-vs-hallucination; KHÔNG
-            ảnh hưởng điểm. Bỏ qua nếu không có diagnostics_sink.
+        word_windows: optional — cửa sổ thời gian Whisper theo CHỈ SỐ TỪ chuẩn (khớp
+            reference_spans). Dùng cho (a) telemetry drift-vs-hallucination (PR3-0) và
+            (b) FALLBACK timestamp phát lại từng từ cho từ toàn deletion (wav2vec không
+            nghe ra segment). Nguồn CHÍNH cho start/end phát lại là wav2vec segment
+            (_word_segment_times); Whisper chỉ bù chỗ thiếu. KHÔNG ảnh hưởng điểm.
+            Telemetry drift vẫn cần thêm diagnostics_sink.
         l1_enabled: bật L1-aware layer (Vietnamese). False (mặc định) = hành vi y hệt trước
             (bit-for-bit). True = giảm penalty cho nuốt phụ âm cuối kiểu L1 + trung hoà sub
             confidence rất thấp; vẫn hiển thị (accent note). KHÔNG skip (Reliability mới được skip).
@@ -698,8 +760,17 @@ def compute_phoneme_score(
     else:
         accuracy = 1.0  # mọi âm đều skip (ASR nghe nhầm cả) → không có gì để chấm
 
+    # Cửa sổ thời gian phát lại từng từ: ưu tiên wav2vec segment (chính xác ~20ms, đúng
+    # "cái wav2vec nghe"), fallback Whisper window cho từ toàn deletion. word_windows
+    # (Whisper) VẪN giữ riêng cho telemetry drift bên dưới — KHÔNG trộn vào đây.
+    seg_times = _word_segment_times(path, segments, reference_spans)
+    if word_windows:
+        playback_times: dict[int, tuple[float, float]] = {**word_windows, **seg_times}
+    else:
+        playback_times = seg_times
     words, words_truncated, words_total = _build_word_details(
-        point_by_ref, reference_phonemes, reference_spans, max_words, span_skip_reason
+        point_by_ref, reference_phonemes, reference_spans, max_words, span_skip_reason,
+        word_times=playback_times,
     )
 
     # Telemetry (PR2/PR3-0) — DIAGNOSTIC ONLY, chỉ tính khi có sink (zero overhead khi tắt).

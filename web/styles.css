@@ -762,6 +762,34 @@ details.phoneme-detail[open] > summary.phoneme-detail__title {
     color: #333;
 }
 
+/* Nút "nghe lại" đoạn audio của riêng từ (bảng lỗi Pronunciation detail). */
+.phoneme-play {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    margin-right: 0.4rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #4f46e5;
+    color: #fff;
+    font-size: 0.62rem;
+    line-height: 1;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: background 0.15s;
+}
+
+.phoneme-play:hover {
+    background: #4338ca;
+}
+
+.phoneme-play:active {
+    transform: scale(0.92);
+}
+
 body.dark .phoneme-detail {
     background: #1c1917;
 }
