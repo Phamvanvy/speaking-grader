@@ -13,8 +13,13 @@ import json
 from src.asr import Transcription, Word
 from src.features import Features
 from src.gating import GatingResult
+from src.rubrics.ielts import get_question_type as get_ielts_question_type
 from src.rubrics.toeic import get_question_type
-from src.scoring import _build_system_prompt, _build_user_prompt
+from src.scoring import (
+    _build_system_prompt,
+    _build_user_prompt,
+    _local_response_schema,
+)
 
 _INFO = "9:00 AM Opening Keynote (Room A); 10:30 AM Session 1 (Room B, Mark Lee)"
 
@@ -92,6 +97,41 @@ def test_system_prompt_contains_criteria_and_guidance():
     assert "organization" in _build_system_prompt(
         get_question_type("express_opinion"), "vi"
     )
+
+
+def test_local_schema_constrains_criteria_count_and_keys():
+    # IELTS (4 tiêu chí) và TOEIC (số tiêu chí khác nhau theo dạng câu): schema
+    # gửi backend local phải ép đúng số lượng + enum đúng tập key của qt.
+    for qt in (
+        get_ielts_question_type("part2_long_turn"),
+        get_question_type("express_opinion"),
+    ):
+        schema = _local_response_schema(qt)
+        n = len(qt.criteria)
+        keys = [c.key for c in qt.criteria]
+        crit = schema["properties"]["criteria"]
+        assert crit["minItems"] == n
+        assert crit["maxItems"] == n
+        assert schema["$defs"]["CriterionScore"]["properties"]["criterion"]["enum"] == keys
+
+
+def test_local_schema_does_not_mutate_shared_schema():
+    # model_json_schema() trả dict mới mỗi lần → siết theo qt không rò rỉ ra
+    # schema mặc định (vẫn là array không min/max).
+    from src.schema import SpeakingResult
+
+    _local_response_schema(get_ielts_question_type("part1_interview"))
+    base = SpeakingResult.model_json_schema()
+    assert "minItems" not in base["properties"]["criteria"]
+    assert "enum" not in base["$defs"]["CriterionScore"]["properties"]["criterion"]
+
+
+def test_system_prompt_demands_exact_criteria():
+    qt = get_ielts_question_type("part3_discussion")
+    sys_prompt = _build_system_prompt(qt, "vi")
+    assert f"EXACTLY {len(qt.criteria)}" in sys_prompt
+    for c in qt.criteria:
+        assert c.key in sys_prompt
 
 
 def test_image_note_differs_describe_vs_respond_with_info():

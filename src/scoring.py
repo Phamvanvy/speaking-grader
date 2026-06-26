@@ -175,6 +175,14 @@ def _build_system_prompt(qt: QuestionType, feedback_lang: str) -> str:
     criteria_lines = "\n".join(
         f"- {c.key} ({c.label}): {c.description}" for c in qt.criteria
     )
+    criterion_keys = ", ".join(c.key for c in qt.criteria)
+    # Chỉ thị cứng: model local nhỏ thỉnh thoảng bỏ sót một tiêu chí (vd
+    # grammatical_range) → nêu rõ số lượng và yêu cầu xuất đúng-đủ, không lặp.
+    criteria_count_rule = (
+        f"You MUST output EXACTLY {len(qt.criteria)} criterion objects — one for "
+        f"each key listed above ({criterion_keys}). Do NOT omit, merge, rename, or "
+        f"duplicate any criterion; every key must appear exactly once."
+    )
     language_name = resolve_language_name(feedback_lang)
 
     # Khác biệt theo kỳ thi: văn phong giám khảo + thang điểm + khối "FINAL SCORE".
@@ -219,6 +227,7 @@ TASK GUIDANCE:
 
 CRITERIA TO SCORE (only these):
 {criteria_lines}
+{criteria_count_rule}
 
 SCORING SCALE:
 {qt.scale_description}
@@ -320,6 +329,40 @@ def _compact_phoneme_data(phoneme_result: PhonemeResult) -> dict:
         # predicted_count, avg_confidence và errors[:20] (đã sort theo severity).
         "score": phoneme_result.score.to_dict() if phoneme_result.score else None,
     }
+
+
+def _local_response_schema(qt: QuestionType) -> dict:
+    """JSON schema gửi backend local, siết `criteria` đúng N tiêu chí của qt.
+
+    Vì sao: schema gốc của SpeakingResult để `criteria` là array ĐỘ DÀI TỰ DO, nên
+    grammar GBNF (llama.cpp dịch từ json_schema) chỉ ràng buộc hình dạng từng phần
+    tử — KHÔNG ép phải đủ N tiêu chí. Model nhỏ/nén vì thế thỉnh thoảng bỏ sót một
+    tiêu chí (vd grammatical_range) mà vẫn hợp lệ schema → hỏng cả bài chấm. Ở đây
+    ta:
+      - đặt minItems = maxItems = N để grammar ép đúng N phần tử;
+      - giới hạn field `criterion` vào enum đúng tập key của qt để mỗi phần tử chỉ
+        có thể là một tiêu chí hợp lệ.
+
+    GIỚI HẠN (quan trọng): hai ràng buộc trên chỉ siết SỐ LƯỢNG và TẬP KEY hợp lệ,
+    KHÔNG ràng buộc theo VỊ TRÍ → về lý thuyết model vẫn có thể lặp một key và bỏ
+    key khác. Đây chỉ là biện pháp GIẢM XÁC SUẤT, không triệt để; `_validate_result`
+    vẫn là lưới an toàn thiết yếu bắt trường hợp trùng/thiếu còn sót lại. Nếu build
+    llama.cpp đang dùng dịch được `prefixItems` (JSON Schema 2020-12 tuple) sang
+    GBNF, có thể nâng cấp: gán mỗi vị trí một `criterion` qua `const` để ép từng
+    tiêu chí xuất hiện đúng một lần — ràng buộc theo vị trí, mạnh hơn enum. Chưa bật
+    ở đây vì chưa xác minh build hiện tại hỗ trợ.
+
+    Chỉ ảnh hưởng backend local. model_json_schema() trả dict MỚI mỗi lần gọi nên
+    mutate ở đây không đụng schema dùng nơi khác.
+    """
+    schema = SpeakingResult.model_json_schema()
+    keys = [c.key for c in qt.criteria]
+    n = len(keys)
+    crit = schema["properties"]["criteria"]
+    crit["minItems"] = n
+    crit["maxItems"] = n
+    schema["$defs"]["CriterionScore"]["properties"]["criterion"]["enum"] = keys
+    return schema
 
 
 def _build_user_prompt(
@@ -507,7 +550,7 @@ def score(
     for attempt in range(1, max_attempts + 1):
         if config.is_local:
             result = _score_local(
-                config, system_prompt, user_prompt, image_b64, image_media_type
+                config, qt, system_prompt, user_prompt, image_b64, image_media_type
             )
         else:
             result = _score_anthropic(
@@ -642,6 +685,7 @@ def _score_anthropic(
 
 def _score_local(
     config: Config,
+    qt: QuestionType,
     system_prompt: str,
     user_prompt: str,
     image_b64: str | None = None,
@@ -732,7 +776,9 @@ def _score_local(
             "type": "json_schema",
             "json_schema": {
                 "name": "SpeakingResult",
-                "schema": SpeakingResult.model_json_schema(),
+                # Schema siết theo qt: ép đúng N tiêu chí + enum key, chặn model
+                # bỏ sót tiêu chí (xem _local_response_schema).
+                "schema": _local_response_schema(qt),
                 "strict": True,
             },
         },

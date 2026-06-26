@@ -63,113 +63,30 @@ ARPABET_TO_IPA: Final[dict[str, str]] = {
 # Reverse mapping: IPA → ARPAbet (cho alignment ngược)
 IPA_TO_ARPABET: Final[dict[str, str]] = {v: k for k, v in ARPABET_TO_IPA.items()}
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Simple English word → ARPAbet → IPA  (built-in fallback dictionary)
-# ──────────────────────────────────────────────────────────────────────────────
+# Valid ARPAbet bases for defensive validation.
+_VALID_ARPABET_BASES: Final[frozenset[str]] = frozenset(ARPABET_TO_IPA.keys())
 
-# Mini dictionary của các từ phổ biến trong TOEIC Speaking.
-# Format: word_lowercase → [ARPAbet phonemes] (CMUdict, đã bỏ stress digit).
-# QUY TẮC: mỗi phần tử phải là MỘT ký hiệu ARPAbet hợp lệ có trong ARPABET_TO_IPA
-# (vd "N","D" — KHÔNG ghép "ND"; "S","T" — KHÔNG ghép "ST"). Token ghép sẽ không
-# map được sang IPA và lọt vào chuỗi tham chiếu thành "phoneme" rác → báo lỗi oan.
-# Built-in path còn lọc lại theo ARPABET_TO_IPA nên token lạ bị bỏ, nhưng giữ dict
-# đúng ngay từ đầu để reference không bị thiếu âm.
-_COMMON_WORD_PRONUNCIATIONS: Final[dict[str, list[str]]] = {
-    # Articles, pronouns
-    "the": ["DH", "AH"], "a": ["AH"], "an": ["AE", "N"],
-    "i": ["AY"], "me": ["M", "IY"], "my": ["M", "AY"],
-    "he": ["HH", "IY"], "him": ["HH", "IH", "M"], "his": ["HH", "IH", "Z"],
-    "she": ["SH", "IY"], "her": ["HH", "ER"],
-    "we": ["W", "IY"], "us": ["AH", "S"], "our": ["AW", "ER"],
-    "you": ["Y", "UW"], "your": ["Y", "AO", "R"],
-    "it": ["IH", "T"], "its": ["IH", "T", "S"],
-    "they": ["DH", "EY"], "them": ["DH", "EH", "M"], "their": ["DH", "EH", "R"],
-    "what": ["W", "AH", "T"], "where": ["W", "EH", "R"], "when": ["W", "EH", "N"],
-    "which": ["W", "IH", "CH"], "who": ["HH", "UW"], "why": ["W", "AY"],
-    "how": ["HH", "AW"],
-    # Common verbs
-    "is": ["IH", "Z"], "are": ["AA", "R"], "was": ["W", "AH", "Z"],
-    "were": ["W", "ER"], "be": ["B", "IY"], "been": ["B", "IH", "N"],
-    "being": ["B", "IY", "IH", "NG"], "do": ["D", "UW"], "does": ["D", "AH", "Z"],
-    "did": ["D", "IH", "D"], "have": ["HH", "AE", "V"], "has": ["HH", "AE", "Z"],
-    "had": ["HH", "AE", "D"], "will": ["W", "IH", "L"], "would": ["W", "UH", "D"],
-    "could": ["K", "UH", "D"], "should": ["SH", "UH", "D"],
-    "can": ["K", "AE", "N"], "may": ["M", "EY"], "might": ["M", "AY", "T"],
-    "must": ["M", "AH", "S", "T"], "shall": ["SH", "AE", "L"],
-    "say": ["S", "EY"], "said": ["S", "EH", "D"],
-    "go": ["G", "OW"], "went": ["W", "EH", "N", "T"], "gone": ["G", "AO", "N"],
-    "come": ["K", "AH", "M"], "came": ["K", "EY", "M"],
-    "get": ["G", "EH", "T"], "got": ["G", "AA", "T"],
-    "make": ["M", "EY", "K"], "made": ["M", "EY", "D"],
-    "take": ["T", "EY", "K"], "took": ["T", "UH", "K"],
-    "give": ["G", "IH", "V"], "gave": ["G", "EY", "V"],
-    "know": ["N", "OW"], "knew": ["N", "UW"],
-    "think": ["TH", "IH", "NG", "K"], "thought": ["TH", "AO", "T"],
-    "see": ["S", "IY"], "saw": ["S", "AO"],
-    "look": ["L", "UH", "K"], "like": ["L", "AY", "K"],
-    "find": ["F", "AY", "N", "D"], "feel": ["F", "IY", "L"],
-    "want": ["W", "AA", "N", "T"], "need": ["N", "IY", "D"],
-    "use": ["Y", "UW", "Z"], "used": ["Y", "UW", "Z", "D"],
-    "work": ["W", "ER", "K"],
-    "try": ["T", "R", "AY"], "show": ["SH", "OW"],
-    "tell": ["T", "EH", "L"], "ask": ["AE", "S", "K"],
-    "move": ["M", "UW", "V"], "live": ["L", "IH", "V"],
-    "run": ["R", "AH", "N"], "help": ["HH", "EH", "L", "P"],
-    "talk": ["T", "AO", "K"], "start": ["S", "T", "AA", "R", "T"],
-    "play": ["P", "L", "EY"],
-    "pay": ["P", "EY"],
-    # Common nouns (TOEIC context)
-    "time": ["T", "AY", "M"], "day": ["D", "EY"], "year": ["Y", "IH", "R"],
-    "way": ["W", "EY"], "thing": ["TH", "IH", "NG"],
-    "man": ["M", "AE", "N"], "men": ["M", "EH", "N"],
-    "woman": ["W", "UH", "M", "AH", "N"], "people": ["P", "IY", "P", "AH", "L"],
-    "world": ["W", "ER", "L", "D"], "life": ["L", "AY", "F"],
-    "hand": ["HH", "AE", "N", "D"], "part": ["P", "AA", "R", "T"],
-    "child": ["CH", "AY", "L", "D"], "children": ["CH", "IH", "L", "D", "R", "AH", "N"],
-    "eye": ["AY"], "place": ["P", "L", "EY", "S"],
-    "week": ["W", "IY", "K"], "company": ["K", "AH", "M", "P", "AH", "N", "IY"],
-    "number": ["N", "AH", "M", "B", "ER"], "state": ["S", "T", "EY", "T"],
-    "family": ["F", "AE", "M", "AH", "L", "IY"],
-    "student": ["S", "T", "UW", "D", "AH", "N", "T"],
-    "group": ["G", "R", "UW", "P"], "country": ["K", "AH", "N", "T", "R", "IY"],
-    # Common adjectives
-    "good": ["G", "UH", "D"], "new": ["N", "UW"], "first": ["F", "ER", "S", "T"],
-    "last": ["L", "AE", "S", "T"], "long": ["L", "AO", "NG"],
-    "great": ["G", "R", "EY", "T"],
-    "little": ["L", "IH", "T", "AH", "L"], "own": ["OW", "N"],
-    "other": ["AH", "DH", "ER"], "old": ["OW", "L", "D"], "right": ["R", "AY", "T"],
-    "big": ["B", "IH", "G"], "high": ["HH", "AY"], "small": ["S", "M", "AO", "L"],
-    "different": ["D", "IH", "F", "R", "AH", "N", "T"],
-    "important": ["IH", "M", "P", "AO", "R", "T", "AH", "N", "T"],
-    # Prepositions
-    "in": ["IH", "N"], "on": ["AA", "N"], "at": ["AE", "T"],
-    "to": ["T", "UW"], "of": ["AH", "V"], "for": ["F", "ER"],
-    "with": ["W", "IH", "DH"], "about": ["AH", "B", "AW", "T"],
-    "between": ["B", "IH", "T", "W", "IY", "N"], "after": ["AE", "F", "T", "ER"],
-    "before": ["B", "IH", "F", "AO", "R"], "under": ["AH", "N", "D", "ER"],
-    "over": ["OW", "V", "ER"], "through": ["TH", "R", "UW"],
-}
-
-# Per-word IPA corrections (ARPAbet KÈM stress digit) cho từ g2p_en cho kết quả sai hoặc
-# chọn biến thể lệch từ điển. Chạy qua _arpabet_tokens_to_ipa_stress → GIỮ nhấn âm + AH split.
-# ƯU TIÊN tra TRƯỚC _COMMON_WORD_PRONUNCIATIONS và g2p (override = sửa lỗi, phải thắng).
-# Mỗi token phải có base hợp lệ trong ARPABET_TO_IPA (validate lúc import bên dưới → fail-fast).
+# Per-word IPA corrections (ARPAbet KÈM stress digit) — HARD PRIORITY: bypasses ALL
+# validation and fallback. Use only for proper nouns not in CMUdict and genuine dialect
+# exceptions where CMUdict gives the wrong pronunciation for our target accent.
+# Each token must have a valid base in ARPABET_TO_IPA (validated at import → fail-fast).
 _WORD_IPA_OVERRIDES: Final[dict[str, list[str]]] = {
-    # especially: g2p_en cho /əspeʃliː/ (thiếu cả ə trước l); Cambridge /ɪˈspeʃ.ᵊl.i/ →
-    # dùng biến thể CMU IH0 S P EH1 SH AH0 L IY0 → /ɪspˈeʃəliː/.
+    # CMUdict all entries start with AH0 (ə) not IH0 (ɪ) — genuine accent exception.
     "especially": ["IH0", "S", "P", "EH1", "SH", "AH0", "L", "IY0"],
-    # g2p cho AA0→ɑː (nên rút gọn ə) + đuôi S (nên Z); nhấn phụ ở âm tiết đầu → /ˌviːetnəˈmiːz/.
-    "vietnamese": ["V", "IY2", "EH0", "T", "N", "AH0", "M", "IY1", "Z"],
-    # nhấn phụ về âm tiết đầu (g2p đặt EH2 lệch) → /ˌviːetˈnɑːm/.
-    "vietnam": ["V", "IY2", "EH0", "T", "N", "AA1", "M"],
-    # g2p "L Y AH0" (l j ə) → dùng IY0 cho biến thể nguyên âm /-liːənt/ → /rɪˈzɪliːənt/.
+    # CMUdict R IH0 Z IH1 L Y AH0 N T: Y→j ("l j ə") instead of IY0→iː ("l iː ə").
     "resilient": ["R", "IH0", "Z", "IH1", "L", "IY0", "AH0", "N", "T"],
-    # g2p IY0→iː ở âm tiết đầu KHÔNG nhấn (nên ɪ); dùng IH0 → /rɪˈleɪʃənʃɪp/.
+    # CMUdict R IY0 L EY1 SH AH0 N SH IH2 P: IY0→iː (not ɪ) at start; IH2 adds
+    # secondary stress on last syllable. Override pins IH0 → /rɪˈleɪʃənʃɪp/.
     "relationship": ["R", "IH0", "L", "EY1", "SH", "AH0", "N", "SH", "IH0", "P"],
-    # g2p ER0→ɜː (nguyên âm NURSE nhấn) sai cho -or- KHÔNG nhấn; AH0+R = ə+r (r-màu) → /ˈfeɪvərɪt/.
+    # CMUdict F EY1 V ER0 AH0 T: ER0→ɜː wrong for unstressed -vor-; AH0+R = ə+r → /ˈfeɪvərɪt/.
     "favorite": ["F", "EY1", "V", "AH0", "R", "IH0", "T"],
-    # g2p chèn W lạ giữa ZH và AH → /ˈjuːʒəwəliː/; CMU đúng Y UW1 ZH UH0 AH0 L IY0 → /ˈjuːʒʊəliː/.
-    "usually": ["Y", "UW1", "ZH", "UH0", "AH0", "L", "IY0"],
+    # CMUdict transcribes "extreme(ly)" inconsistently with EH0 (→e) while the rest of the
+    # ex- family uses IH0 (→ɪ). EH0→e gives wrong /ekˈstriːm.../; pin IH0 → /ɪkˈstriːm.../.
+    "extreme": ["IH0", "K", "S", "T", "R", "IY1", "M"],
+    "extremely": ["IH0", "K", "S", "T", "R", "IY1", "M", "L", "IY0"],
+    # Proper nouns not in CMUdict — must stay permanently.
+    "vietnamese": ["V", "IY2", "EH0", "T", "N", "AH0", "M", "IY1", "Z"],
+    "vietnam": ["V", "IY2", "EH0", "T", "N", "AA1", "M"],
 }
 
 
@@ -266,6 +183,11 @@ def normalize_ipa(phoneme: str) -> str:
 # Tập nguyên âm ở dạng đã chuẩn hoá (sau normalize_ipa) — dùng để nhận diện
 # nguyên âm sau khi đã bỏ ː / gộp tương đương (vd "iː"→"i", "ɒ"→"ɔ").
 _VOWELS_NORM: Final[frozenset[str]] = frozenset(normalize_ipa(v) for v in _VOWELS)
+
+# Full IPA inventory normalized — used to validate eSpeak output (post-normalize_ipa).
+_IPA_PHONEMES_NORM: Final[frozenset[str]] = frozenset(
+    normalize_ipa(p) for p in ENGLISH_IPA_PHONEMES
+)
 
 
 def is_vowel(phoneme: str) -> bool:
@@ -481,43 +403,174 @@ def deletion_penalty(
 # Word → IPA sequence
 # ──────────────────────────────────────────────────────────────────────────────
 
-# g2p_en.G2p() nặng (nạp CMUdict + POS tagger) → khởi tạo 1 lần, cache lại.
-# None = chưa thử; False = không khả dụng (thiếu package / lỗi nạp).
-_g2p_instance: object | None | bool = None
+# ── Layer 2: CMUdict (~134k words, validated ARPAbet with stress digits) ──────
+
+_cmudict_data: dict | None = None
 
 
-def _ensure_nltk_data() -> None:
-    """Tải dữ liệu NLTK g2p_en cần (nếu thiếu). nltk mới đổi tên tagger thành
-    '..._eng' mà g2p_en không tự tải → tự xử lý để chạy ngay lần đầu."""
-    import nltk
+def _get_cmudict() -> dict:
+    """Lazy-load CMU Pronouncing Dictionary. Singleton — loaded once on first call."""
+    global _cmudict_data
+    if _cmudict_data is None:
+        import cmudict as _pkg  # noqa: PLC0415
+        _cmudict_data = _pkg.dict()
+    return _cmudict_data
 
-    resources = [
-        ("taggers/averaged_perceptron_tagger_eng", "averaged_perceptron_tagger_eng"),
-        ("taggers/averaged_perceptron_tagger", "averaged_perceptron_tagger"),
-        ("corpora/cmudict", "cmudict"),
-    ]
-    for path, name in resources:
+
+# Reduced (unstressed) ARPAbet vowels — natural weak-form markers. Their presence
+# nudges selection toward conversational reduced pronunciations.
+_REDUCED_ARPABET: Final[frozenset[str]] = frozenset({"AH0", "IH0", "UH0"})
+
+
+def _primary_stress_count(entry: list[str]) -> int:
+    """Số nguyên âm mang nhấn chính (token ARPAbet kết thúc bằng '1')."""
+    return sum(1 for t in entry if t.endswith("1"))
+
+
+def _reduction_count(entry: list[str]) -> int:
+    """Số nguyên âm rút gọn (AH0/IH0/UH0) — dấu hiệu dạng yếu tự nhiên."""
+    return sum(1 for t in entry if t in _REDUCED_ARPABET)
+
+
+def _entry_score(entry: list[str], *, is_function_word: bool) -> float:
+    """Điểm chọn entry (THẤP hơn = tốt hơn).
+
+    score = 3·|primary − target| + 0.1·len − 0.05·reduction
+      - stress (w=3.0) CHI PHỐI: function word → ưu tiên 0 nhấn chính (dạng yếu);
+        content word → ưu tiên đúng 1 nhấn chính.
+      - len (w=0.1) là tie-break CHÍNH, giữ hành vi gần với min(len) cũ.
+      - reduction (w=−0.05, thưởng) là nudge dưới mức len → thiên về dạng rút gọn
+        tự nhiên khi mọi thứ khác bằng nhau. Dấu ÂM (thưởng) là chủ ý: reduction
+        nhiều hơn ⇒ score thấp hơn ⇒ được chọn.
+    """
+    target = 0 if is_function_word else 1
+    stress = abs(_primary_stress_count(entry) - target)
+    return 3.0 * stress + 0.1 * len(entry) - 0.05 * _reduction_count(entry)
+
+
+def _rank_cmudict_entries(
+    entries: list[list[str]], *, is_function_word: bool
+) -> list[str]:
+    """Chọn phát âm tốt nhất trong nhiều entry CMUdict bằng điểm ngôn ngữ học.
+
+    Thay heuristic min(len) cũ (không có cơ sở ngôn ngữ, phụ thuộc thứ tự CMUdict)
+    bằng _entry_score: cấu trúc nhấn (function vs content word) + rút gọn nguyên âm,
+    với độ dài làm tie-break. Deterministic: min() ổn định → entry SỚM NHẤT khi điểm
+    bằng nhau.
+
+    Examples:
+      "usually" entries[0]=8 tokens (spurious W), entries[1]=6 tokens, cùng 1 nhấn →
+        len tie-break chọn entries[1]: Y UW1 ZH AH0 L IY0 → /juːʒəliː/. ✓
+      "the"     function word → ưu tiên 0 nhấn chính: DH AH0 (/ðə/) thắng DH AH1/DH IY0. ✓
+    """
+    return min(entries, key=lambda e: _entry_score(e, is_function_word=is_function_word))
+
+
+def _lookup_cmudict(word: str) -> list[str] | None:
+    """Return ranked CMUdict pronunciation for word, or None if OOV."""
+    entries = _get_cmudict().get(word.lower())
+    if not entries:
+        return None
+    return _rank_cmudict_entries(
+        entries, is_function_word=word.lower() in FUNCTION_WORDS
+    )
+
+
+def _cmudict_entry_is_valid(tokens: list[str]) -> bool:
+    """Defensive all-or-nothing check: every token base must be a known ARPAbet phoneme.
+
+    CMUdict is a trusted source so this should never fail in practice.
+    Returns False for the entire entry if *any* token is invalid — no partial stripping.
+    """
+    return all(t.rstrip("012") in _VALID_ARPABET_BASES for t in tokens)
+
+
+# ── Layer 3: eSpeak NG — deterministic rule-based G2P for OOV words ──────────
+# Requires: pip install phonemizer  +  apt-get install espeak-ng espeak-ng-data
+# Falls through to hard failure ([], []) if espeak-ng binary is unavailable.
+
+_espeak_backend: object | None | bool = None  # None=not tried; False=unavailable
+
+
+def _get_espeak() -> object | None:
+    """Lazy-init eSpeak NG backend (singleton). Returns None if unavailable."""
+    global _espeak_backend
+    if _espeak_backend is None:
         try:
-            nltk.data.find(path)
-        except LookupError:
-            try:
-                nltk.download(name, quiet=True)
-            except Exception:  # noqa: BLE001 - mạng/permission; g2p sẽ tự báo lỗi
-                pass
+            from phonemizer.backend import EspeakBackend  # noqa: PLC0415
+            _espeak_backend = EspeakBackend(
+                "en-us",
+                with_stress=True,
+                preserve_punctuation=False,
+                language_switch="remove-flags",
+            )
+        except Exception:  # noqa: BLE001 - missing package or espeak-ng binary
+            _espeak_backend = False
+    return _espeak_backend or None
 
 
-def _get_g2p() -> object | None:
-    """Lazy-init + cache g2p_en.G2p(). Trả None nếu không khả dụng."""
-    global _g2p_instance
-    if _g2p_instance is None:
-        try:
-            import g2p_en
+def _espeak_token_to_canonical(tok: str) -> tuple[str, StressType | None]:
+    """Strip stress prefix and normalize one eSpeak phone token.
 
-            _ensure_nltk_data()
-            _g2p_instance = g2p_en.G2p()
-        except Exception:  # noqa: BLE001 - thiếu package / lỗi nạp model
-            _g2p_instance = False
-    return _g2p_instance or None
+    Single call to normalize_ipa() — no custom IPA parser.
+    Returns (canonical_ipa_symbol, stress_type | None).
+    eSpeak places ˈ/ˌ before the vowel nucleus of the stressed syllable.
+    """
+    stress: StressType | None = None
+    if tok.startswith("ˈ"):
+        stress = "primary"
+        tok = tok[1:]
+    elif tok.startswith("ˌ"):
+        stress = "secondary"
+        tok = tok[1:]
+    return normalize_ipa(tok), stress
+
+
+def _espeak_word_to_symbols_stress(
+    word: str,
+) -> tuple[list[str], list[StressType | None]] | None:
+    """Deterministic eSpeak G2P for OOV words.
+
+    Returns (canonical_symbols, stresses) or None if output is empty or backend unavailable.
+    Validation: per-symbol against _IPA_PHONEMES_NORM after normalize_ipa().
+    Invalid symbols are strictly dropped (not the whole prediction).
+    Empty result after drop → None.
+    """
+    backend = _get_espeak()
+    if backend is None:
+        return None
+
+    from phonemizer.separator import Separator  # noqa: PLC0415
+
+    try:
+        raw: str = backend.phonemize(
+            [word],
+            separator=Separator(phone=" ", word="", syllable=""),
+            strip=True,
+        )[0]
+    except Exception:  # noqa: BLE001
+        logger.warning("ipa_resolve word=%r source=espeak ERROR", word)
+        return None
+
+    if not raw.strip():
+        return None
+
+    symbols: list[str] = []
+    stresses: list[StressType | None] = []
+    syllables = 0
+    for tok in raw.split():
+        canonical, stress = _espeak_token_to_canonical(tok)
+        if canonical in _IPA_PHONEMES_NORM:
+            symbols.append(canonical)
+            stresses.append(stress)
+            if canonical in _VOWELS_NORM:
+                syllables += 1
+        else:
+            logger.debug("ipa_resolve word=%r espeak_drop_symbol=%r (from %r)", word, canonical, tok)
+
+    if not symbols:
+        return None
+    return _finalize_stress(symbols, stresses, syllables)
 
 
 def _arpabet_tokens_to_ipa_stress(
@@ -639,11 +692,6 @@ def word_to_ipa(word: str) -> list[str]:
 
     Thin wrapper của word_to_ipa_with_stress() — giữ chữ ký cũ cho các caller
     chỉ cần danh sách symbol (không cần nhấn âm).
-
-    Priority:
-      1. Built-in dictionary (_COMMON_WORD_PRONUNCIATIONS)
-      2. g2p module (grapheme-to-phoneme), instance được cache
-      3. Fallback: empty list (caller sẽ handle missing words)
     """
     symbols, _stress = word_to_ipa_with_stress(word)
     return symbols
@@ -652,51 +700,56 @@ def word_to_ipa(word: str) -> list[str]:
 def word_to_ipa_with_stress(
     word: str,
 ) -> tuple[list[str], list[StressType | None]]:
-    """Như word_to_ipa() nhưng kèm danh sách nhấn âm song song 1-1 với symbols.
+    """Convert one English word to IPA symbols + parallel stress list.
 
-    Nhấn âm CHỈ dùng để hiển thị — KHÔNG bao giờ chèn vào chuỗi phoneme dùng cho
-    DTW alignment (predicted từ wav2vec không có dấu nhấn → sẽ lệch).
+    4-layer deterministic pipeline (first match wins):
+      Layer 1 — _WORD_IPA_OVERRIDES: HARD PRIORITY. Bypasses all validation and
+        fallback. For proper nouns not in CMUdict and genuine dialect exceptions.
+      Layer 2 — CMUdict (~134k words, validated ARPAbet + stress digits).
+        Accepted all-or-nothing: if any token base is invalid the entry is rejected
+        and falls through. Should never happen with a well-formed CMUdict package.
+      Layer 3 — eSpeak NG (deterministic rule-based G2P for OOV words).
+        Per-symbol validation against _IPA_PHONEMES_NORM after normalize_ipa().
+        Invalid symbols strictly dropped; empty result → falls through.
+      Layer 4 — HARD FAILURE: returns ([], []) + warning log.
+        Callers must not treat this as a valid (silent) pronunciation.
 
-    - Built-in dictionary: ARPAbet không kèm stress digit → stress toàn None.
-    - g2p_en: ARPAbet vowel token kèm stress digit (AH0/AH1/AH2). Map
-      1→"primary", 2→"secondary", 0/không có→None. Digit chỉ nằm trên nguyên âm
-      nên số token có digit = số âm tiết.
-    - Từ ĐƠN ÂM TIẾT (≤1 âm tiết): set toàn bộ stress về None — từ điển chuẩn
-      không ký hiệu nhấn cho từ 1 âm tiết (cat /kæt/ chứ không /ˈkæt/).
+    Stress marks CHỈ dùng để hiển thị — KHÔNG chèn vào chuỗi DTW (wav2vec không
+    có dấu nhấn → sẽ lệch). Monosyllabic words (≤1 syllable) get all-None stress
+    per IPA convention. Returns (symbols, stresses) with len(symbols)==len(stresses).
 
-    Returns (symbols, stresses) với len(symbols) == len(stresses).
+    Determinism: same input → identical output under fixed versions of CMUdict package,
+    espeak-ng binary, and phonemizer library.
     """
     key = word.lower().strip(".,;:!?\"'()[]{}")
     if not key:
         return [], []
 
-    # Override sửa lỗi (ARPAbet KÈM stress) — tra TRƯỚC để luôn thắng common dict/g2p.
+    # Layer 1: HARD PRIORITY — bypasses all validation and fallback logic.
     if key in _WORD_IPA_OVERRIDES:
+        logger.debug("ipa_resolve word=%r source=override", key)
         return _finalize_stress(*_arpabet_tokens_to_ipa_stress(_WORD_IPA_OVERRIDES[key]))
 
-    # Built-in dictionary (chủ yếu function words; ARPAbet KHÔNG kèm stress → stress None).
-    # Lọc theo ARPABET_TO_IPA để token không hợp lệ không lọt vào chuỗi IPA tham chiếu.
-    if key in _COMMON_WORD_PRONUNCIATIONS:
-        symbols = [ARPABET_TO_IPA[a] for a in _COMMON_WORD_PRONUNCIATIONS[key]
-                   if a in ARPABET_TO_IPA]
-        return symbols, [None] * len(symbols)
-
-    # g2p (cached instance — KHÔNG khởi tạo lại mỗi từ). g2p_en trả flat list ARPAbet
-    # token kèm stress digit; helper parse digit + AH split + lọc base lạ.
-    transcriber = _get_g2p()
-    if transcriber is not None:
-        try:
-            symbols, stresses, syllables = _arpabet_tokens_to_ipa_stress(
-                list(transcriber(key))
+    # Layer 2: CMUdict primary lexicon — all-or-nothing acceptance.
+    cmu = _lookup_cmudict(key)
+    if cmu is not None:
+        if _cmudict_entry_is_valid(cmu):
+            logger.debug("ipa_resolve word=%r source=cmudict", key)
+            return _finalize_stress(*_arpabet_tokens_to_ipa_stress(cmu))
+        else:
+            logger.warning(
+                "ipa_resolve word=%r source=cmudict INVALID_TOKENS=%r — falling through",
+                key, cmu,
             )
-            if symbols:
-                return _finalize_stress(symbols, stresses, syllables)
-        except ValueError:
-            raise  # guard alignment — không nuốt
-        except Exception:  # noqa: BLE001 - lỗi runtime g2p
-            pass
 
-    # Fallback: empty list (caller detect và handle missing words)
+    # Layer 3: eSpeak NG — deterministic rule-based G2P for OOV words.
+    espeak = _espeak_word_to_symbols_stress(key)
+    if espeak is not None:
+        logger.debug("ipa_resolve word=%r source=espeak", key)
+        return espeak
+
+    # Layer 4: hard failure — callers must not treat [] as a valid pronunciation.
+    logger.warning("ipa_resolve word=%r source=failed", key)
     return [], []
 
 

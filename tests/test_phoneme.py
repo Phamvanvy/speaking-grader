@@ -54,7 +54,7 @@ class TestIPAMapping:
 
 
 class TestWordToIpa:
-    """Word → IPA sequence using built-in dictionary."""
+    """Word → IPA sequence via CMUdict / eSpeak pipeline."""
 
     def test_common_words(self):
         result = word_to_ipa("the")
@@ -84,11 +84,60 @@ class TestWordToIpa:
         result_upper = word_to_ipa("THE")
         assert result_lower == result_upper
 
-    def test_usually_override_no_spurious_w(self):
-        # g2p_en inserts a spurious W → /ˈjuːʒəwəliː/; override pins CMU sequence.
+    def test_usually_no_spurious_w(self):
+        # CMUdict has two entries: entries[0] (8 tokens, spurious W) and entries[1]
+        # (6 tokens, no W). Both have the same primary-stress count, so _entry_score's
+        # length tie-break picks the shorter: Y UW1 ZH AH0 L IY0 → /juːʒəliː/.
         result = word_to_ipa("usually")
         assert "w" not in result, f"spurious /w/ in usually: {result}"
-        assert result == ["j", "uː", "ʒ", "ʊ", "ə", "l", "iː"]
+        assert result == ["j", "uː", "ʒ", "ə", "l", "iː"]
+
+    def test_function_word_prefers_weak_form(self):
+        # Function words score toward 0 primary stress → reduced (schwa) variant.
+        # "the" → DH AH0 (/ðə/), not the strong DH IY0 (/ðiː/) or DH AH1.
+        result = word_to_ipa("the")
+        assert result == ["ð", "ə"], f"the not weak form: {result}"
+        # "to" → T AH0 (/tə/) reduced, not strong T UW1 (/tuː/).
+        result = word_to_ipa("to")
+        assert "uː" not in result, f"to picked strong form: {result}"
+
+    def test_content_word_prefers_one_primary(self):
+        # Content words score toward exactly 1 primary stress.
+        symbols, stresses = word_to_ipa_with_stress("record")  # noun/verb both 1 primary
+        assert symbols
+        assert stresses.count("primary") == 1, (symbols, stresses)
+
+    def test_override_hard_priority(self):
+        # "favorite" override (F EY1 V AH0 R IH0 T) must win over CMUdict
+        # (which has F EY1 V ER0 AH0 T → /ˈfeɪvɜːət/ with wrong ɜː).
+        result = word_to_ipa("favorite")
+        assert "ɜː" not in result, f"CMUdict ER0 slipped through override: {result}"
+        assert result == ["f", "eɪ", "v", "ə", "r", "ɪ", "t"]
+
+    def test_cmudict_common_word(self):
+        # Common words previously in _COMMON_WORD_PRONUNCIATIONS now come from CMUdict.
+        for word, expected_subset in [
+            ("work", {"w", "ɜː", "k"}),
+            ("think", {"θ", "ɪ", "ŋ", "k"}),
+            ("people", {"p", "iː", "p", "ə", "l"}),
+        ]:
+            result = set(word_to_ipa(word))
+            assert expected_subset <= result, f"{word}: got {result}"
+
+    def test_determinism(self):
+        # Same input must produce identical output on every call.
+        for word in ("the", "usually", "traditional", "important"):
+            assert word_to_ipa_with_stress(word) == word_to_ipa_with_stress(word), word
+
+    def test_hard_failure_returns_empty(self, monkeypatch):
+        # Layer 4: if CMUdict and eSpeak both return nothing, result is ([], []).
+        import src.phoneme.ipa as ipa_mod
+        monkeypatch.setattr(ipa_mod, "_lookup_cmudict", lambda w: None)
+        monkeypatch.setattr(ipa_mod, "_espeak_word_to_symbols_stress", lambda w: None)
+        assert word_to_ipa("anything") == []
+        symbols, stresses = word_to_ipa_with_stress("anything")
+        assert symbols == []
+        assert stresses == []
 
 
 class TestWordStress:
@@ -99,10 +148,10 @@ class TestWordStress:
 
     @staticmethod
     def _g2p_or_skip(word):
-        """Trả (symbols, stresses); skip nếu g2p không có (từ đa âm tiết → rỗng)."""
+        """Return (symbols, stresses); skip if no pronunciation found (OOV with eSpeak unavailable)."""
         symbols, stresses = word_to_ipa_with_stress(word)
         if not symbols:
-            pytest.skip("g2p_en không khả dụng — bỏ qua test phụ thuộc g2p")
+            pytest.skip(f"no pronunciation found for {word!r} — eSpeak may be unavailable")
         return symbols, stresses
 
     def test_alignment_length(self):
@@ -112,14 +161,14 @@ class TestWordStress:
             assert len(symbols) == len(stresses), w
 
     def test_dictionary_word_no_stress(self):
-        # Từ trong từ điển nội bộ: ARPAbet không kèm stress → toàn None.
+        # "the" (DH AH0) is monosyllabic → _finalize_stress suppresses all marks → None.
         symbols, stresses = word_to_ipa_with_stress("the")
         assert symbols
         assert len(symbols) == len(stresses)
         assert all(s is None for s in stresses)
 
     def test_multisyllable_has_primary(self):
-        # "traditional" qua g2p → có đúng nhấn chính, nằm trên một nguyên âm.
+        # "traditional" via CMUdict → primary stress on a vowel.
         symbols, stresses = self._g2p_or_skip("traditional")
         assert "primary" in stresses
         for sym, st in zip(symbols, stresses):
@@ -131,7 +180,7 @@ class TestWordStress:
         assert "primary" in stresses
 
     def test_monosyllable_suppressed(self):
-        # Từ 1 âm tiết (cat) qua g2p: nhấn âm bị suppress ở backend → toàn None.
+        # "cat" (K AE1 T) is monosyllabic → _finalize_stress suppresses stress → all None.
         symbols, stresses = self._g2p_or_skip("cat")
         assert all(s is None for s in stresses)
 
@@ -184,9 +233,8 @@ class TestTextToIpaSequenceWithSpans:
     def test_dropped_word_keeps_alignment(self, monkeypatch):
         import src.phoneme.ipa as ipa_mod
 
-        # Force the middle word to be unmappable (→ empty). g2p_en maps almost any
-        # token, so the drop path must be triggered deterministically. Patch
-        # word_to_ipa_with_stress since text_to_ipa_sequence_with_spans calls it.
+        # Force the middle word to be unmappable (→ empty) to test alignment stability.
+        # CMUdict + eSpeak cover most tokens, so patch directly to trigger the drop path.
         real = ipa_mod.word_to_ipa_with_stress
 
         def fake_word_to_ipa_with_stress(word):
@@ -1300,7 +1348,7 @@ class TestRecognizerNoiseGate:
         assert sc.recognizer_noise_count == 0
 
 
-# ── Reference IPA accuracy (g2p AH split + per-word overrides) ────────────────
+# ── Reference IPA accuracy (AH split + CMUdict / per-word overrides) ─────────
 
 from src.phoneme.ipa import (
     _validate_word_ipa_overrides,
@@ -1309,10 +1357,10 @@ from src.phoneme.ipa import (
 
 
 class TestReferenceIpaAccuracy:
-    """AH1/AH2→ʌ vs AH0→ə (display) + _WORD_IPA_OVERRIDES. Scoring KHÔNG đổi (normalize ʌ→ə)."""
+    """AH1/AH2→ʌ vs AH0→ə (display) + CMUdict / _WORD_IPA_OVERRIDES. Scoring KHÔNG đổi (normalize ʌ→ə)."""
 
     def test_stressed_ah_is_open_back_vowel(self):
-        # stomach (g2p: S T AH1 M AH0 K) → ʌ ở âm nhấn, ə ở âm yếu (trước: cả hai ə).
+        # stomach (CMUdict: S T AH1 M AH0 K) → ʌ ở âm nhấn, ə ở âm yếu.
         sym, _st = word_to_ipa_with_stress("stomach")
         assert "ʌ" in sym
         assert sym == ["s", "t", "ʌ", "m", "ə", "k"]
@@ -1327,9 +1375,10 @@ class TestReferenceIpaAccuracy:
         assert sym[0] == "ə" and "ʌ" not in sym
 
     def test_especially_override(self):
+        # CMUdict entries start with AH0 (ə) not IH0 (ɪ); override pins /ɪspˈeʃəliː/.
         sym, st = word_to_ipa_with_stress("especially")
         assert sym == ["ɪ", "s", "p", "e", "ʃ", "ə", "l", "iː"]  # /ɪspˈeʃəliː/
-        assert "primary" in st  # giữ nhấn (override qua cùng helper parse stress)
+        assert "primary" in st
 
     def test_override_validation_passes_and_rejects_bad_token(self):
         import re
@@ -1367,10 +1416,10 @@ class TestReferenceIpaAccuracy:
             assert "oʊ" in sym and "əʊ" not in sym, w
 
     def test_folktales_reference_uses_oh(self):
-        # g2p path: folktales bắt đầu f, oʊ, k... (trước: əʊ). Skip nếu g2p vắng.
+        # "folktales" may be OOV in CMUdict; falls to eSpeak. Skip if neither available.
         sym, _st = word_to_ipa_with_stress("folktales")
         if not sym:
-            pytest.skip("g2p_en không khả dụng")
+            pytest.skip("folktales not in CMUdict and eSpeak unavailable")
         assert "oʊ" in sym and "əʊ" not in sym
         assert sym[:2] == ["f", "oʊ"]
 
@@ -1396,10 +1445,10 @@ class TestReferenceIpaAccuracy:
         assert ARPABET_TO_IPA["AO"] == "ɔː"
 
     def test_according_vowel_is_thought(self):
-        # AO→ɔː + giữ r (rhotic/US) → /əˈkɔːrdɪŋ/ (không override).
+        # AO→ɔː + giữ r (rhotic/US) → /əˈkɔːrdɪŋ/ (not an override — comes from CMUdict).
         sym, _st = word_to_ipa_with_stress("according")
         if not sym:
-            pytest.skip("g2p_en không khả dụng")
+            pytest.skip("according not found in CMUdict and eSpeak unavailable")
         assert sym == ["ə", "k", "ɔː", "r", "d", "ɪ", "ŋ"]
 
     def test_scoring_unchanged_ao_thought_vs_lot(self):
@@ -1413,10 +1462,12 @@ class TestReferenceIpaAccuracy:
         assert thought.overall_accuracy == lot.overall_accuracy
         assert thought.substitution_count == lot.substitution_count
 
-    # ── Per-word overrides khớp từ điển chuẩn (qua helper: AH-split + onset relocation) ──
+    # ── Expected IPA for key words (overrides + CMUdict) ─────────────────────────
 
-    def test_word_overrides_match_dictionary(self):
-        # symbols + nhấn-hiển-thị (dời onset) → đúng IPA mong đợi.
+    def test_word_ipa_matches_expected(self):
+        # All from _WORD_IPA_OVERRIDES: CMUdict entries[0] has wrong pronunciations for
+        # each (spurious W in usually, AH0 vs IH0 start in especially, Y vs IY in resilient,
+        # IY0 vs IH0 start in relationship, ER0 in favorite, OOV for vietnamese/vietnam).
         cases = {
             "vietnamese": (["v","iː","e","t","n","ə","m","iː","z"], "ˌviːetnəˈmiːz"),
             "vietnam":    (["v","iː","e","t","n","ɑː","m"], "ˌviːetˈnɑːm"),
@@ -1445,7 +1496,7 @@ class TestStressOnsetPlacement:
     def _render(word):
         ph, _spans, _stress, disp = text_to_ipa_sequence_with_spans(word)
         if not ph:
-            pytest.skip("g2p_en không khả dụng")
+            pytest.skip(f"no pronunciation found for {word!r} (CMUdict / eSpeak unavailable)")
         return "".join(
             ("ˈ" if d == "primary" else "ˌ" if d == "secondary" else "") + s
             for s, d in zip(ph, disp)

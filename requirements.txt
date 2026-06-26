@@ -20,11 +20,14 @@ python-multipart>=0.0.9
 # torch: deep learning runtime (CPU build ~800MB, CUDA ~2GB+).
 # transformers: AutoModelForCTC + AutoFeatureExtractor cho wav2vec.
 # librosa: audio loading + resampling (fallback: torchaudio/soundfile).
-# g2p-en: grapheme-to-phoneme fallback khi word không có trong built-in dict.
+# cmudict: full CMU Pronouncing Dictionary (~134k words, pure Python, no downloads).
+# phonemizer: eSpeak NG wrapper for deterministic rule-based G2P (OOV fallback).
+#   Requires espeak-ng system binary: apt-get install -y espeak-ng espeak-ng-data
 torch>=2.0.0
 transformers>=4.35.0
 librosa>=0.10.0
-g2p-en>=2.1.0
+cmudict>=1.0.2
+phonemizer>=3.2.1
 # accelerate: đặt device (GPU) cho transformers.pipeline — dùng bởi ASR backend
 # 'insanely_fast_whisper' (src/asr.py:_transcribe_insanely_fast_whisper) và wav2vec.
 accelerate>=0.26.0
