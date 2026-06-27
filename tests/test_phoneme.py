@@ -529,6 +529,59 @@ class TestAccentVariants:
         assert score.overall_accuracy < 1.0
 
 
+class TestNasalCodaLinking:
+    """Nối âm: coda mũi của function word → stop homorganic trước nguyên âm = không lỗi.
+
+    "in order" /ɪn/+/ɔː/ — wav2vec hay nghe /n/ cuối thành /t/ (giải phóng/nối coda).
+    Đây là artifact nối âm, KHÔNG phải nuốt nasal (vẫn được phát) nên KHÔNG phạt.
+    """
+
+    def _make_segments(self, phonemes: list[str]) -> list[PhonemeSegment]:
+        return [
+            PhonemeSegment(phoneme=p, start=float(i), end=float(i + 1), confidence=0.9)
+            for i, p in enumerate(phonemes)
+        ]
+
+    def _ref(self, text: str):
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        return text_to_ipa_sequence_with_spans(text)
+
+    def test_in_order_n_to_t_accepted(self):
+        # "in order" /ɪ n ɔː r d ɜː/ → /n/ nghe thành /t/ trước nguyên âm /ɔː/ của "order".
+        ref, spans, stress, disp = self._ref("in order")
+        pred = list(ref)
+        pred[1] = "t"  # n → t (coda của "in", nối sang /ɔː/)
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans, stress, reference_display_stress=disp)
+        n_point = score.words[0].phonemes[1]
+        assert n_point.status == "ok"
+        assert n_point.penalty_reason == "linking_variant"
+        assert score.substitution_count == 0
+
+    def test_in_bed_n_to_t_stays_error(self):
+        # "in bed": /n/ trước phụ âm /b/ → KHÔNG nối âm → n→t vẫn là lỗi thật.
+        ref, spans, stress, disp = self._ref("in bed")
+        pred = list(ref)
+        pred[1] = "t"  # n → t nhưng từ kế bắt đầu bằng phụ âm
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans, stress, reference_display_stress=disp)
+        n_point = score.words[0].phonemes[1]
+        assert n_point.status == "sub"
+        assert n_point.penalty_reason != "linking_variant"
+
+    def test_content_word_coda_not_exempted(self):
+        # "pen" KHÔNG phải function word → n→t cuối vẫn là lỗi (giữ phân biệt pen/pet).
+        ref, spans, stress, disp = self._ref("pen apple")
+        n_idx = ref.index("n")
+        pred = list(ref)
+        pred[n_idx] = "t"
+        segs = self._make_segments(pred)
+        score = compute_phoneme_score(segs, ref, spans, stress, reference_display_stress=disp)
+        n_point = next(p for p in score.words[0].phonemes if p.symbol == "n")
+        assert n_point.penalty_reason != "linking_variant"
+
+
 class TestWordDetails:
     """Per-word IPA detail (score.words) for ELSA-style display."""
 

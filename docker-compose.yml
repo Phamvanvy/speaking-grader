@@ -16,6 +16,9 @@ services:
     # Thư mục ./.model_cache cần được thêm vào .gitignore.
     volumes:
       - whisper-cache:/root/.cache
+      # Voice Piper cho /tts (nghe phát âm đúng). Đặt file .onnx (+ .onnx.json cùng tên)
+      # vào ./voices trên host rồi trỏ TTS_VOICE_US/GB tới chúng. Thiếu → /tts 503.
+      - ./voices:/app/voices:ro
 
     # Cho phép container gọi service trên host (llama.cpp) qua host.docker.internal.
     extra_hosts:
@@ -29,6 +32,11 @@ services:
       HF_HOME: "/root/.cache/huggingface"
       TORCH_HOME: "/root/.cache/torch"
       XDG_CACHE_HOME: "/root/.cache"
+      # TTS Piper: trỏ tới voice trong ./voices (mount ở trên). Đặt TTS_VOICE_US/GB trong
+      # .env để đổi tên file; rỗng → dùng mặc định dưới đây. Cache WAV persist vào volume.
+      TTS_VOICE_US: "${TTS_VOICE_US:-/app/voices/en_US-lessac-medium.onnx}"
+      TTS_VOICE_GB: "${TTS_VOICE_GB:-/app/voices/en_GB-alan-medium.onnx}"
+      TTS_CACHE_DIR: "/root/.cache/tts"
       # NVIDIA_VISIBLE_DEVICES: "1" # Mở ra nếu muốn ép container chỉ nhìn thấy GPU số 2
 
     # Healthcheck dùng endpoint /health có sẵn của app.

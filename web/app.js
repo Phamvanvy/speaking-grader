@@ -154,6 +154,35 @@ document.addEventListener('click', e => {
     if (Number.isFinite(start) && Number.isFinite(end)) playWordSegment(start, end);
 });
 
+// ── Phát "phát âm đúng" của 1 TỪ (nút 🔊) ──────────────────────────────
+// Khác playWordSegment (phát lại Blob của chính người học): đây là audio THAM CHIẾU
+// do server tổng hợp (Piper TTS) qua GET /tts. Phát CẢ file nên không cần token/seek/
+// setTimeout — chỉ pause→đổi src→play. Giọng theo `currentAccent` (default→US ở backend).
+// 1 thẻ <audio> ẩn dùng chung (tách khỏi wordAudio để hai nút không cắt nhau).
+let ttsAudio = null;
+
+function playWordTts(word) {
+    if (!word) return;
+    const base = document.getElementById('api-url').value.replace(/\/$/, '');
+    const url = `${base}/tts?text=${encodeURIComponent(word)}&accent=${encodeURIComponent(currentAccent)}`;
+    if (!ttsAudio) ttsAudio = new Audio();
+    ttsAudio.pause();
+    ttsAudio.src = url;
+    const p = ttsAudio.play();
+    // 503 (chưa cài voice) / lỗi mạng → báo nhẹ, không vỡ UI.
+    if (p && typeof p.catch === 'function') {
+        p.catch(() => alert('Chưa phát được audio mẫu — server có thể chưa cài voice TTS (xem README: TTS_VOICE_US/GB).'));
+    }
+}
+
+// Delegated: bắt mọi nút .tts-play (panel dựng lại mỗi lần render), gắn 1 lần.
+document.addEventListener('click', e => {
+    const btn = e.target instanceof Element ? e.target.closest('.tts-play') : null;
+    if (!btn) return;
+    e.preventDefault();
+    playWordTts(btn.dataset.word || '');
+});
+
 // Load saved API URL, or pick a sensible default.
 // - Saved value always wins.
 // - Served from a real host (not file:// or localhost) → default the API to the
@@ -847,7 +876,7 @@ function toBritishWord(w) {
 
 // ELSA-style phoneme detail fed by data.phoneme.score.words: every word shows its
 // full reference IPA with mispronounced sounds bolded/red in place, followed by a
-// detail table (Từ / IPA đúng / Bạn đọc / Âm sai / Mức độ) for the words with errors.
+// detail table (Từ / Bạn đọc / IPA đúng / Âm sai / Mức độ) for the words with errors.
 // Falls back to the legacy errors-only table when `words` is absent (older payloads).
 function phonemeErrorsHtml(phoneme, opts = {}) {
     const score = phoneme?.score;
@@ -862,6 +891,12 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     const playback = !!opts.playback;
     const playBtn = w => (playback && w.start != null && w.end != null)
         ? `<button type="button" class="phoneme-play" data-start="${w.start}" data-end="${w.end}" title="Nghe lại từ này" aria-label="Nghe lại từ ${escapeHtml(w.word)}">▶</button>`
+        : '';
+    // Nút "nghe phát âm đúng" — audio mẫu Piper TTS qua /tts. LUÔN hiện (chỉ cần w.word,
+    // không phụ thuộc Blob/timestamp người dùng). Đặt ở cột "IPA đúng" (đi với phát âm
+    // chuẩn), tách khỏi nút ▶ ở cột "Bạn đọc" — mỗi cột tự đủ: bản + nghe bản đó.
+    const ttsBtn = w => (w.word)
+        ? `<button type="button" class="tts-play" data-word="${escapeHtml(w.word)}" title="Nghe phát âm chuẩn (máy đọc — tham khảo)" aria-label="Nghe phát âm chuẩn của từ ${escapeHtml(w.word)}">🔊</button>`
         : '';
 
     // Anh-Anh: bản clone đã biến đổi IPA hiển thị (dữ liệu gốc `words` giữ nguyên).
@@ -936,21 +971,21 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         const bad = (w.phonemes || []).filter(p => !p._hidden && isSignificant(p));
         const pairs = bad.map(p => {
             const heard = p.status === 'del' ? '∅' : escapeHtml(p.heard ?? '');
-            return `<span style="color:${sevColor(p.severity)};">${escapeHtml(p.symbol)} → ${heard}</span>`;
+            return `<span style="color:${sevColor(p.severity)};">${heard} → ${escapeHtml(p.symbol)}</span>`;
         }).join('<br>');
         const worst = bad.reduce((acc, p) =>
             (sevRank[p.severity] ?? 0) > (sevRank[acc] ?? -1) ? p.severity : acc, 'low');
         return `<tr>
-            <td class="phoneme-table__word">${playBtn(w)}${escapeHtml(w.word)}</td>
-            <td>${ipaHtml(w)}</td>
-            <td>${heardHtml(w)}</td>
+            <td class="phoneme-table__word">${escapeHtml(w.word)}</td>
+            <td>${playBtn(w)}${heardHtml(w)}</td>
+            <td>${ttsBtn(w)}${ipaHtml(w)}</td>
             <td>${pairs}</td>
             <td style="color:${sevColor(worst)};white-space:nowrap;">${sevLabel(worst)}</td>
         </tr>`;
     }).join('');
     const table = errWords.length
         ? `<table class="phoneme-table">
-            <thead><tr><th>Từ</th><th>IPA đúng</th><th>Bạn đọc</th><th>Âm sai</th><th>Mức độ</th></tr></thead>
+            <thead><tr><th>Từ</th><th>Bạn đọc</th><th>IPA đúng</th><th>Âm sai</th><th>Mức độ sai</th></tr></thead>
             <tbody>${tableRows}</tbody>
         </table>`
         : '<div style="color:#16a34a;font-size:0.88rem;margin-top:0.4rem;">Tất cả các âm đều đúng 🎉</div>';
@@ -1006,7 +1041,7 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         </div>`;
     const body = `
         ${accentRow}
-        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm</div>
+        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm · 🔊 = nghe phát âm chuẩn (máy đọc — tham khảo)</div>
         <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}</div>
         ${truncLine}
         <div class="phoneme-words">${head}</div>${moreCards}

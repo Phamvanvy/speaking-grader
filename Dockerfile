@@ -31,6 +31,15 @@ ENV WHISPER_MODEL=large-v3-turbo \
     TOEIC_PHONEME_ANALYSIS_ENABLED=true \
     TOEIC_PHONEME_DEVICE=cuda
 
+# ── TTS "nghe phát âm đúng" (Piper) ─────────────────────────────────────────
+# piper-tts đã cài từ requirements.txt; espeak-ng (Piper cần) đã có ở apt trên.
+# Voice .onnx KHÔNG bake vào image (giữ image nhẹ) → mount qua volume vào /app/voices
+# (xem docker-compose.yml). File vắng → /tts trả 503, phần còn lại app vẫn chạy.
+# TTS_CACHE_DIR đặt dưới /root/.cache để WAV đã tổng hợp persist cùng volume cache model.
+ENV TTS_VOICE_US=/app/voices/en_US-lessac-medium.onnx \
+    TTS_VOICE_GB=/app/voices/en_GB-alan-medium.onnx \
+    TTS_CACHE_DIR=/root/.cache/tts
+
 # Tăng worker để tận dụng i5-14400F và 64GB RAM xử lý đa luồng gối đầu (Concurrency)
 ENV PORT=8000
 EXPOSE 8000

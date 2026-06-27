@@ -35,7 +35,7 @@ from time import perf_counter
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 import subprocess
@@ -45,6 +45,7 @@ from .core import grade_response
 from .logging_setup import setup_logging
 from .rubrics import EXAM_REGISTRIES, resolve_question_type
 from .rubrics.base import QuestionType
+from .tts import MAX_TEXT_LEN as _TTS_MAX_TEXT, TtsUnavailable, synthesize as _tts_synthesize
 
 logger = logging.getLogger("toeic.api")
 
@@ -657,6 +658,50 @@ async def grade_batch(
         "total_processing_time_ms": total_ms,
         "results": results,
     }
+
+
+def _validate_tts_text(text: str) -> str:
+    """Chuẩn hoá text cho TTS — NỚI LỎNG: chỉ strip + bỏ ký tự điều khiển + chặn rỗng
+    + trần độ dài. KHÔNG whitelist hẹp chữ cái: TTS đọc được text tự nhiên, whitelist
+    sẽ chặn nhầm từ hợp lệ (it's, co-op) và cụm từ tương lai. Mục tiêu chỉ là chống
+    lạm dụng (độ dài), không lọc nội dung."""
+    value = "".join(ch for ch in (text or "") if ch >= " " or ch == "\t")
+    value = " ".join(value.split())
+    if not value:
+        raise HTTPException(status_code=400, detail="Thiếu 'text'.")
+    if len(value) > _TTS_MAX_TEXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'text' quá dài ({len(value)} > {_TTS_MAX_TEXT} ký tự).",
+        )
+    return value
+
+
+@app.get("/tts")
+async def tts(text: str = "", accent: str = "default") -> Response:
+    """Tổng hợp audio mẫu (Piper TTS) cho 1 từ/cụm ngắn → WAV.
+
+    Dùng cho nút 🔊 "nghe phát âm đúng" ở bảng lỗi phát âm. Param đặt tên trung lập
+    để sau thêm `ipa=` mà giữ nguyên route (xem src/tts.py:synthesize). Voice chưa
+    cài → 503; text sai → 400.
+    """
+    clean = _validate_tts_text(text)
+    accent = _validate_accent(accent)
+    try:
+        wav = await run_in_threadpool(
+            _tts_synthesize, text=clean, accent=accent, config=_BASE_CONFIG
+        )
+    except TtsUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
+        logger.exception("Lỗi TTS")
+        raise HTTPException(status_code=500, detail=f"Lỗi TTS: {e}") from e
+    return Response(
+        content=wav,
+        media_type="audio/wav",
+        # Audio mẫu ổn định theo (text, accent, version) → cho trình duyệt cache.
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 # Mount frontend tĩnh ở "/" — PHẢI đặt sau mọi route API ở trên. Starlette so khớp

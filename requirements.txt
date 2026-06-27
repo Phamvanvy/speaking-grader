@@ -36,3 +36,7 @@ accelerate>=0.26.0
 # TOEIC_ASR_ENGINE_MOCK_TEST=whisperx (xem src/asr.py:_transcribe_whisperx).
 whisperx>=3.3.0
 onnxruntime>=1.18
+# Piper TTS: sinh audio mẫu "nghe phát âm đúng" (endpoint /tts, nút 🔊 ở web).
+# Chỉ cần khi bật tính năng — phải tải file voice .onnx riêng (TTS_VOICE_US/GB),
+# xem README. Dùng chung onnxruntime ở trên.
+piper-tts>=1.2.0

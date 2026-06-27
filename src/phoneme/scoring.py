@@ -19,8 +19,10 @@ from typing import Final
 
 from .diagnostics import WordDiagnostic, build_word_diagnostics
 from .ipa import (
+    FUNCTION_WORDS,
     deletion_penalty,
     deletion_severity,
+    is_nasal_coda_linking,
     is_real_error_substitution,
     is_vowel,
     normalize_ipa,
@@ -497,6 +499,20 @@ def _score_deletion(
     return point, penalty, raw
 
 
+def _links_into_vowel(
+    reference: list[str], ref_word: list[str | None], ref_idx: int, word: str | None
+) -> bool:
+    """True nếu âm tại ref_idx nối sang nguyên âm ĐẦU của TỪ KẾ TIẾP (linking).
+
+    Điều kiện nối âm liên-từ: phoneme reference ngay sau thuộc MỘT TỪ KHÁC và là nguyên âm
+    (vd coda /n/ của "in" + onset /ɔ/ của "order"). Cùng từ → không tính là nối âm.
+    """
+    nxt = ref_idx + 1
+    if nxt >= len(reference) or ref_word[nxt] == word:
+        return False
+    return is_vowel(reference[nxt])
+
+
 def _align_points(
     path: list[tuple[int, int]],
     predicted: list[str],
@@ -570,6 +586,22 @@ def _align_points(
                 point = PhonemePoint(
                     symbol=ref_ph, status="ok", stress=stress, display_stress=disp,
                     penalty_reason=PenaltyReason.ACCENT_VARIANT.value,
+                    penalty_adjustment=0.0,
+                )
+                penalty = 0.0
+            elif (
+                ref_is_coda[ref_idx]
+                and (word or "").lower() in FUNCTION_WORDS
+                and is_nasal_coda_linking(ref_ph, pred_ph)
+                and _links_into_vowel(reference, ref_word, ref_idx, word)
+            ):
+                # Nối âm: coda MŨI của function word ("in", "on", "an"...) nối sang nguyên
+                # âm đầu từ kế ("in order" /ɪn/+/ɔ/) hay bị wav2vec gán thành stop homorganic
+                # (n→t/d). KHÔNG phải nuốt âm cũng KHÔNG phải lỗi người đọc → ok. Ràng buộc
+                # function word + nguyên âm theo sau giữ "in" vs "it" vẫn là lỗi mọi ngữ cảnh khác.
+                point = PhonemePoint(
+                    symbol=ref_ph, status="ok", stress=stress, display_stress=disp,
+                    penalty_reason=PenaltyReason.LINKING_VARIANT.value,
                     penalty_adjustment=0.0,
                 )
                 penalty = 0.0

@@ -13,6 +13,9 @@ __pycache__/
 data/
 outputs/
 logs/
+# Voice Piper TTS: mount qua volume lúc chạy (không bake vào image) → khỏi phình
+# build context khi file .onnx nằm trong repo.
+voices/
 
 # Tài liệu/khác không cần cho runtime.
 docs/

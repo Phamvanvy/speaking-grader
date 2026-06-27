@@ -28,6 +28,7 @@ class PenaltyReason(str, Enum):
     LOW_CONFIDENCE_NEUTRALIZED = "low_confidence_neutralized"  # conf rất thấp → trung hoà
     RECOGNIZER_NOISE = "recognizer_noise"      # sub bất khả thi + conf thấp → wav2vec hallucinate
     ACCENT_VARIANT = "accent_variant"          # biến thể giọng được chấp nhận (coda /r/ non-rhotic)
+    LINKING_VARIANT = "linking_variant"        # nối âm: coda mũi function-word → stop homorganic trước nguyên âm
 
 
 @dataclass(frozen=True)

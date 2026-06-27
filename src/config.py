@@ -145,6 +145,19 @@ class Config:
     # cùng đề trong batch. Server không hỗ trợ sẽ bỏ qua key này. Tắt bằng
     # TOEIC_LOCAL_PREFIX_CACHE=false. (Không ảnh hưởng backend Anthropic.)
     local_prefix_cache: bool = True
+    # ── TTS "nghe phát âm đúng" (Piper) ──────────────────────────────────
+    # Đường dẫn file voice .onnx (file config .onnx.json cùng tên đặt cạnh nó).
+    # Rỗng → endpoint /tts trả 503 (tính năng tắt). Voice tải tách khỏi pip để
+    # không phình cài đặt mặc định — xem README. Đặt qua TTS_VOICE_US / TTS_VOICE_GB.
+    tts_voice_us: str = ""
+    tts_voice_gb: str = ""
+    # accent 'default'/'auto' (client) map sang giọng này. Mặc định US vì IPA tham
+    # chiếu (g2p_en/CMUdict) là giọng Mỹ → nhất quán với IPA hiển thị. KHÔNG phải
+    # fallback tuỳ tiện. Đặt qua TTS_DEFAULT_ACCENT (us | gb).
+    tts_default_accent: str = "us"
+    # Thư mục cache WAV đã tổng hợp. Key cache có version (xem src/tts.py:CACHE_VERSION)
+    # → đổi voice/normalization tự "miss" không cần xoá tay. Đặt qua TTS_CACHE_DIR.
+    tts_cache_dir: str = "outputs/tts_cache"
 
     @property
     def has_api_key(self) -> bool:
@@ -272,4 +285,12 @@ def load_config() -> Config:
         local_prefix_cache=(
             os.getenv("TOEIC_LOCAL_PREFIX_CACHE", "true") or "true"
         ).strip().lower() in {"1", "true", "yes", "on"},
+        tts_voice_us=os.getenv("TTS_VOICE_US", "") or "",
+        tts_voice_gb=os.getenv("TTS_VOICE_GB", "") or "",
+        tts_default_accent=(
+            os.getenv("TTS_DEFAULT_ACCENT", "us") or "us"
+        ).strip().lower(),
+        tts_cache_dir=(
+            os.getenv("TTS_CACHE_DIR", "outputs/tts_cache") or "outputs/tts_cache"
+        ),
     )

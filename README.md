@@ -355,6 +355,11 @@ docker compose up --build
 - **GPU**: đổi base image sang `nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04`, đặt
   `WHISPER_DEVICE=cuda`, chạy `docker run --gpus all ...` (hoặc bỏ comment khối `deploy.resources`
   trong `docker-compose.yml`). Chi tiết: [docs/deployment.html](docs/deployment.html).
+- **TTS "nghe phát âm đúng"**: `piper-tts` đã có trong image; voice `.onnx` **không** bake
+  vào image (giữ image nhẹ) mà **mount qua volume**. Đặt file voice vào `./voices` trên host
+  (compose đã mount `./voices:/app/voices:ro`); với `docker run` thêm `-v "$(pwd)/voices:/app/voices:ro"`.
+  Đổi tên file qua `TTS_VOICE_US`/`TTS_VOICE_GB`. Thiếu voice → `/tts` trả 503 (nút 🔊 báo
+  lỗi nhẹ, phần còn lại chạy bình thường).
 
 > ⚠️ **Engine ASR cho `mock_test`:** image mặc định chỉ cài `faster-whisper`. `whisperx`
 > (engine mặc định của `mock_test`) **không** có trong `requirements.txt` (rất nặng + thiên
@@ -386,6 +391,26 @@ docker compose up --build
 | `TOEIC_MAX_TOKENS` | `30000` | Trần token LLM sinh ra. Nhận xét tiếng Việt dài dễ vượt 4096 → JSON bị cắt; để rộng (cả 2 backend dừng sớm khi xong nên không tốn thêm). |
 | `TOEIC_PHONEME_ANALYSIS_ENABLED` | `false` | Bật phoneme analysis (wav2vec) cho `mode=practice`. `mode=mock_test` luôn bật — bất kể cờ này. Cần cài `torch`/`transformers`/`librosa`/`g2p-en`. |
 | `TOEIC_PHONEME_DEVICE` | `cpu` | `cpu` hoặc `cuda` cho model wav2vec. |
+| `TTS_VOICE_US` | — | Đường dẫn file voice Piper giọng Mỹ (`.onnx`) cho nút 🔊 "nghe phát âm đúng". Rỗng → endpoint `/tts` trả 503 (tính năng tắt). |
+| `TTS_VOICE_GB` | — | Đường dẫn file voice Piper giọng Anh (`.onnx`). Rỗng → request `accent=gb` cũng 503. |
+| `TTS_DEFAULT_ACCENT` | `us` | Giọng cho `accent=default/auto` (`us` \| `gb`). Mặc định US vì IPA tham chiếu (CMUdict) là giọng Mỹ. |
+| `TTS_CACHE_DIR` | `outputs/tts_cache` | Thư mục cache WAV đã tổng hợp (key có version → đổi voice/logic tự miss). |
+
+### Audio mẫu "nghe phát âm đúng" (TTS — tuỳ chọn)
+
+Nút 🔊 ở bảng lỗi phát âm phát audio mẫu do **Piper TTS** sinh ra (offline). Cần cài
+`piper-tts` (đã có trong `requirements.txt`) và **tải file voice riêng** (tách khỏi pip để
+không phình cài đặt mặc định):
+
+```bash
+# Ví dụ tải 1 voice US + 1 voice GB từ Hugging Face (rhasspy/piper-voices), mỗi voice gồm
+# 2 file: <voice>.onnx và <voice>.onnx.json (đặt CẠNH nhau).
+# Rồi trỏ env tới file .onnx:
+export TTS_VOICE_US=/path/to/en_US-lessac-medium.onnx
+export TTS_VOICE_GB=/path/to/en_GB-alan-medium.onnx
+```
+
+Không đặt env → `/tts` trả 503 và nút 🔊 chỉ báo lỗi nhẹ, phần còn lại của app vẫn chạy bình thường.
 
 ## Lưu ý thiết kế
 

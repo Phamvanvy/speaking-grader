@@ -2,6 +2,10 @@
 .gitnexus/
 # Cache model ASR/phoneme (HuggingFace + torch hub), bind-mount từ docker-compose.
 .model_cache/
+# Voice Piper TTS (.onnx ~60MB mỗi cái) — tải cục bộ, không commit.
+voices/
+# Cache WAV do Piper TTS sinh ra.
+outputs/tts_cache/
 __pycache__/
 *.pyc
 .venv/

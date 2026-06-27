@@ -241,6 +241,35 @@ _REAL_ERROR_SUBS: Final[frozenset[frozenset[str]]] = frozenset(
 )
 
 
+# Nối âm (linking): coda MŨI (n/m/ŋ) của một từ đứng trước nguyên âm đầu từ kế tiếp hay
+# bị recognizer nghe thành âm TẮC CÙNG VỊ TRÍ — "in order" /ɪn/→/ɪt/, "some apples" /m/→/p/,
+# "long ago" /ŋ/→/k/. Đây là artifact giải phóng/nối coda khi linking, KHÔNG phải nuốt âm
+# (deletion) cũng KHÔNG phải lỗi người đọc. KHÁC với _FINAL_DELETION (l1_vietnamese.py) vốn
+# CỐ Ý không khoan dung nuốt nasal cuối: ở đây nasal VẪN được phát, chỉ bị gán nhãn sai thành
+# stop homorganic. Caller (_align_points) còn ràng buộc thêm: chỉ áp cho FUNCTION_WORDS + có
+# nguyên âm nối ngay sau → giữ phân biệt thật như "in" vs "it" ở mọi ngữ cảnh khác.
+_NASAL_CODA_STOP_LINKS: Final[frozenset[frozenset[str]]] = frozenset(
+    frozenset({normalize_ipa(a), normalize_ipa(b)})
+    for a, b in [
+        ("n", "t"), ("n", "d"),
+        ("m", "p"), ("m", "b"),
+        ("ŋ", "k"), ("ŋ", "ɡ"),
+    ]
+)
+
+
+def is_nasal_coda_linking(expected: str, predicted: str) -> bool:
+    """True nếu (expected, predicted) là cặp coda-mũi↔stop-cùng-vị-trí của nối âm.
+
+    expected là nasal /n m ŋ/, predicted là stop homorganic (n↔t/d, m↔p/b, ŋ↔k/ɡ).
+    Ngữ cảnh nối âm (function word + nguyên âm theo sau) do caller kiểm tra riêng.
+    """
+    return (
+        frozenset({normalize_ipa(expected), normalize_ipa(predicted)})
+        in _NASAL_CODA_STOP_LINKS
+    )
+
+
 def is_real_error_substitution(expected: str, predicted: str, *, sim_floor: float) -> bool:
     """True nếu cặp sub (expected→predicted) là lỗi học viên THẬT → KHÔNG gate thành noise.
 
