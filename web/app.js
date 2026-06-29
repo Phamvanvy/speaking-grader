@@ -169,9 +169,14 @@ function playWordTts(word) {
     ttsAudio.pause();
     ttsAudio.src = url;
     const p = ttsAudio.play();
-    // 503 (chưa cài voice) / lỗi mạng → báo nhẹ, không vỡ UI.
     if (p && typeof p.catch === 'function') {
-        p.catch(() => alert('Chưa phát được audio mẫu — server có thể chưa cài voice TTS (xem README: TTS_VOICE_US/GB).'));
+        p.catch(err => {
+            // Bấm từ khác khi từ trước còn đang tải → load bị ngắt (AbortError) hoặc
+            // play() bị pause() chen ngang: KHÔNG phải lỗi server → bỏ qua, không báo.
+            if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) return;
+            // Còn lại (NotSupportedError = src tải lỗi: 503 chưa cài voice / lỗi mạng) → báo nhẹ.
+            alert('Chưa phát được audio mẫu — server có thể chưa cài voice TTS (xem README: TTS_VOICE_US/GB).');
+        });
     }
 }
 
