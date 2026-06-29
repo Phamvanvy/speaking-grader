@@ -1,0 +1,242 @@
+/* Pronunciation detail (phoneme): IPA, stress, error table, accent select. */
+
+/* ── Pronunciation detail (phoneme) — ELSA-style ───────────────────────── */
+.phoneme-detail {
+    margin-top: 1rem;
+    background: #fff7ed;
+    border-radius: 8px;
+    padding: 0.85rem;
+}
+
+.phoneme-detail__title {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 0.3rem;
+}
+
+/* Khi khối phoneme lồng dưới tiêu chí Pronunciation: <details> thu gọn. */
+.phoneme-detail-wrapper {
+    margin-top: 0.75rem;
+}
+
+summary.phoneme-detail__title {
+    cursor: pointer;
+    margin-bottom: 0;
+}
+
+details.phoneme-detail[open] > summary.phoneme-detail__title {
+    margin-bottom: 0.3rem;
+}
+
+.phoneme-legend {
+    color: #888;
+    font-size: 0.8rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Chọn giọng IPA tham chiếu (Anh-Anh / Anh-Mỹ) ngay trong Pronunciation detail. */
+.accent-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.6rem;
+    margin-bottom: 0.6rem;
+}
+
+.accent-label {
+    font-size: 0.82rem;
+    color: #555;
+    font-weight: 600;
+}
+
+/* Trong panel Pronunciation detail: override global select width:100% — control
+   cỡ nhỏ gọn cạnh nhãn. Selector trên form chính giữ full-width như các select khác. */
+.accent-row .accent-select {
+    width: auto;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.82rem;
+    margin-left: 0.3rem;
+}
+
+.accent-note {
+    font-size: 0.78rem;
+    color: #9ca3af;
+}
+
+.phoneme-words {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.phoneme-word {
+    background: #fff;
+    border: 1px solid #fed7aa;
+    border-radius: 8px;
+    padding: 0.4rem 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.phoneme-word--err {
+    border-color: #fdba74;
+    background: #fffbeb;
+}
+
+.phoneme-word__text {
+    font-weight: 600;
+    color: #333;
+    font-size: 0.9rem;
+}
+
+/* IPA string; inline-flex + gap keeps adjacent glyphs from colliding. */
+.phoneme-ipa {
+    color: #444;
+    font-size: 0.95rem;
+}
+
+.phoneme-sym {
+    letter-spacing: 0.03em;
+    /* inline-block để dấu nhấn đứng liền nguyên âm, không rớt xuống dòng lẻ. */
+    display: inline-block;
+}
+
+/* Dấu nhấn âm (ˈ primary / ˌ secondary). Span riêng để dễ đổi màu/tooltip;
+   KHÔNG dùng user-select:none để copy vẫn lấy được IPA đầy đủ kèm dấu nhấn.
+   Arial/sans-serif render tốt ˈ (U+02C8) / ˌ (U+02CC). */
+.phoneme-stress {
+    color: #4338ca;
+    font-weight: 700;
+    font-family: Arial, sans-serif;
+    /* Glyph ˈ/ˌ vốn mảnh & nhỏ → phóng to + nâng lên cho dễ nhìn. */
+    font-size: 1.35em;
+    line-height: 1;
+    vertical-align: 0.05em;
+    margin-right: 0.02em;
+}
+
+.phoneme-sym--bad {
+    color: #b91c1c;
+    font-weight: 700;
+}
+
+.phoneme-sym--missing {
+    color: #b91c1c;
+    font-weight: 700;
+    text-decoration: line-through;
+}
+
+/* Biến thể giọng được chấp nhận (vd coda /r/ non-rhotic) — không phải lỗi: màu dịu +
+   gạch chấm để phân biệt với âm đúng thường, kèm tooltip giải thích. */
+.phoneme-sym--accent {
+    color: #6b7280;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    cursor: help;
+}
+
+.phoneme-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin-top: 0.3rem;
+}
+
+.phoneme-table th,
+.phoneme-table td {
+    text-align: left;
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid #fed7aa;
+    vertical-align: top;
+}
+
+.phoneme-table th {
+    color: #92400e;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.phoneme-table__word {
+    font-weight: 600;
+    color: #333;
+}
+
+/* Nút "nghe lại" đoạn audio của riêng từ (bảng lỗi Pronunciation detail). */
+.phoneme-play {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    margin-right: 0.4rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: #4f46e5;
+    color: #fff;
+    font-size: 0.62rem;
+    line-height: 1;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: background 0.15s;
+}
+
+.phoneme-play:hover {
+    background: #4338ca;
+}
+
+.phoneme-play:active {
+    transform: scale(0.92);
+}
+
+body.dark .phoneme-detail {
+    background: #1c1917;
+}
+
+body.dark .phoneme-detail__title,
+body.dark .phoneme-table__word,
+body.dark .phoneme-word__text {
+    color: #f1f5f9;
+}
+
+body.dark .accent-label {
+    color: #cbd5e1;
+}
+
+body.dark .phoneme-word {
+    background: #0f172a;
+    border-color: #44403c;
+}
+
+body.dark .phoneme-word--err {
+    background: #1c1917;
+    border-color: #78350f;
+}
+
+body.dark .phoneme-ipa {
+    color: #cbd5e1;
+}
+
+body.dark .phoneme-sym--bad,
+body.dark .phoneme-sym--missing {
+    color: #f87171;
+}
+
+body.dark .phoneme-sym--accent {
+    color: #9ca3af;
+}
+
+body.dark .phoneme-stress {
+    color: #a5b4fc;
+}
+
+body.dark .phoneme-table th {
+    color: #fdba74;
+}
+
+body.dark .phoneme-table th,
+body.dark .phoneme-table td {
+    border-bottom-color: #44403c;
+}

@@ -1,0 +1,300 @@
+/* Components: mic recorder, saved recordings, image preview, buttons,
+   status bar, result + score + features + batch cards, api config. */
+
+/* ── Mic recorder ────────────────────────────────────────────────────── */
+.recorder {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.recorder .btn {
+    width: auto;
+}
+
+#record-btn.recording {
+    background: #dc2626;
+    color: #fff;
+    animation: pulse 1.2s ease-in-out infinite;
+}
+
+#record-btn.recording:hover:not(:disabled) {
+    background: #b91c1c;
+}
+
+@keyframes pulse {
+    50% { opacity: 0.6; }
+}
+
+.record-timer {
+    color: #dc2626;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Saved recordings (IndexedDB) ────────────────────────────────────── */
+.saved-rec-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.saved-rec-meta {
+    color: #888;
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+
+.saved-rec-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.saved-rec-actions .remove-btn {
+    color: #dc2626;
+}
+
+/* ── Image preview (Describe Picture) ────────────────────────────────── */
+.image-preview {
+    margin-top: 1rem;
+    text-align: center;
+}
+
+.image-preview:empty {
+    margin-top: 0;
+}
+
+.preview-img {
+    display: block;
+    max-width: 100%;
+    max-height: 320px;
+    margin: 0 auto 0.75rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+
+.checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.checkbox-group input[type="checkbox"] {
+    width: auto;
+}
+
+.row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.btn {
+    padding: 0.875rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+}
+
+.btn-primary {
+    background: #4f46e5;
+    color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #4338ca;
+}
+
+.btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #d1d5db;
+}
+
+.btn-secondary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.status-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.status-bar.info {
+    background: #eff6ff;
+    color: #1e40af;
+}
+
+.status-bar.success {
+    background: #f0fdf4;
+    color: #166534;
+}
+
+.status-bar.error {
+    background: #fef2f2;
+    color: #991b1b;
+}
+
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.result {
+    display: none;
+}
+
+.result.visible {
+    display: block;
+}
+
+.result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    gap: 0.5rem;
+}
+
+.result-header .actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.score-display {
+    text-align: center;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    border-radius: 12px;
+    color: white;
+    margin-bottom: 1.5rem;
+}
+
+.score-display .score {
+    font-size: 3rem;
+    font-weight: 700;
+}
+
+.score-display .label {
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.result-section {
+    margin-bottom: 1.5rem;
+}
+
+.result-section h3 {
+    color: #333;
+    margin-bottom: 0.75rem;
+    font-size: 1.1rem;
+}
+
+.result-section p {
+    color: #555;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 0.75rem;
+}
+
+.feature-item {
+    background: #f9fafb;
+    padding: 0.75rem;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.feature-item .value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #4f46e5;
+}
+
+.feature-item .name {
+    font-size: 0.8rem;
+    color: #666;
+    margin-top: 0.25rem;
+}
+
+.batch-result {
+    background: #f9fafb;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.batch-result .filename {
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 0.5rem;
+}
+
+.batch-result .batch-score {
+    display: inline-block;
+    background: #4f46e5;
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.batch-result .batch-error {
+    color: #dc2626;
+}
+
+/* Hide the default disclosure triangle on batch <summary> rows. */
+.batch-result > summary::-webkit-details-marker {
+    display: none;
+}
+
+.api-config {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.api-config input {
+    flex: 1;
+}
+
+.api-config .btn {
+    width: auto;
+    padding: 0.75rem 1rem;
+}
+
+.hidden {
+    display: none;
+}
+

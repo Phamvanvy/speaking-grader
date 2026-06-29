@@ -4,7 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Speaking Grader</title>
-    <link rel="stylesheet" href="styles.css?v=accent-default-1">
+    <!-- styles.css đã tách theo nhóm. THỨ TỰ QUAN TRỌNG (cascade): base → components
+         → theme-dark → phoneme, giữ đúng trình tự gốc của styles.css. -->
+    <link rel="stylesheet" href="css/base.css?v=accent-default-1">
+    <link rel="stylesheet" href="css/components.css?v=accent-default-1">
+    <link rel="stylesheet" href="css/theme-dark.css?v=accent-default-1">
+    <link rel="stylesheet" href="css/phoneme.css?v=accent-default-1">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
@@ -204,6 +209,15 @@
         </div>
     </div>
 
-    <script src="app.js?v=accent-default-1"></script>
+    <!-- app.js đã tách theo nhóm chức năng. THỨ TỰ QUAN TRỌNG: state trước (chứa
+         const/state dùng chung); render trước recording & form (escapeHtml được
+         gọi ở top-level khi 2 file này nạp). -->
+    <script src="js/state.js?v=accent-default-1"></script>
+    <script src="js/render.js?v=accent-default-1"></script>
+    <script src="js/playback.js?v=accent-default-1"></script>
+    <script src="js/recording.js?v=accent-default-1"></script>
+    <script src="js/form.js?v=accent-default-1"></script>
+    <script src="js/grade.js?v=accent-default-1"></script>
+    <script src="js/report.js?v=accent-default-1"></script>
 </body>
 </html>

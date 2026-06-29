@@ -1,0 +1,82 @@
+'use strict';
+
+// Phát lại đoạn audio từng từ (▶) + phát mẫu TTS (🔊). Listener delegated gắn 1 lần.
+
+// ── Phát lại đoạn audio của 1 TỪ (nút ▶ ở Pronunciation detail) ────────
+// 1 thẻ <audio> ẩn dùng chung + generation token: mỗi lần bấm tăng token, huỷ timer
+// dừng cũ, pause→seek→play đoạn mới, rồi đặt setTimeout dừng (guard bằng token để
+// timer cũ thành no-op). Dừng bằng setTimeout chứ KHÔNG timeupdate: timeupdate chỉ
+// ~4 lần/giây nên với đoạn từ 300–700ms dễ phát lố; audio từ Blob cục bộ không
+// buffering nên setTimeout theo độ dài cố định ổn định + chính xác trên mọi trình duyệt.
+// `start/end` từ backend ĐÃ đệm + clamp theo từ liền kề (xem _pad_and_clamp_windows) →
+// FE phát VERBATIM, KHÔNG tự đệm (đệm là việc của backend vì chỉ nó biết ranh giới từ kề).
+let wordAudio = null;
+let wordPlayToken = 0;
+let wordStopTimer = null;
+
+function playWordSegment(start, end) {
+    const url = playbackUrl();
+    if (!url) return;
+    if (!wordAudio) wordAudio = new Audio();
+    const myToken = ++wordPlayToken;
+    if (wordStopTimer) { clearTimeout(wordStopTimer); wordStopTimer = null; }
+    wordAudio.pause();
+    if (wordAudio.src !== url) wordAudio.src = url;
+    const from = Math.max(0, start);
+    const stopMs = Math.max(0, end - start) * 1000;
+    const begin = () => {
+        wordAudio.currentTime = from;
+        const p = wordAudio.play();
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+        wordStopTimer = setTimeout(() => {
+            if (myToken === wordPlayToken) wordAudio.pause();
+        }, stopMs);
+    };
+    // currentTime chỉ set được khi metadata đã sẵn sàng (file mới load lần đầu).
+    if (wordAudio.readyState >= 1) begin();
+    else wordAudio.addEventListener('loadedmetadata', begin, { once: true });
+}
+
+// Delegated: bắt mọi nút .phoneme-play (panel dựng lại mỗi lần render), gắn 1 lần.
+document.addEventListener('click', e => {
+    const btn = e.target instanceof Element ? e.target.closest('.phoneme-play') : null;
+    if (!btn) return;
+    e.preventDefault();
+    const start = parseFloat(btn.dataset.start);
+    const end = parseFloat(btn.dataset.end);
+    if (Number.isFinite(start) && Number.isFinite(end)) playWordSegment(start, end);
+});
+
+// ── Phát "phát âm đúng" của 1 TỪ (nút 🔊) ──────────────────────────────
+// Khác playWordSegment (phát lại Blob của chính người học): đây là audio THAM CHIẾU
+// do server tổng hợp (Piper TTS) qua GET /tts. Phát CẢ file nên không cần token/seek/
+// setTimeout — chỉ pause→đổi src→play. Giọng theo `currentAccent` (default→US ở backend).
+// 1 thẻ <audio> ẩn dùng chung (tách khỏi wordAudio để hai nút không cắt nhau).
+let ttsAudio = null;
+
+function playWordTts(word) {
+    if (!word) return;
+    const base = document.getElementById('api-url').value.replace(/\/$/, '');
+    const url = `${base}/tts?text=${encodeURIComponent(word)}&accent=${encodeURIComponent(currentAccent)}`;
+    if (!ttsAudio) ttsAudio = new Audio();
+    ttsAudio.pause();
+    ttsAudio.src = url;
+    const p = ttsAudio.play();
+    if (p && typeof p.catch === 'function') {
+        p.catch(err => {
+            // Bấm từ khác khi từ trước còn đang tải → load bị ngắt (AbortError) hoặc
+            // play() bị pause() chen ngang: KHÔNG phải lỗi server → bỏ qua, không báo.
+            if (err && (err.name === 'AbortError' || err.name === 'NotAllowedError')) return;
+            // Còn lại (NotSupportedError = src tải lỗi: 503 chưa cài voice / lỗi mạng) → báo nhẹ.
+            alert('Chưa phát được audio mẫu — server có thể chưa cài voice TTS (xem README: TTS_VOICE_US/GB).');
+        });
+    }
+}
+
+// Delegated: bắt mọi nút .tts-play (panel dựng lại mỗi lần render), gắn 1 lần.
+document.addEventListener('click', e => {
+    const btn = e.target instanceof Element ? e.target.closest('.tts-play') : null;
+    if (!btn) return;
+    e.preventDefault();
+    playWordTts(btn.dataset.word || '');
+});
