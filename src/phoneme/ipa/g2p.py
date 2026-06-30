@@ -201,11 +201,17 @@ def _arpabet_tokens_to_ipa_stress(
     THUẦN parsing/conversion — KHÔNG áp luật đơn-âm-tiết / length guard (để ở caller).
     - AH split theo nhấn: AH1/AH2 → ʌ; AH0 hoặc thiếu/không hợp lệ digit → ə (fail-soft
       CHỈ cho stress digit của AH, KHÔNG cho base lạ).
+    - ER split theo nhấn: ER1/ER2 (hoặc từ đơn âm tiết) → ɜː ("bird/sir"); ER0 không nhấn
+      trong từ ĐA âm tiết → ə + r (rhotic schwa, như override "favorite") — 1 token sinh
+      2 symbol. Tránh /ˈsætɜːdeɪ/ (sai) cho Saturday; cho /ˈsætərdeɪ/ (đúng).
     - Base không có trong ARPABET_TO_IPA → BỎ QUA (skip), KHÔNG bịa IPA.
     """
     symbols: list[str] = []
     stresses: list[StressType | None] = []
     syllables = 0
+    # ER split cần biết từ đơn hay đa âm tiết: đơn âm tiết "sir/fur" giữ ɜː dù CMUdict gắn
+    # ER0. Số nguyên âm = số token có stress digit (proxy giống cách đếm syllables bên dưới).
+    total_vowels = sum(1 for t in tokens if re.search(r"\d", t))
     for raw in tokens:
         if not raw.strip():
             continue
@@ -214,12 +220,22 @@ def _arpabet_tokens_to_ipa_stress(
         if base not in ARPABET_TO_IPA:
             continue  # base lạ → không bịa (override validate lúc import; g2p tự lọc)
         d = digit.group() if digit is not None else None
+        stress: StressType | None = "primary" if d == "1" else "secondary" if d == "2" else None
+        # ER split: ER0 không nhấn trong từ đa âm tiết → ə + r (schwa rhotic). Nhấn rõ (1/2)
+        # hoặc từ đơn âm tiết → rơi xuống nhánh chung → ɜː.
+        if base == "ER" and d not in ("1", "2") and total_vowels > 1:
+            symbols.append("ə")
+            stresses.append(stress)
+            syllables += 1  # schwa là nguyên âm → đếm âm tiết
+            symbols.append("r")
+            stresses.append(None)  # phụ âm r không mang nhấn
+            continue
         # AH split: chỉ nhấn rõ (1/2) mới là ʌ; còn lại (gồm thiếu digit) → ə.
         symbol = ("ʌ" if d in ("1", "2") else "ə") if base == "AH" else ARPABET_TO_IPA[base]
         symbols.append(symbol)
         if digit is not None:
             syllables += 1  # digit chỉ trên nguyên âm → đếm âm tiết
-        stresses.append("primary" if d == "1" else "secondary" if d == "2" else None)
+        stresses.append(stress)
     return symbols, stresses, syllables
 
 

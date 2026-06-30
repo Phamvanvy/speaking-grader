@@ -124,6 +124,17 @@ class TestWordToIpa:
             result = set(word_to_ipa(word))
             assert expected_subset <= result, f"{word}: got {result}"
 
+    def test_er0_split_unstressed_vs_monosyllable(self):
+        # ER0 không nhấn trong từ ĐA âm tiết → ə + r (rhotic schwa), KHÔNG phải ɜː.
+        # CMUdict map ER→ɜː cố định nên trước đây cho /ˈsætɜː…/, /ˈmʌðɜː/ (sai).
+        for word in ("mother", "water", "computer", "teacher", "number", "after"):
+            result = word_to_ipa(word)
+            assert "ɜː" not in result, f"{word}: ER0 vẫn ra ɜː: {result}"
+            assert result[-2:] == ["ə", "r"], f"{word}: đuôi -er sai: {result}"
+        # Từ ĐƠN âm tiết giữ ɜː dù CMUdict gắn ER0 (sir/fur), và ER1/ER2 luôn ɜː.
+        for word in ("bird", "sir", "fur", "work", "person"):
+            assert "ɜː" in word_to_ipa(word), word
+
     def test_determinism(self):
         # Same input must produce identical output on every call.
         for word in ("the", "usually", "traditional", "important"):

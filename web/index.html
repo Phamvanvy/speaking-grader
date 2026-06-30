@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="css/components.css?v=accent-default-1">
     <link rel="stylesheet" href="css/theme-dark.css?v=accent-default-1">
     <link rel="stylesheet" href="css/phoneme.css?v=accent-default-1">
-    <link rel="stylesheet" href="css/exam.css?v=exam-2">
+    <link rel="stylesheet" href="css/exam.css?v=exam-4">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
@@ -63,7 +63,7 @@
 
             <div class="form-group">
                 <label class="file-upload" id="single-file-label">
-                    <input type="file" id="audio-file" multiple accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4,.mov,.mkv,.avi">
+                    <input type="file" id="audio-file" multiple accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.weba,.mp4,.mov,.mkv,.avi">
                     <div class="file-upload-text">
                         <span class="icon">📁</span>
                         <span>Click to select audio file(s) — pick several to grade a whole batch</span>
@@ -177,7 +177,7 @@
                 <div class="result-header">
                     <h2>📊 Results</h2>
                     <div class="actions">
-                        <button class="btn btn-primary" onclick="exportSingleCsv()" style="width: auto; padding: 0.5rem 1rem;">⬇ Export CSV</button>
+                        <button class="btn btn-primary" onclick="exportSingleCsv()" style="width: auto; padding: 0.5rem 1rem;">⬇ Download CSV</button>
                         <button class="btn btn-secondary" onclick="printSingleReport()" style="width: auto; padding: 0.5rem 1rem;">🖨 Print / PDF</button>
                         <button class="btn btn-secondary" onclick="closeResult()" style="width: auto; padding: 0.5rem 1rem;">Close</button>
                     </div>
@@ -236,8 +236,8 @@
 
             <!-- BƯỚC 1: nạp đề -->
             <div class="card" x-show="step==='setup'">
-                <h2>📄 Thi cả đề — tải đề lên</h2>
-                <p class="exam-hint">Tải tài liệu đề thi (PDF / ảnh / Word). Hệ thống tự bóc tách thành từng câu để bạn review, chỉnh sửa rồi làm bài tuần tự như thi thật. Điểm cuối là <strong>ước tính nội bộ</strong>, không thay thế kết quả thi chính thức.</p>
+                <h2>📄 Thi cả đề — import đề</h2>
+                <p class="exam-hint">Import tài liệu đề thi (PDF / ảnh / Word). Hệ thống tự bóc tách thành từng câu để bạn review, chỉnh sửa rồi làm bài tuần tự như thi thật. Điểm cuối là <strong>ước tính nội bộ</strong>, không thay thế kết quả thi chính thức.</p>
                 <div class="row">
                     <div class="form-group">
                         <label>Kỳ thi</label>
@@ -264,7 +264,7 @@
             <div class="card" x-show="step==='review'">
                 <div class="result-header">
                     <h2>🔎 Review đề trước khi thi</h2>
-                    <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="reset()">↺ Tải đề khác</button>
+                    <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="reset()">↺ Import đề khác</button>
                 </div>
                 <div class="form-group">
                     <label>Tiêu đề đề thi</label>
@@ -378,8 +378,8 @@
                     </div>
                     <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;padding:0.75rem;background:#f8fafc;border-radius:8px;">
                         <label class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;margin:0;cursor:pointer;">
-                            📁📁 Tải nhiều audio cùng lúc
-                            <input type="file" multiple accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4" @change="uploadBatch($event)" style="display:none;">
+                            📁📁 Import nhiều audio cùng lúc
+                            <input type="file" multiple accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.weba,.mp4" @change="uploadBatch($event)" style="display:none;">
                         </label>
                         <span class="exam-hint" style="margin:0;">Gán lần lượt theo tên file, bắt đầu từ câu hiện tại. Đã có audio: <strong x-text="recordedCount() + '/' + order.length"></strong></span>
                     </div>
@@ -396,8 +396,8 @@
                                 <button class="btn btn-primary" style="width:auto;padding:0.6rem 1.2rem;" @click="toggleRec()"
                                         x-text="recording ? '⏹ Dừng ghi' : '🎙 Ghi âm câu này'"></button>
                                 <label class="btn btn-secondary" style="width:auto;padding:0.6rem 1.2rem;margin:0;cursor:pointer;" :class="recording ? 'disabled' : ''">
-                                    📁 Tải audio lên
-                                    <input type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4" @change="uploadRec($event)" :disabled="recording" style="display:none;">
+                                    📁 Import audio
+                                    <input type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.weba,.mp4" @change="uploadRec($event)" :disabled="recording" style="display:none;">
                                 </label>
                                 <span class="exam-rec-dot" x-show="recording">● đang ghi…</span>
                                 <span style="color:#16a34a;" x-show="current._recBlob && !recording">✓ đã có audio</span>
@@ -451,7 +451,10 @@
                     <details class="exam-result-q">
                         <summary>
                             <span x-text="'Câu ' + (item.sequence || '?') + ' · ' + typeLabel(item.type)"></span>
-                            <span class="exam-q-score" x-text="questionScore(item)"></span>
+                            <span class="exam-q-summary-right">
+                                <span class="exam-q-score" x-text="questionScore(item)"></span>
+                                <span class="exam-q-caret" aria-hidden="true" x-show="questionDone(item)">▸</span>
+                            </span>
                         </summary>
                         <div class="exam-q-body" :id="'exam-q-' + item.question_id"></div>
                     </details>
@@ -465,8 +468,8 @@
          const/state dùng chung); render trước recording & form (escapeHtml được
          gọi ở top-level khi 2 file này nạp). -->
     <script src="js/state.js?v=accent-default-1"></script>
-    <script src="js/render.js?v=accent-default-1"></script>
-    <script src="js/playback.js?v=accent-default-1"></script>
+    <script src="js/render.js?v=accent-default-2"></script>
+    <script src="js/playback.js?v=accent-default-2"></script>
     <script src="js/recording.js?v=accent-default-1"></script>
     <script src="js/form.js?v=accent-default-1"></script>
     <script src="js/grade.js?v=accent-default-1"></script>
@@ -474,7 +477,7 @@
     <script src="js/report.js?v=accent-default-1"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
-    <script src="js/exam.js?v=exam-4"></script>
+    <script src="js/exam.js?v=exam-5"></script>
     <script defer src="vendor/alpine.min.js?v=exam-1"></script>
 </body>
 </html>

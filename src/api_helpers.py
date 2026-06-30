@@ -29,6 +29,7 @@ _ALLOWED_AUDIO_SUFFIXES = {
     ".ogg",
     ".flac",
     ".webm",
+    ".weba",  # WebM audio-only (cùng container .webm — vài nguồn upload đặt đuôi này)
     ".aac",
     ".mp4",
     ".mov",

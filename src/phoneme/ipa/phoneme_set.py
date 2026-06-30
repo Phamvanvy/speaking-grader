@@ -82,6 +82,18 @@ _WORD_IPA_OVERRIDES: Final[dict[str, list[str]]] = {
     # Proper nouns not in CMUdict — must stay permanently.
     "vietnamese": ["V", "IY2", "EH0", "T", "N", "AH0", "M", "IY1", "Z"],
     "vietnam": ["V", "IY2", "EH0", "T", "N", "AA1", "M"],
+    # Weekdays: CMUdict có cả biến thể đuôi -day = IY0 (/di/) lẫn EY (/deɪ/); xếp hạng
+    # entry hoà điểm nên hay rơi vào /di/ (dạng rút gọn). Citation form Cambridge dùng
+    # /deɪ/ (vd Saturday UK /ˈsæt.ə.deɪ/). Pin EY0: nguyên âm /eɪ/ đầy đủ nhưng KHÔNG
+    # mang dấu nhấn phụ (Cambridge chỉ đánh nhấn chính ở âm tiết đầu). "saturday" qua
+    # ER0→ə+r (fix split ER) → /ˈsætərdeɪ/.
+    "monday": ["M", "AH1", "N", "D", "EY0"],
+    "tuesday": ["T", "UW1", "Z", "D", "EY0"],
+    "wednesday": ["W", "EH1", "N", "Z", "D", "EY0"],
+    "thursday": ["TH", "ER1", "Z", "D", "EY0"],
+    "friday": ["F", "R", "AY1", "D", "EY0"],
+    "saturday": ["S", "AE1", "T", "ER0", "D", "EY0"],
+    "sunday": ["S", "AH1", "N", "D", "EY0"],
 }
 
 

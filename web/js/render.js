@@ -107,8 +107,12 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     // từ có cửa sổ thời gian (start/end từ Whisper word timestamp). Từ bị skip / không map
     // được window → không có nút (không phát được thì không hiện).
     const playback = !!opts.playback;
+    // src tuỳ chọn: kết quả cả đề có Blob audio RIÊNG mỗi câu (playbackSrc) → gắn vào
+    // nút để click phát đúng audio câu đó; single bỏ trống → playback.js fallback Blob global.
+    const playbackSrc = opts.playbackSrc || '';
+    const srcAttr = playbackSrc ? ` data-src="${escapeHtml(playbackSrc)}"` : '';
     const playBtn = w => (playback && w.start != null && w.end != null)
-        ? `<button type="button" class="phoneme-play" data-start="${w.start}" data-end="${w.end}" title="Nghe lại từ này" aria-label="Nghe lại từ ${escapeHtml(w.word)}">▶</button>`
+        ? `<button type="button" class="phoneme-play" data-start="${w.start}" data-end="${w.end}"${srcAttr} title="Nghe lại từ này" aria-label="Nghe lại từ ${escapeHtml(w.word)}">▶</button>`
         : '';
     // Nút "nghe phát âm đúng" — audio mẫu Piper TTS qua /tts. LUÔN hiện (chỉ cần w.word,
     // không phụ thuộc Blob/timestamp người dùng). Đặt ở cột "IPA đúng" (đi với phát âm
@@ -317,6 +321,7 @@ function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
     // `playback`: cho phép nút "nghe lại" từng từ (chỉ kết quả single — nơi lastSingleFile
     // khớp audio đang xem). Batch/print không bật để khỏi phát nhầm audio file khác.
     const pb = !!opts.playback;
+    const pbSrc = opts.playbackSrc || '';
     if (!scores) {
         // pronunciation-only: thiếu đề bài → backend chủ động bỏ chấm điểm tổng,
         // chỉ trả phoneme. KHÔNG suy ra trạng thái này từ (scores == null) vì còn
@@ -327,10 +332,10 @@ function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
             return `<div style="background:#fef9c3;border:1px solid #fde047;border-radius:8px;padding:0.85rem;color:#854d0e;line-height:1.5;">
                     ⚠️ ${escapeHtml(msg)}
                 </div>`
-                + phonemeErrorsHtml(phoneme, { playback: pb });
+                + phonemeErrorsHtml(phoneme, { playback: pb, playbackSrc: pbSrc });
         }
         return '<p style="color:#666;">No AI scoring (ASR-only or skipped by gating).</p>'
-             + phonemeErrorsHtml(phoneme, { playback: pb });
+             + phonemeErrorsHtml(phoneme, { playback: pb, playbackSrc: pbSrc });
     }
     const cfg = examConfig(exam);
     const overall = scores[cfg.scoreField];
@@ -357,7 +362,7 @@ function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
             const isPronunciation = key === 'pronunciation' || key.includes('pronun');
             let phonemeBlock = '';
             if (isPronunciation && !renderedPhoneme) {
-                const detail = phonemeErrorsHtml(phoneme, { collapsible: true, playback: pb });
+                const detail = phonemeErrorsHtml(phoneme, { collapsible: true, playback: pb, playbackSrc: pbSrc });
                 if (detail) {
                     phonemeBlock = detail;
                     renderedPhoneme = true;
@@ -384,7 +389,7 @@ function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
     }
     // Fallback: không có tiêu chí phát âm nào khớp (vd exam khác) → render rời ở
     // cuối như cũ, tránh mất dữ liệu. renderedPhoneme chặn render trùng.
-    if (!renderedPhoneme) html += phonemeErrorsHtml(phoneme, { playback: pb });
+    if (!renderedPhoneme) html += phonemeErrorsHtml(phoneme, { playback: pb, playbackSrc: pbSrc });
     return html;
 }
 

@@ -14,8 +14,10 @@ let wordAudio = null;
 let wordPlayToken = 0;
 let wordStopTimer = null;
 
-function playWordSegment(start, end) {
-    const url = playbackUrl();
+function playWordSegment(start, end, srcUrl) {
+    // srcUrl: audio câu cụ thể (kết quả cả đề — mỗi câu một Blob). Bỏ trống → dùng
+    // Blob single global (playbackUrl) như cũ.
+    const url = srcUrl || playbackUrl();
     if (!url) return;
     if (!wordAudio) wordAudio = new Audio();
     const myToken = ++wordPlayToken;
@@ -44,7 +46,7 @@ document.addEventListener('click', e => {
     e.preventDefault();
     const start = parseFloat(btn.dataset.start);
     const end = parseFloat(btn.dataset.end);
-    if (Number.isFinite(start) && Number.isFinite(end)) playWordSegment(start, end);
+    if (Number.isFinite(start) && Number.isFinite(end)) playWordSegment(start, end, btn.dataset.src || null);
 });
 
 // ── Phát "phát âm đúng" của 1 TỪ (nút 🔊) ──────────────────────────────

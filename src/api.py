@@ -473,23 +473,6 @@ async def grade_batch(
     }
 
 
-def _validate_tts_text(text: str) -> str:
-    """Chuẩn hoá text cho TTS — NỚI LỎNG: chỉ strip + bỏ ký tự điều khiển + chặn rỗng
-    + trần độ dài. KHÔNG whitelist hẹp chữ cái: TTS đọc được text tự nhiên, whitelist
-    sẽ chặn nhầm từ hợp lệ (it's, co-op) và cụm từ tương lai. Mục tiêu chỉ là chống
-    lạm dụng (độ dài), không lọc nội dung."""
-    value = "".join(ch for ch in (text or "") if ch >= " " or ch == "\t")
-    value = " ".join(value.split())
-    if not value:
-        raise HTTPException(status_code=400, detail="Thiếu 'text'.")
-    if len(value) > _TTS_MAX_TEXT:
-        raise HTTPException(
-            status_code=400,
-            detail=f"'text' quá dài ({len(value)} > {_TTS_MAX_TEXT} ký tự).",
-        )
-    return value
-
-
 @app.get("/tts")
 async def tts(text: str = "", accent: str = "default") -> Response:
     """Tổng hợp audio mẫu (Piper TTS) cho 1 từ/cụm ngắn → WAV.

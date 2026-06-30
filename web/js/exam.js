@@ -598,10 +598,15 @@ function examSession() {
             if (!el) return;
             if (item.error) { el.innerHTML = `<p class="exam-error">${escapeHtml(item.error)}</p>`; return; }
             const r = item.result || {};
+            // Audio người học của ĐÚNG câu này → bật nút "nghe lại" từng từ (▶) như chấm
+            // lẻ. Mỗi câu một Blob riêng nên truyền src theo câu (playbackSrc), không dùng
+            // lastSingleFile toàn cục (sẽ phát nhầm audio câu khác).
+            const q = (this.order || []).find(o => o.id === item.question_id);
+            const src = (q && q._recUrl) ? q._recUrl : null;
             el.innerHTML =
                 `<div class="result-section"><h4>📝 Transcript</h4><p>${escapeHtml(r.transcript || '')}</p></div>`
                 + `<div class="result-section"><h4>📈 Features</h4>${featureGridHtml(r.features || {})}</div>`
-                + `<div class="result-section"><h4>📋 Điểm</h4>${scoresBreakdownHtml(r.scores, r.exam, r.phoneme, { pronunciationOnly: !!r.pronunciation_only, notice: r.notice })}</div>`;
+                + `<div class="result-section"><h4>📋 Điểm</h4>${scoresBreakdownHtml(r.scores, r.exam, r.phoneme, { pronunciationOnly: !!r.pronunciation_only, notice: r.notice, playback: !!src, playbackSrc: src })}</div>`;
         },
         overallText() {
             if (this.grading) return `Đang chấm ${this.gradedCount}/${this.gradeTotal}…`;
@@ -609,10 +614,14 @@ function examSession() {
             return this.result.overall != null ? `${this.result.overall}/${this.result.overall_max}` : '--';
         },
         questionScore(item) {
-            if (item.error || !item.result || !item.result.scores) return '--';
+            // Badge dùng x-text → emoji thay cho "--": ⚠️ câu lỗi, ⏳ chưa chấm xong.
+            if (item.error) return '⚠️';
+            if (!item.result || !item.result.scores) return '⏳';
             const cfg = examConfig(this.result.exam);
-            return item.result.scores[cfg.scoreField] ?? '--';
+            return item.result.scores[cfg.scoreField] ?? '⏳';
         },
+        // Câu đã chấm xong (có điểm hoặc lỗi) → cho hiện mũi tên expand ở summary.
+        questionDone(item) { return !!(item.error || (item.result && item.result.scores)); },
 
         reset() {
             this._runToken++;
