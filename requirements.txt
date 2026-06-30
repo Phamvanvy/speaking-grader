@@ -40,3 +40,8 @@ onnxruntime>=1.18
 # Chỉ cần khi bật tính năng — phải tải file voice .onnx riêng (TTS_VOICE_US/GB),
 # xem README. Dùng chung onnxruntime ở trên.
 piper-tts>=1.2.0
+# Bóc tách "đề thi đầy đủ" từ tài liệu cho luồng "Thi cả đề" (/exam/import) —
+# optional, guard import: thiếu thì chỉ tắt import đề từ file đó, app vẫn chạy.
+# pymupdf (fitz): đọc PDF + render trang ra ảnh cho vision. python-docx: đọc Word.
+pymupdf>=1.24.0
+python-docx>=1.1.0

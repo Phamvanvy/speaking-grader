@@ -109,3 +109,34 @@ def _compute_ielts_band(result: SpeakingResult) -> float:
     )
     capped = min(mean, cap)
     return max(0.0, min(9.0, _round_half(capped)))
+
+
+# --- Gộp điểm tổng cho TRỌN một đề thi (nhiều câu/phần) -----------------------
+# Dùng cho luồng "Thi cả đề" (/exam/grade). Mỗi câu đã có điểm tổng riêng (TOEIC
+# /200, IELTS band) tính tất định ở trên; overall cả đề = TRUNG BÌNH các câu đã
+# chấm, làm tròn theo bước của kỳ thi. Đây là ƯỚC TÍNH NỘI BỘ — KHÔNG phải bảng
+# quy đổi ETS/IELTS official (TOEIC official cộng có trọng số 11 câu; IELTS là
+# đánh giá liên tục). Hiển thị phải ghi rõ "ước tính".
+
+
+def compute_exam_overall(
+    exam: str, per_question_scores: list[dict | None]
+) -> int | float | None:
+    """Trung bình điểm tổng các câu đã chấm → overall cả đề.
+
+    per_question_scores: list các dict `scores` (field 'estimated_toeic_score' /
+    'estimated_ielts_band'); phần tử None / thiếu điểm (câu bỏ qua, lỗi) được loại.
+    Trả None nếu không câu nào có điểm. TOEIC làm tròn bội 10; IELTS làm tròn 0.5.
+    """
+    field = "estimated_ielts_band" if exam == "ielts" else "estimated_toeic_score"
+    vals = [
+        float(s[field])
+        for s in per_question_scores
+        if s and s.get(field) is not None
+    ]
+    if not vals:
+        return None
+    mean = sum(vals) / len(vals)
+    if exam == "ielts":
+        return max(0.0, min(9.0, _round_half(mean)))
+    return max(0, min(200, int(round(mean / 10.0) * 10)))

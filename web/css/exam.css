@@ -1,0 +1,220 @@
+/* "Thi cả đề" — tab chuyển chế độ, timer, stepper. Nạp SAU phoneme.css. */
+
+[x-cloak] { display: none !important; }
+
+.mode-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin: 0 0 1.25rem;
+    flex-wrap: wrap;
+}
+.mode-tab {
+    flex: 1 1 auto;
+    padding: 0.7rem 1rem;
+    border: 1px solid #d1d5db;
+    background: #f3f4f6;
+    color: #555;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.mode-tab.active {
+    background: #4f46e5;
+    border-color: #4f46e5;
+    color: #fff;
+}
+
+.exam-hint { color: #666; line-height: 1.55; margin: 0 0 1rem; }
+.exam-error {
+    margin-top: 0.75rem;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    color: #991b1b;
+    border-radius: 8px;
+    padding: 0.7rem 0.85rem;
+    line-height: 1.5;
+}
+.exam-warnings {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    color: #92400e;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    line-height: 1.5;
+}
+.exam-warnings ul { margin: 0.35rem 0 0 1.1rem; }
+
+/* Review — danh sách câu hỏi */
+.exam-q {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.9rem;
+    background: #fafafa;
+}
+.exam-q-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.6rem;
+    gap: 0.5rem;
+}
+.exam-q-seq {
+    background: #4f46e5;
+    color: #fff;
+    border-radius: 6px;
+    padding: 0.15rem 0.6rem;
+    font-weight: 700;
+    font-size: 0.85rem;
+}
+.exam-q-actions { display: flex; gap: 0.35rem; }
+.exam-q-actions button {
+    border: 1px solid #d1d5db;
+    background: #fff;
+    border-radius: 6px;
+    padding: 0.25rem 0.55rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.exam-q-img { max-width: 220px; border-radius: 8px; margin-top: 0.5rem; display: block; }
+
+/* Runner */
+.exam-running { position: relative; }
+.exam-runner-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+/* Đồng hồ đếm ngược — thông tin quan trọng nhất khi thi → rất to */
+.exam-timer-wrap { text-align: center; margin: 1.25rem 0; }
+.exam-timer {
+    font-size: 5rem;             /* >> 64px */
+    line-height: 1;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    color: #4f46e5;
+}
+.exam-timer.prep { color: #d97706; }
+.exam-timer.recording { color: #dc2626; }
+
+.exam-status-pill {
+    display: inline-block;
+    padding: 0.25rem 0.85rem;
+    border-radius: 999px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    background: #e5e7eb;
+    color: #555;
+}
+.exam-status-pill.prep { background: #fef3c7; color: #92400e; }
+.exam-status-pill.recording { background: #fee2e2; color: #991b1b; }
+.exam-status-pill.listening { background: #dbeafe; color: #1e40af; }
+
+/* Part intro */
+.exam-intro { text-align: center; padding: 2rem 1rem; }
+.exam-part-name { font-size: 1.6rem; font-weight: 800; color: #4f46e5; margin-bottom: 0.75rem; }
+.exam-directions { max-width: 640px; margin: 0 auto 1.25rem; color: #444; line-height: 1.6; font-size: 1.05rem; }
+.exam-countdown-num {
+    font-size: 6rem;
+    font-weight: 800;
+    color: #4f46e5;
+    line-height: 1;
+    animation: exam-pop 0.9s ease-out;
+}
+@keyframes exam-pop { 0% { transform: scale(0.4); opacity: 0; } 40% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); } }
+
+/* Waveform + mic */
+.exam-wave-wrap { display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin-top: 0.75rem; }
+.exam-wave { width: 100%; max-width: 600px; height: 80px; background: #fff5f5; border-radius: 10px; }
+.exam-mic { font-size: 1.8rem; animation: exam-blink 1s infinite; }
+
+/* Dừng khẩn cấp — nhỏ, góc trên phải */
+.exam-emergency {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 5;
+    border: 1px solid #fca5a5;
+    background: #fff;
+    color: #b91c1c;
+    border-radius: 8px;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.exam-emergency:hover { background: #fef2f2; }
+
+/* Fullscreen: nền sáng, canh giữa nội dung như phòng thi */
+#mode-exam:fullscreen { background: #f8fafc; overflow-y: auto; padding: 2rem; }
+#mode-exam:fullscreen .card { max-width: 900px; margin: 0 auto; }
+body.dark #mode-exam:fullscreen { background: #0b1220; }
+
+.exam-prompt-box {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 1rem;
+    line-height: 1.6;
+    margin-bottom: 1rem;
+}
+.exam-prompt-box .label {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #888;
+    margin-bottom: 0.3rem;
+}
+.exam-prompt-box .script { white-space: pre-wrap; font-size: 1.05rem; }
+.exam-runner-img { max-width: 100%; border-radius: 10px; margin-top: 0.5rem; }
+
+.exam-rec-dot { color: #dc2626; animation: exam-blink 1s infinite; }
+@keyframes exam-blink { 50% { opacity: 0.25; } }
+
+.exam-nav { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+.exam-nav .btn { width: auto; padding: 0.6rem 1.1rem; }
+
+/* Kết quả gộp */
+.exam-overall {
+    text-align: center;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    color: #fff;
+    border-radius: 12px;
+    margin-bottom: 1rem;
+}
+.exam-overall .score { font-size: 3rem; font-weight: 800; line-height: 1; }
+.exam-overall .label { opacity: 0.9; margin-bottom: 0.4rem; }
+.exam-overall .note { font-size: 0.8rem; opacity: 0.8; margin-top: 0.5rem; }
+
+.exam-result-q { border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 0.8rem; }
+.exam-result-q > summary {
+    cursor: pointer;
+    padding: 0.85rem 1rem;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+}
+.exam-result-q .exam-q-score {
+    background: #4f46e5; color: #fff; border-radius: 6px;
+    padding: 0.1rem 0.6rem; font-size: 0.85rem;
+}
+.exam-result-q .exam-q-body { padding: 0 1rem 1rem; }
+.exam-result-q h4 { margin: 1rem 0 0.4rem; font-size: 0.95rem; }
+
+/* Dark mode */
+body.dark .mode-tab { background: #1f2937; border-color: #374151; color: #cbd5e1; }
+body.dark .mode-tab.active { background: #6366f1; border-color: #6366f1; color: #fff; }
+body.dark .exam-q,
+body.dark .exam-prompt-box { background: #111827; border-color: #374151; }
+body.dark .exam-q-actions button { background: #1f2937; border-color: #374151; color: #cbd5e1; }
+body.dark .exam-result-q { border-color: #374151; }

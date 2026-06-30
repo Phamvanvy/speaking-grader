@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import dataclasses
+import json
 import logging
 import os
 import tempfile
@@ -41,8 +42,12 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import Config, load_config
 from .core import grade_response
+from .exam_import import ExamImportError, extract_exam
+from .exam_paper import ExamPaper
 from .logging_setup import setup_logging
+from .rubrics import EXAM_REGISTRIES
 from .rubrics.base import QuestionType
+from .scoring import compute_exam_overall
 from .tts import TtsUnavailable, synthesize as _tts_synthesize
 from .api_helpers import (
     _VIDEO_SUFFIXES,
@@ -494,6 +499,167 @@ async def tts(text: str = "", accent: str = "default") -> Response:
         # Audio mẫu ổn định theo (text, accent, version) → cho trình duyệt cache.
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+# ── Thi cả đề (cá nhân): upload đề thật → chấm từng câu/phần → gộp ────────────
+# THÊM MỚI, không đụng luồng /grade & /grade-batch (chấm lẻ / cả lớp giữ nguyên).
+
+
+@app.post("/exam/import")
+async def exam_import(
+    file: UploadFile = File(..., description="Tài liệu đề thi (.pdf/.docx/ảnh)"),
+    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts"),
+) -> dict:
+    """Bóc tách đề từ tài liệu → ExamPaper JSON (kèm warnings) cho UI review/sửa.
+
+    Ảnh Describe Picture trả về dạng base64 trong từng câu (client giữ, gửi lại khi
+    chấm) — server KHÔNG lưu file ảnh.
+    """
+    exam = _validate_exam(exam)
+    suffix = Path(file.filename or "").suffix.lower()
+    file_bytes = await file.read()
+    try:
+        paper, warnings = await run_in_threadpool(
+            extract_exam, file_bytes, suffix, exam, _BASE_CONFIG
+        )
+    except ExamImportError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
+        logger.exception("Lỗi bóc tách đề")
+        raise HTTPException(status_code=500, detail=f"Lỗi bóc tách đề: {e}") from e
+    out = paper.to_dict()
+    out["warnings"] = warnings
+    return out
+
+
+@app.post("/exam/grade")
+async def exam_grade(
+    paper: str = Form(..., description="Định nghĩa đề (JSON: {exam,title,questions[]})"),
+    audios: list[UploadFile] = File(..., description="Audio từng câu (đã ghi âm)"),
+    audio_question_ids: str = Form(
+        ..., description="JSON list[str] question_id song song với 'audios'"
+    ),
+    feedback_lang: str | None = Form(None),
+    mode: str = Form("practice", description="practice | mock_test"),
+    accent: str = Form("default"),
+) -> dict:
+    """Chấm TRỌN một đề: mỗi câu chấm độc lập qua pipeline hiện có, rồi gộp overall.
+
+    audio_question_ids[i] cho biết file audios[i] thuộc câu nào (map theo
+    question_id — KHÔNG theo index, vì UI cho reorder). Câu thiếu audio → bỏ qua.
+    """
+    try:
+        paper_obj = ExamPaper.from_dict(json.loads(paper))
+        qids = [str(x) for x in json.loads(audio_question_ids)]
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"'paper'/'audio_question_ids' JSON sai: {e}") from e
+
+    exam = _validate_exam(paper_obj.exam)
+    accent = _validate_accent(accent)
+    config = _resolve_config(feedback_lang)
+    requested_mode = _normalize_mode(mode)
+    questions = {q.id: q for q in paper_obj.ordered()}
+
+    if len(qids) != len(audios):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Số audio ({len(audios)}) ≠ số question_id ({len(qids)}).",
+        )
+    if len(audios) > _MAX_BATCH:
+        raise HTTPException(status_code=400, detail=f"Quá nhiều câu (> {_MAX_BATCH}).")
+
+    # Đọc sẵn bytes (UploadFile là stream) + validate dạng câu/định dạng audio.
+    items: list[tuple[str, bytes, str | None, QuestionType | None]] = []
+    for qid, up in zip(qids, audios):
+        q = questions.get(qid)
+        if q is None:
+            items.append((qid, b"", None, None))
+            continue
+        try:
+            qt = _resolve(q.type, exam)
+            suffix = _audio_suffix(up.filename)
+        except HTTPException:
+            items.append((qid, b"", None, None))
+            continue
+        data = await up.read()
+        items.append((qid, data, suffix, qt))
+
+    concurrency = config.batch_concurrency or (1 if config.is_local else 4)
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one(qid: str, data: bytes, suffix: str | None, qt: QuestionType | None) -> dict:
+        q = questions.get(qid)
+        base = {"question_id": qid, "sequence": q.sequence if q else None,
+                "type": q.type if q else None}
+        if q is None or qt is None or suffix is None:
+            return {**base, "error": "Câu không hợp lệ hoặc audio sai định dạng."}
+        if not data:
+            return {**base, "error": "Thiếu audio cho câu này."}
+        async with sem:
+            try:
+                result = await run_in_threadpool(
+                    _grade_bytes,
+                    data,
+                    suffix,
+                    config,
+                    qt,
+                    reference_script=q.reference_script,
+                    image_b64=q.image_b64,
+                    image_media_type=q.image_media_type,
+                    expected_duration_sec=q.expected_duration_sec,
+                    prompt=q.prompt,
+                    provided_info=q.provided_info,
+                    no_ai=False,
+                    mode=requested_mode,
+                    user_requested_review=False,
+                    accent=accent,
+                )
+                return {**base, "result": result}
+            except Exception as e:  # noqa: BLE001 - 1 câu lỗi không hỏng cả đề
+                logger.exception("Lỗi khi chấm câu %s", qid)
+                return {**base, "error": str(e)}
+
+    graded = await asyncio.gather(*(_one(qid, d, s, qt) for qid, d, s, qt in items))
+    graded.sort(key=lambda r: (r.get("sequence") is None, r.get("sequence") or 0))
+
+    overall = compute_exam_overall(
+        exam, [r.get("result", {}).get("scores") for r in graded if "result" in r]
+    )
+    return {
+        "exam": exam,
+        "title": paper_obj.title,
+        "overall": overall,
+        "overall_max": 9 if exam == "ielts" else 200,
+        "overall_estimated": True,  # ƯỚC TÍNH nội bộ — không phải điểm thi official
+        "count": len(paper_obj.questions),
+        "graded": sum(1 for r in graded if "result" in r),
+        "questions": graded,
+    }
+
+
+@app.get("/exam/builtin/{exam}")
+def exam_builtin(exam: str) -> dict:
+    """Xuất ngân hàng câu hỏi sẵn có thành 1 đề mẫu (test nhanh không cần upload)."""
+    exam = _validate_exam(exam)
+    from .questions import _load_all  # ngân hàng câu hỏi tĩnh
+
+    bank = _load_all(exam)
+    questions = []
+    for seq, q in enumerate(bank.values(), start=1):
+        questions.append(
+            {
+                "id": f"q{seq}-{q.type}",
+                "sequence": seq,
+                "type": q.type,
+                "prompt": q.prompt,
+                "reference_script": q.reference_script,
+                "provided_info": q.provided_info,
+                "expected_duration_sec": q.expected_duration_sec,
+                "image_b64": None,
+                "image_media_type": None,
+            }
+        )
+    return {"exam": exam, "title": f"Đề mẫu {exam.upper()}", "questions": questions, "warnings": []}
 
 
 # Mount frontend tĩnh ở "/" — PHẢI đặt sau mọi route API ở trên. Starlette so khớp

@@ -41,6 +41,7 @@ from .compute import (
     _compute_toeic_score,
     _interp_crit_points,
     _round_half,
+    compute_exam_overall,
 )
 from .prompts import (
     _build_system_prompt,

@@ -10,11 +10,20 @@
     <link rel="stylesheet" href="css/components.css?v=accent-default-1">
     <link rel="stylesheet" href="css/theme-dark.css?v=accent-default-1">
     <link rel="stylesheet" href="css/phoneme.css?v=accent-default-1">
+    <link rel="stylesheet" href="css/exam.css?v=exam-2">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
     <div class="container">
         <h1>🎤 Speaking Grader</h1>
+
+        <!-- Chuyển chế độ: chấm lẻ/cả lớp (cũ, giữ nguyên) ↔ thi cả đề (mới, cá nhân) -->
+        <div class="mode-tabs">
+            <button id="tab-classic" class="mode-tab active" onclick="switchMode('classic')">📝 Chấm bài lẻ / cả lớp</button>
+            <button id="tab-exam" class="mode-tab" onclick="switchMode('exam')">📄 Thi cả đề (cá nhân)</button>
+        </div>
+
+        <div id="mode-classic">
 
         <!-- API Configuration — ẩn khỏi người dùng (input vẫn ở trong DOM để
              app.js tự lấy origin của trang). Bỏ class "hidden" để hiện lại khi cần. -->
@@ -207,6 +216,222 @@
                 <div id="batch-results-list"></div>
             </div>
         </div>
+        </div><!-- /#mode-classic -->
+
+        <!-- ── Thi cả đề (cá nhân) — luồng MỚI, dùng Alpine ── -->
+        <div id="mode-exam" class="hidden" x-data="examSession()" x-cloak>
+
+            <!-- BƯỚC 1: nạp đề -->
+            <div class="card" x-show="step==='setup'">
+                <h2>📄 Thi cả đề — tải đề lên</h2>
+                <p class="exam-hint">Tải tài liệu đề thi (PDF / ảnh / Word). Hệ thống tự bóc tách thành từng câu để bạn review, chỉnh sửa rồi làm bài tuần tự như thi thật. Điểm cuối là <strong>ước tính nội bộ</strong>, không thay thế kết quả thi chính thức.</p>
+                <div class="row">
+                    <div class="form-group">
+                        <label>Kỳ thi</label>
+                        <select x-model="exam">
+                            <option value="toeic">TOEIC</option>
+                            <option value="ielts">IELTS</option>
+                        </select>
+                    </div>
+                </div>
+                <label class="file-upload">
+                    <input type="file" accept=".pdf,.docx,image/*" @change="importFile($event)">
+                    <div class="file-upload-text">
+                        <span class="icon">📤</span>
+                        <span x-text="importing ? 'Đang bóc tách đề…' : 'Chọn tài liệu đề (PDF / ảnh / Word)'"></span>
+                    </div>
+                </label>
+                <div style="margin-top:0.75rem;">
+                    <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="loadBuiltin()" :disabled="importing">Dùng đề mẫu (không cần upload)</button>
+                </div>
+                <div class="exam-error" x-show="error" x-text="error"></div>
+            </div>
+
+            <!-- BƯỚC 2: review/sửa -->
+            <div class="card" x-show="step==='review'">
+                <div class="result-header">
+                    <h2>🔎 Review đề trước khi thi</h2>
+                    <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="reset()">↺ Tải đề khác</button>
+                </div>
+                <div class="form-group">
+                    <label>Tiêu đề đề thi</label>
+                    <input type="text" x-model="title">
+                </div>
+                <div class="exam-warnings" x-show="warnings.length">
+                    ⚠️ Bóc tách tự động — vui lòng kiểm tra:
+                    <ul><template x-for="w in warnings" :key="w"><li x-text="w"></li></template></ul>
+                </div>
+
+                <template x-for="(q, i) in questions" :key="q.id">
+                    <div class="exam-q">
+                        <div class="exam-q-head">
+                            <span class="exam-q-seq" x-text="'Câu ' + q.sequence"></span>
+                            <div class="exam-q-actions">
+                                <button @click="move(i,-1)" title="Lên">▲</button>
+                                <button @click="move(i,1)" title="Xuống">▼</button>
+                                <button @click="removeQuestion(i)" title="Xóa">✕</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Dạng câu</label>
+                            <select x-model="q.type">
+                                <template x-for="o in typeOptions()" :key="o.value">
+                                    <option :value="o.value" x-text="o.label"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Đề bài / câu hỏi (prompt)</label>
+                            <textarea x-model="q.prompt" rows="2"></textarea>
+                        </div>
+                        <div class="form-group" x-show="needsScript(q.type)">
+                            <label>Reference Script (đoạn cần đọc to)</label>
+                            <textarea x-model="q.reference_script" rows="3"></textarea>
+                        </div>
+                        <div class="form-group" x-show="needsProvided(q.type)">
+                            <label>Provided info / cue card</label>
+                            <textarea x-model="q.provided_info" rows="3"></textarea>
+                        </div>
+                        <div class="form-group" x-show="isPicture(q.type)">
+                            <label>Ảnh đề bài</label>
+                            <img class="exam-q-img" :src="imgSrc(q)" x-show="q.image_b64" alt="picture">
+                            <p class="mode-note" x-show="!q.image_b64">Chưa có ảnh cho câu tả tranh này.</p>
+                        </div>
+                        <div class="form-group">
+                            <label>Thời lượng trả lời (giây)</label>
+                            <input type="number" min="1" x-model.number="q.expected_duration_sec">
+                        </div>
+                    </div>
+                </template>
+
+                <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;margin-bottom:1rem;" @click="addQuestion()">＋ Thêm câu</button>
+
+                <div class="checkbox-group" style="margin-bottom:1rem;">
+                    <input type="checkbox" id="exam-timed" x-model="timed">
+                    <label for="exam-timed">Bấm giờ như thi thật (tự ghi âm theo thời lượng từng câu)</label>
+                </div>
+                <button class="btn btn-primary" @click="startTest()" :disabled="!questions.length">▶ Bắt đầu thi</button>
+            </div>
+
+            <!-- BƯỚC 3: làm bài -->
+            <div class="card exam-running" x-show="step==='running'" x-cloak>
+
+                <!-- Dừng khẩn cấp — nút duy nhất còn bật khi đang chạy tự động -->
+                <button class="exam-emergency" x-show="timed && phase!=='done'" @click="emergencyStop()" title="Dừng khẩn cấp">✕ Dừng thi</button>
+
+                <!-- A. Part intro (LISTENING + đếm 3-2-1) -->
+                <div class="exam-intro" x-show="timed && phase==='intro'">
+                    <div class="exam-part-name" x-text="partName"></div>
+                    <p class="exam-directions" x-text="directionsText"></p>
+                    <div class="exam-status-pill listening" x-show="countdownNum===0">🔊 Đang đọc hướng dẫn…</div>
+                    <div class="exam-countdown-num" x-show="countdownNum>0" x-text="countdownNum"></div>
+                </div>
+
+                <!-- B. Câu hỏi tự động (PREP / RECORDING) -->
+                <div x-show="timed && (phase==='prep' || phase==='recording')">
+                    <div class="exam-runner-meta">
+                        <h2 x-text="'Câu ' + (idx+1) + ' / ' + order.length"></h2>
+                        <span class="exam-status-pill" :class="statusKey" x-text="statusText()"></span>
+                    </div>
+                    <template x-if="current">
+                        <div class="exam-prompt-box">
+                            <div class="label" x-text="typeLabel(current.type)"></div>
+                            <div x-show="current.prompt" x-text="current.prompt" style="margin-bottom:0.5rem;"></div>
+                            <div class="script" x-show="current.reference_script" x-text="current.reference_script"></div>
+                            <div class="script" x-show="current.provided_info" x-text="current.provided_info" style="color:#555;"></div>
+                            <img class="exam-runner-img" :src="imgSrc(current)" x-show="current.image_b64" alt="picture">
+                        </div>
+                    </template>
+                    <div class="exam-timer-wrap">
+                        <div class="exam-timer" :class="statusKey" x-text="secondsLeft + 's'"></div>
+                        <div class="exam-wave-wrap" x-show="phase==='recording'">
+                            <span class="exam-mic">🎙</span>
+                            <canvas id="exam-wave" width="600" height="80" class="exam-wave"></canvas>
+                        </div>
+                    </div>
+                    <div class="exam-nav">
+                        <button class="btn btn-secondary" @click="skip()" x-show="phase==='prep'">Bỏ qua chuẩn bị →</button>
+                        <button class="btn btn-secondary" @click="skip()" x-show="phase==='recording'">Kết thúc trả lời →</button>
+                    </div>
+                </div>
+
+                <!-- C. Chế độ THỦ CÔNG (không bấm giờ) -->
+                <div x-show="!timed">
+                    <div class="exam-runner-meta">
+                        <h2 x-text="'Câu ' + (idx+1) + ' / ' + order.length"></h2>
+                    </div>
+                    <template x-if="current">
+                        <div>
+                            <div class="exam-prompt-box">
+                                <div class="label" x-text="typeLabel(current.type)"></div>
+                                <div x-show="current.prompt" x-text="current.prompt" style="margin-bottom:0.5rem;"></div>
+                                <div class="script" x-show="current.reference_script" x-text="current.reference_script"></div>
+                                <div class="script" x-show="current.provided_info" x-text="current.provided_info" style="color:#555;"></div>
+                                <img class="exam-runner-img" :src="imgSrc(current)" x-show="current.image_b64" alt="picture">
+                            </div>
+                            <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
+                                <button class="btn btn-primary" style="width:auto;padding:0.6rem 1.2rem;" @click="toggleRec()"
+                                        x-text="recording ? '⏹ Dừng ghi' : '🎙 Ghi âm câu này'"></button>
+                                <span class="exam-rec-dot" x-show="recording">● đang ghi…</span>
+                                <span style="color:#16a34a;" x-show="current._recBlob && !recording">✓ đã ghi</span>
+                            </div>
+                            <audio x-show="current._recUrl" :src="current._recUrl" controls style="margin-top:0.75rem;width:100%;"></audio>
+                            <div class="exam-nav">
+                                <button class="btn btn-secondary" @click="prevManual()" :disabled="idx===0">← Câu trước</button>
+                                <button class="btn btn-secondary" @click="nextManual()" x-show="idx < order.length-1">Câu tiếp →</button>
+                                <button class="btn btn-primary" @click="submitExam()" :disabled="grading"
+                                        x-text="grading ? 'Đang chấm…' : ('✔ Nộp &amp; chấm (' + recordedCount() + '/' + order.length + ')')"></button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- D. Hoàn thành (tự động) → nghe lại + nộp -->
+                <div x-show="timed && phase==='done'">
+                    <h2>✅ Đã hoàn thành tất cả câu</h2>
+                    <p class="exam-hint">Nghe lại nếu cần rồi nộp để chấm gộp.</p>
+                    <template x-for="q in order" :key="q.id">
+                        <div class="exam-q" x-show="q._recBlob">
+                            <div class="exam-q-head">
+                                <span class="exam-q-seq" x-text="'Câu ' + q.sequence"></span>
+                                <span style="color:#888;font-size:0.85rem;" x-text="typeLabel(q.type)"></span>
+                            </div>
+                            <audio :src="q._recUrl" controls style="width:100%;"></audio>
+                        </div>
+                    </template>
+                    <div class="exam-nav">
+                        <button class="btn btn-secondary" @click="reset()">↺ Làm lại đề</button>
+                        <button class="btn btn-primary" @click="submitExam()" :disabled="grading"
+                                x-text="grading ? 'Đang chấm…' : ('✔ Nộp &amp; chấm (' + recordedCount() + '/' + order.length + ')')"></button>
+                    </div>
+                </div>
+
+                <div class="exam-error" x-show="error" x-text="error"></div>
+            </div>
+
+            <!-- BƯỚC 4: kết quả gộp -->
+            <div class="card" x-show="step==='result'" x-cloak>
+                <div class="result-header">
+                    <h2>📊 Kết quả cả đề</h2>
+                    <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="reset()">Thi đề khác</button>
+                </div>
+                <div class="exam-overall">
+                    <div class="label" x-text="(result && result.exam==='ielts') ? 'IELTS band (ước tính)' : 'Điểm TOEIC Speaking (ước tính)'"></div>
+                    <div class="score" x-text="overallText()"></div>
+                    <div class="note">Ước tính nội bộ (trung bình các câu) — không thay thế kết quả thi chính thức.</div>
+                </div>
+                <template x-for="item in (result ? result.questions : [])" :key="item.question_id">
+                    <details class="exam-result-q">
+                        <summary>
+                            <span x-text="'Câu ' + (item.sequence || '?') + ' · ' + typeLabel(item.type)"></span>
+                            <span class="exam-q-score" x-text="questionScore(item)"></span>
+                        </summary>
+                        <div class="exam-q-body" :id="'exam-q-' + item.question_id"></div>
+                    </details>
+                </template>
+            </div>
+
+        </div><!-- /#mode-exam -->
     </div>
 
     <!-- app.js đã tách theo nhóm chức năng. THỨ TỰ QUAN TRỌNG: state trước (chứa
@@ -219,5 +444,9 @@
     <script src="js/form.js?v=accent-default-1"></script>
     <script src="js/grade.js?v=accent-default-1"></script>
     <script src="js/report.js?v=accent-default-1"></script>
+    <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
+         cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
+    <script src="js/exam.js?v=exam-2"></script>
+    <script defer src="vendor/alpine.min.js?v=exam-1"></script>
 </body>
 </html>
