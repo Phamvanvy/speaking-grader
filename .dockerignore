@@ -8,9 +8,14 @@ __pycache__/
 **/__pycache__/
 *.pyc
 
-# Secret & dữ liệu cục bộ — KHÔNG đưa vào image.
+# Secret & dữ liệu cục bộ — KHÔNG đưa vào image (TRỪ ngân hàng câu hỏi đề mẫu,
+# cần cho /exam/builtin "dùng đề có sẵn").
 .env
 data/
+!data/questions/
+!data/questions/**
+!data/image/
+!data/image/**
 outputs/
 logs/
 # Voice Piper TTS: mount qua volume lúc chạy (không bake vào image) → khỏi phình

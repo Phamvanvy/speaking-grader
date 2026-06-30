@@ -49,6 +49,7 @@ from .logging_setup import setup_logging
 from .rubrics import EXAM_REGISTRIES
 from .rubrics.base import QuestionType
 from .scoring import compute_exam_overall
+from .suggest import default_target_band, suggest_answer
 from .tts import TtsUnavailable, synthesize as _tts_synthesize
 from .api_helpers import (
     _VIDEO_SUFFIXES,
@@ -516,6 +517,62 @@ async def tts(text: str = "", accent: str = "default") -> Response:
     )
 
 
+# ── Gợi ý bài nói MẪU (band cao) cho dạng câu mở ─────────────────────────────
+# Sinh bài mẫu để người học tham khảo; KHÔNG chấm điểm, KHÔNG đụng luồng /grade.
+
+
+@app.post("/suggest")
+async def suggest(
+    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts"),
+    question_type: str = Form(
+        ..., description="Dạng câu mở (vd part2_long_turn / describe_picture)"
+    ),
+    prompt: str = Form("", description="Đề bài / câu hỏi hiển thị cho thí sinh"),
+    provided_info: str | None = Form(
+        None, description="Cue card / tài liệu cho sẵn (IELTS Part 2 / TOEIC Q8-10)"
+    ),
+    expected_duration_sec: float | None = Form(None),
+    target_band: str = Form(
+        "", description="Mức nhắm tới (vd '9.0'); rỗng → cao nhất theo kỳ thi"
+    ),
+    feedback_lang: str | None = Form(None),
+    image: UploadFile | None = File(None, description="Ảnh đề bài (Describe Picture)"),
+) -> dict:
+    """Sinh MỘT bài nói mẫu chất lượng cao (mặc định band 9.0 / TOEIC max).
+
+    Chỉ cho dạng câu MỞ. `read_aloud` bị chặn (bài mẫu chính là reference script).
+    """
+    exam = _validate_exam(exam)
+    qt = _resolve(question_type, exam)
+    if qt.key == "read_aloud":
+        raise HTTPException(
+            status_code=400,
+            detail="Read Aloud đã có sẵn script mẫu — không cần gợi ý bài mẫu.",
+        )
+    image_b64, image_media_type = await _read_image(image)
+    band = target_band.strip() or default_target_band(exam)
+    config = _resolve_config(feedback_lang)
+    try:
+        result = await run_in_threadpool(
+            suggest_answer,
+            config,
+            qt,
+            prompt_text=prompt,
+            provided_info=provided_info,
+            image_b64=image_b64,
+            image_media_type=image_media_type,
+            target_band=band,
+            expected_duration_sec=expected_duration_sec,
+        )
+    except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
+        logger.exception("Lỗi khi sinh bài mẫu")
+        raise HTTPException(status_code=500, detail=f"Lỗi khi sinh bài mẫu: {e}") from e
+    out = result.model_dump()
+    out["question_type"] = qt.key
+    out["exam"] = exam
+    return out
+
+
 # ── Thi cả đề (cá nhân): upload đề thật → chấm từng câu/phần → gộp ────────────
 # THÊM MỚI, không đụng luồng /grade & /grade-batch (chấm lẻ / cả lớp giữ nguyên).
 
@@ -652,6 +709,30 @@ async def exam_grade(
     }
 
 
+_IMAGE_MEDIA_TYPES: dict[str, str] = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+}
+# Gốc project (để giải image_path tương đối của ngân hàng câu hỏi: "data/image/...").
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_builtin_image(image_path: str | None) -> tuple[str | None, str | None]:
+    """Đọc ảnh đề (image_path tương đối từ gốc project) → (base64, media_type).
+
+    Thiếu đường dẫn / file không tồn tại → (None, None) để câu vẫn dùng được (UI
+    hiển thị "chưa có ảnh") thay vì làm hỏng cả đề mẫu.
+    """
+    if not image_path:
+        return None, None
+    path = (_PROJECT_ROOT / image_path).resolve()
+    if not path.is_file():
+        logger.warning("Đề mẫu: không thấy ảnh %s", path)
+        return None, None
+    media = _IMAGE_MEDIA_TYPES.get(path.suffix.lower(), "image/jpeg")
+    return base64.b64encode(path.read_bytes()).decode("ascii"), media
+
+
 @app.get("/exam/builtin/{exam}")
 def exam_builtin(exam: str) -> dict:
     """Xuất ngân hàng câu hỏi sẵn có thành 1 đề mẫu (test nhanh không cần upload)."""
@@ -661,6 +742,7 @@ def exam_builtin(exam: str) -> dict:
     bank = _load_all(exam)
     questions = []
     for seq, q in enumerate(bank.values(), start=1):
+        image_b64, image_media_type = _load_builtin_image(q.image_path)
         questions.append(
             {
                 "id": f"q{seq}-{q.type}",
@@ -670,11 +752,45 @@ def exam_builtin(exam: str) -> dict:
                 "reference_script": q.reference_script,
                 "provided_info": q.provided_info,
                 "expected_duration_sec": q.expected_duration_sec,
-                "image_b64": None,
-                "image_media_type": None,
+                "image_b64": image_b64,
+                "image_media_type": image_media_type,
             }
         )
     return {"exam": exam, "title": f"Đề mẫu {exam.upper()}", "questions": questions, "warnings": []}
+
+
+@app.post("/exam/overall")
+def exam_overall(
+    exam: str = Form(..., description="Kỳ thi: toeic | ielts"),
+    scores: str = Form(
+        ..., description="JSON list các dict `scores` từng câu (null = câu lỗi/bỏ qua)"
+    ),
+) -> dict:
+    """Gộp điểm tổng cả đề từ danh sách điểm từng câu (client chấm từng câu qua /grade).
+
+    Tách khỏi /exam/grade để client chấm RỜI từng câu (request ngắn, tránh timeout
+    proxy với đề dài/model local chậm) rồi gọi 1 lần tính overall TẤT ĐỊNH ở đây —
+    dùng đúng `compute_exam_overall` để tránh lệch làm tròn so với chấm gộp.
+    """
+    exam = _validate_exam(exam)
+    try:
+        per_question = json.loads(scores)
+        if not isinstance(per_question, list):
+            raise ValueError("'scores' phải là JSON list.")
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=f"'scores' JSON sai: {e}") from e
+
+    overall = compute_exam_overall(exam, per_question)
+    field = "estimated_ielts_band" if exam == "ielts" else "estimated_toeic_score"
+    graded = sum(1 for s in per_question if s and s.get(field) is not None)
+    return {
+        "exam": exam,
+        "overall": overall,
+        "overall_max": 9 if exam == "ielts" else 200,
+        "overall_estimated": True,  # ƯỚC TÍNH nội bộ — không phải điểm thi official
+        "count": len(per_question),
+        "graded": graded,
+    }
 
 
 # Mount frontend tĩnh ở "/" — PHẢI đặt sau mọi route API ở trên. Starlette so khớp

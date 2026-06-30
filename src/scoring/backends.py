@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import time
 
+from pydantic import BaseModel
+
 from ..config import Config
 from ..rubrics.base import QuestionType
 from ..schema import SpeakingResult
@@ -34,13 +36,20 @@ def _get_local_client(base_url: str, api_key: str):
     return client
 
 
-def _score_anthropic(
+def _generate_anthropic(
     config: Config,
     system_prompt: str,
     user_prompt: str,
+    output_model: type[BaseModel],
     image_b64: str | None = None,
     image_media_type: str | None = None,
-) -> SpeakingResult:
+) -> BaseModel:
+    """Gọi Claude với structured output GENERIC theo `output_model` (Pydantic).
+
+    Dùng chung cho mọi tác vụ cần JSON đúng schema (chấm điểm: SpeakingResult;
+    sinh bài mẫu: SampleAnswer...). Mọi logic invoke (content text/vision, log,
+    messages.parse, xử lý max_tokens) tập trung ở đây — đổi backend chỉ sửa 1 chỗ.
+    """
     if not config.has_api_key:
         raise RuntimeError(
             "Thiếu ANTHROPIC_API_KEY. Đặt trong .env, dùng TOEIC_BACKEND=local "
@@ -97,13 +106,13 @@ def _score_anthropic(
         thinking={"type": "adaptive"},
         system=system_prompt,
         messages=messages,
-        output_format=SpeakingResult,
+        output_format=output_model,
     )
     latency = time.monotonic() - t0
 
     usage = response.usage
     logger.info(
-        "Claude chấm xong | model=%s | latency=%.2fs | "
+        "Claude trả structured output | model=%s | latency=%.2fs | "
         "input_tokens=%s output_tokens=%s",
         config.model,
         latency,
@@ -132,19 +141,40 @@ def _score_anthropic(
     return result
 
 
-def _score_local(
+def _score_anthropic(
     config: Config,
-    qt: QuestionType,
     system_prompt: str,
     user_prompt: str,
     image_b64: str | None = None,
     image_media_type: str | None = None,
 ) -> SpeakingResult:
-    """Chấm bằng model local qua API OpenAI-compatible (vd llama.cpp server).
+    """Chấm điểm qua Claude (wrapper mỏng quanh _generate_anthropic)."""
+    result = _generate_anthropic(
+        config, system_prompt, user_prompt, SpeakingResult, image_b64, image_media_type
+    )
+    assert isinstance(result, SpeakingResult)
+    return result
+
+
+def _generate_local(
+    config: Config,
+    system_prompt: str,
+    user_prompt: str,
+    output_model: type[BaseModel],
+    json_schema: dict,
+    schema_name: str,
+    image_b64: str | None = None,
+    image_media_type: str | None = None,
+) -> BaseModel:
+    """Gọi model local (OpenAI-compatible) với structured output GENERIC.
 
     Ép đúng schema bằng response_format json_schema — llama.cpp chuyển schema
     thành GBNF grammar nên JSON trả về luôn hợp lệ. Không có 'thinking' của
     Claude; nếu model hỗ trợ reasoning (Qwen3) có thể bật qua chat template.
+
+    `json_schema`/`schema_name`/`output_model` đến từ caller nên hàm này dùng được
+    cho cả chấm điểm (SpeakingResult, schema siết theo qt) lẫn sinh bài mẫu
+    (SampleAnswer) — logic invoke local tập trung một chỗ.
     """
     try:
         client = _get_local_client(config.local_base_url, config.local_api_key)
@@ -224,10 +254,10 @@ def _score_local(
         response_format={
             "type": "json_schema",
             "json_schema": {
-                "name": "SpeakingResult",
-                # Schema siết theo qt: ép đúng N tiêu chí + enum key, chặn model
-                # bỏ sót tiêu chí (xem _local_response_schema).
-                "schema": _local_response_schema(qt),
+                "name": schema_name,
+                # Schema do caller cung cấp (vd SpeakingResult siết theo qt — ép
+                # đúng N tiêu chí + enum key; hoặc SampleAnswer cho bài mẫu).
+                "schema": json_schema,
                 "strict": True,
             },
         },
@@ -237,7 +267,7 @@ def _score_local(
 
     usage = response.usage
     logger.info(
-        "Model local chấm xong | model=%s | base_url=%s | latency=%.2fs | "
+        "Model local trả structured output | model=%s | base_url=%s | latency=%.2fs | "
         "prompt_tokens=%s completion_tokens=%s",
         config.local_model,
         config.local_base_url,
@@ -264,9 +294,36 @@ def _score_local(
         _log_response(config, "local", content)
 
     try:
-        return SpeakingResult.model_validate_json(content)
+        return output_model.model_validate_json(content)
     except Exception as e:  # noqa: BLE001 - bọc lỗi parse cho rõ
         raise RuntimeError(
-            f"Model local trả JSON không đúng schema SpeakingResult: {e}\n"
+            f"Model local trả JSON không đúng schema {schema_name}: {e}\n"
             f"Nội dung: {content[:500]}"
         ) from e
+
+
+def _score_local(
+    config: Config,
+    qt: QuestionType,
+    system_prompt: str,
+    user_prompt: str,
+    image_b64: str | None = None,
+    image_media_type: str | None = None,
+) -> SpeakingResult:
+    """Chấm điểm qua model local (wrapper mỏng quanh _generate_local).
+
+    Truyền schema siết theo qt (_local_response_schema) — chống model nhỏ bỏ sót
+    tiêu chí — và validate về SpeakingResult.
+    """
+    result = _generate_local(
+        config,
+        system_prompt,
+        user_prompt,
+        SpeakingResult,
+        _local_response_schema(qt),
+        "SpeakingResult",
+        image_b64,
+        image_media_type,
+    )
+    assert isinstance(result, SpeakingResult)
+    return result

@@ -62,6 +62,40 @@ class CriterionScore(BaseModel):
     )
 
 
+class SampleAnswer(BaseModel):
+    """Bài nói mẫu chất lượng cao do LLM sinh cho một dạng câu mở.
+
+    Dùng cho nút "Gợi ý bài mẫu" (endpoint /suggest). KHÁC SpeakingResult: không
+    chấm điểm, chỉ tạo bài mẫu để người học tham khảo/luyện theo.
+    """
+
+    answer: str = Field(
+        description=(
+            "Bài nói mẫu hoàn chỉnh bằng TIẾNG ANH, văn phong NÓI tự nhiên (như "
+            "thí sinh nói thật, không phải văn viết), độ dài hợp với thời lượng "
+            "kỳ vọng của dạng câu."
+        )
+    )
+    target_band: str = Field(
+        description="Mức nhắm tới của bài mẫu (echo lại), vd '9.0' hoặc 'TOEIC mức cao nhất'."
+    )
+    highlights: list[str] = Field(
+        default_factory=list,
+        description=(
+            "3-5 điểm nhấn band cao đáng học từ bài mẫu (collocation, cấu trúc câu "
+            "phức, từ nối, cách triển khai ý...). Viết bằng ngôn ngữ nhận xét được "
+            "cấu hình (feedback_lang)."
+        ),
+    )
+    outline: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Dàn ý ngắn (mở-thân-kết / các ý chính) — hữu ích cho độc thoại dài "
+            "(IELTS Part 2). Có thể để rỗng với câu trả lời ngắn."
+        ),
+    )
+
+
 class SpeakingResult(BaseModel):
     question_type: str
     # task_completion là tiêu chí hạng nhất: trả lời đúng/đủ yêu cầu hay không.

@@ -142,3 +142,17 @@ body.dark .file-item-audio audio {
     filter: invert(0.9) hue-rotate(180deg);
 }
 
+
+/* ── Gợi ý bài nói mẫu (dark) ────────────────────────────────────────── */
+body.dark .suggest-card {
+    background: #0f172a;
+    border-color: #334155;
+}
+
+body.dark .suggest-band {
+    color: #a5b4fc;
+}
+
+body.dark .suggest-section h4 {
+    color: #94a3b8;
+}

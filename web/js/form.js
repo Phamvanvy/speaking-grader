@@ -97,11 +97,21 @@ function syncConditionalFields() {
     if (!imageVisible) renderImagePreview();
 }
 
+// Đồng bộ khối "Gợi ý bài mẫu" (định nghĩa ở suggest.js, nạp SAU form.js → gọi
+// có kiểm tra tồn tại; lần init đầu do chính suggest.js tự chạy khi nạp).
+function syncSuggestUI() {
+    if (typeof updateSuggestUI === 'function') updateSuggestUI();
+}
+
 examSelect.addEventListener('change', () => {
     populateQuestionTypes();
     syncConditionalFields();
+    syncSuggestUI();
 });
-questionTypeSelect.addEventListener('change', syncConditionalFields);
+questionTypeSelect.addEventListener('change', () => {
+    syncConditionalFields();
+    syncSuggestUI();
+});
 populateQuestionTypes();
 syncConditionalFields();
 

@@ -85,6 +85,12 @@ def test_exam_builtin_returns_ordered_questions():
     assert len(data["questions"]) >= 1
     seqs = [q["sequence"] for q in data["questions"]]
     assert seqs == sorted(seqs)
+    # Câu tả tranh trong đề mẫu PHẢI kèm ảnh base64 (đọc từ image_path), không để None.
+    pics = [q for q in data["questions"] if q["type"] == "describe_picture"]
+    assert pics, "đề mẫu TOEIC cần có câu describe_picture"
+    for q in pics:
+        assert q["image_b64"], f"câu {q['id']} thiếu ảnh đề mẫu"
+        assert q["image_media_type"]
 
 
 def test_exam_import_rejects_unsupported_format():
@@ -93,6 +99,37 @@ def test_exam_import_rejects_unsupported_format():
         "/exam/import",
         data={"exam": "toeic"},
         files={"file": ("note.txt", b"hello", "text/plain")},
+    )
+    assert res.status_code == 400
+
+
+# ── Endpoint /exam/overall (client chấm rời từng câu rồi gộp) ─────────────────
+
+
+def test_exam_overall_aggregates_client_scores():
+    client = TestClient(api.app)
+    res = client.post(
+        "/exam/overall",
+        data={
+            "exam": "toeic",
+            "scores": json.dumps(
+                [{"estimated_toeic_score": 120}, None, {"estimated_toeic_score": 160}]
+            ),
+        },
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["overall"] == 140  # mean(120, 160)
+    assert data["graded"] == 2
+    assert data["count"] == 3
+    assert data["overall_max"] == 200
+    assert data["overall_estimated"] is True
+
+
+def test_exam_overall_rejects_non_list_scores():
+    client = TestClient(api.app)
+    res = client.post(
+        "/exam/overall", data={"exam": "toeic", "scores": json.dumps({"x": 1})}
     )
     assert res.status_code == 400
 

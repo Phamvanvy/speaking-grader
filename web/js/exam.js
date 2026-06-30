@@ -39,6 +39,26 @@ async function examParseResponse(res) {
     }
 }
 
+// Ảnh đề (Describe Picture) được client giữ dạng base64 (từ import/builtin). Khi chấm
+// rời từng câu qua /grade ta phải gửi lại dưới dạng FILE → đổi base64 sang Blob.
+function examB64ToBlob(b64, mediaType) {
+    if (!b64) return null;
+    try {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new Blob([bytes], { type: mediaType || 'image/png' });
+    } catch (e) {
+        return null;
+    }
+}
+
+function examImgExt(mediaType) {
+    if (mediaType === 'image/jpeg' || mediaType === 'image/jpg') return '.jpg';
+    if (mediaType === 'image/webp') return '.webp';
+    return '.png';
+}
+
 // ── Bảng thời gian chuẩn IIG (giây) theo kỳ thi + dạng câu ────────────────────
 // resp=null → lấy theo expected_duration_sec của câu (vd respond 15/15/30 lệ thuộc
 // vị trí câu). Tập trung 1 chỗ cho dễ chỉnh nếu format IIG đổi.
@@ -160,6 +180,8 @@ function examSession() {
         // kết quả
         grading: false,
         result: null,
+        gradedCount: 0,           // số câu đã chấm xong (hiện tiến trình khi chấm rời)
+        gradeTotal: 0,
 
         // ── helpers dạng câu ──
         typeOptions() {
@@ -442,57 +464,102 @@ function examSession() {
 
         recordedCount() { return this.order.filter(q => q._recBlob).length; },
 
-        // ── BƯỚC 4: chấm gộp ──
+        // ── BƯỚC 4: chấm cả đề ──
+        // Chấm RỜI từng câu (mỗi câu 1 request /grade ngắn) thay vì gửi cả đề trong 1
+        // request dài: tránh 502/timeout ở reverse proxy khi đề dài + model local chậm.
+        // Kết quả từng câu hiện dần; điểm tổng tính 1 lần qua /exam/overall ở cuối.
         async submitExam() {
             if (this.recording) this.stopRec();
             this.exitFullscreen();
             const withAudio = this.order.filter(q => q._recBlob);
             if (!withAudio.length) { alert('Chưa ghi âm câu nào.'); return; }
             this.grading = true; this.error = '';
+            this.gradedCount = 0; this.gradeTotal = withAudio.length;
+            this.result = {
+                exam: this.exam, title: this.title,
+                overall: null, overall_max: this.exam === 'ielts' ? 9 : 200,
+                overall_estimated: true,
+                count: this.order.length, graded: 0,
+                questions: withAudio.map(q => ({
+                    question_id: q.id, sequence: q.sequence, type: q.type,
+                })),
+            };
+            this.step = 'result';
+            this.$nextTick(() => {
+                this.result.questions.forEach(it => {
+                    const el = document.getElementById(`exam-q-${it.question_id}`);
+                    if (el) el.innerHTML = '<p style="color:#888;">⏳ Đang chờ chấm…</p>';
+                });
+            });
+
+            const mode = document.getElementById('mode')?.value || 'practice';
+            const fl = document.getElementById('feedback-lang')?.value;
+            const accent = (typeof currentAccent !== 'undefined' ? currentAccent : 'default');
             try {
-                const paper = {
-                    exam: this.exam, title: this.title,
-                    questions: this.order.map(q => ({
-                        id: q.id, sequence: q.sequence, type: q.type, prompt: q.prompt,
-                        reference_script: q.reference_script || null,
-                        provided_info: q.provided_info || null,
-                        expected_duration_sec: q.expected_duration_sec,
-                        image_b64: q.image_b64, image_media_type: q.image_media_type,
-                    })),
-                };
-                const fd = new FormData();
-                fd.append('paper', JSON.stringify(paper));
-                fd.append('audio_question_ids', JSON.stringify(withAudio.map(q => q.id)));
-                fd.append('mode', document.getElementById('mode')?.value || 'practice');
-                const fl = document.getElementById('feedback-lang')?.value;
-                if (fl) fd.append('feedback_lang', fl);
-                fd.append('accent', (typeof currentAccent !== 'undefined' ? currentAccent : 'default'));
-                withAudio.forEach(q => fd.append('audios', q._recBlob, q._recName));
-                const res = await fetch(`${examApiBase()}/exam/grade`, { method: 'POST', body: fd });
-                const data = await examParseResponse(res);
-                if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
-                this.result = data; this.step = 'result';
-                this.$nextTick(() => this._renderResults());
-            } catch (e) {
-                this.error = `Chấm đề thất bại: ${e.message}`;
+                for (const q of withAudio) {
+                    const item = this.result.questions.find(it => it.question_id === q.id);
+                    try {
+                        const fd = new FormData();
+                        fd.append('audio', q._recBlob, q._recName);
+                        fd.append('exam', this.exam);
+                        fd.append('question_type', q.type);   // dạng câu đã biết → khỏi auto-detect
+                        if (q.reference_script) fd.append('text', q.reference_script);
+                        if (q.provided_info) fd.append('provided_info', q.provided_info);
+                        if (q.prompt) fd.append('prompt', q.prompt);
+                        if (q.expected_duration_sec != null)
+                            fd.append('expected_duration_sec', q.expected_duration_sec);
+                        fd.append('mode', mode);
+                        if (fl) fd.append('feedback_lang', fl);
+                        fd.append('accent', accent);
+                        const imgBlob = examB64ToBlob(q.image_b64, q.image_media_type);
+                        if (imgBlob) fd.append('image', imgBlob, `image${examImgExt(q.image_media_type)}`);
+                        const res = await fetch(`${examApiBase()}/grade`, { method: 'POST', body: fd });
+                        const data = await examParseResponse(res);
+                        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+                        item.result = data;
+                    } catch (e) {
+                        item.error = e.message;   // 1 câu lỗi không làm hỏng cả đề
+                    }
+                    this.gradedCount++;
+                    this.$nextTick(() => this._renderQuestionResult(item));
+                }
+                await this._computeOverall();
             } finally {
                 this.grading = false;
             }
         },
 
-        _renderResults() {
-            (this.result.questions || []).forEach(item => {
-                const el = document.getElementById(`exam-q-${item.question_id}`);
-                if (!el) return;
-                if (item.error) { el.innerHTML = `<p class="exam-error">${escapeHtml(item.error)}</p>`; return; }
-                const r = item.result || {};
-                el.innerHTML =
-                    `<div class="result-section"><h4>📝 Transcript</h4><p>${escapeHtml(r.transcript || '')}</p></div>`
-                    + `<div class="result-section"><h4>📈 Features</h4>${featureGridHtml(r.features || {})}</div>`
-                    + `<div class="result-section"><h4>📋 Điểm</h4>${scoresBreakdownHtml(r.scores, r.exam, r.phoneme, { pronunciationOnly: !!r.pronunciation_only, notice: r.notice })}</div>`;
-            });
+        // Gộp điểm tổng từ điểm các câu đã chấm (tái dùng compute_exam_overall ở server).
+        async _computeOverall() {
+            try {
+                const scores = this.result.questions.map(it => (it.result && it.result.scores) || null);
+                const fd = new FormData();
+                fd.append('exam', this.exam);
+                fd.append('scores', JSON.stringify(scores));
+                const res = await fetch(`${examApiBase()}/exam/overall`, { method: 'POST', body: fd });
+                const data = await examParseResponse(res);
+                if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+                this.result.overall = data.overall;
+                this.result.overall_max = data.overall_max;
+                this.result.graded = data.graded;
+            } catch (e) {
+                // Lỗi tính tổng KHÔNG xoá kết quả từng câu đã chấm xong.
+                this.error = `Không tính được điểm tổng: ${e.message}`;
+            }
+        },
+
+        _renderQuestionResult(item) {
+            const el = document.getElementById(`exam-q-${item.question_id}`);
+            if (!el) return;
+            if (item.error) { el.innerHTML = `<p class="exam-error">${escapeHtml(item.error)}</p>`; return; }
+            const r = item.result || {};
+            el.innerHTML =
+                `<div class="result-section"><h4>📝 Transcript</h4><p>${escapeHtml(r.transcript || '')}</p></div>`
+                + `<div class="result-section"><h4>📈 Features</h4>${featureGridHtml(r.features || {})}</div>`
+                + `<div class="result-section"><h4>📋 Điểm</h4>${scoresBreakdownHtml(r.scores, r.exam, r.phoneme, { pronunciationOnly: !!r.pronunciation_only, notice: r.notice })}</div>`;
         },
         overallText() {
+            if (this.grading) return `Đang chấm ${this.gradedCount}/${this.gradeTotal}…`;
             if (!this.result) return '--';
             return this.result.overall != null ? `${this.result.overall}/${this.result.overall_max}` : '--';
         },

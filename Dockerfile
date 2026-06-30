@@ -23,6 +23,10 @@ ENV LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/cublas/lib:/u
 
 COPY src ./src
 COPY web ./web
+# Ngân hàng câu hỏi + ảnh đề mẫu cho /exam/builtin ("dùng đề có sẵn"). Chỉ JSON câu
+# hỏi và ảnh mẫu, các phần khác của data/ vẫn bị .dockerignore loại ra.
+COPY data/questions ./data/questions
+COPY data/image ./data/image
 
 # ── ĐỒNG BỘ CẤU HÌNH VỚI FILE .ENV ─────────────────────────────────────────
 ENV WHISPER_MODEL=large-v3-turbo \

@@ -298,3 +298,66 @@
     display: none;
 }
 
+
+/* ── Gợi ý bài nói mẫu (#suggest-group) ──────────────────────────────── */
+.suggest-controls {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.suggest-controls select {
+    flex: 1;
+}
+
+.suggest-controls .btn {
+    width: auto;
+    white-space: nowrap;
+    padding: 0.75rem 1rem;
+}
+
+#suggest-result {
+    margin-top: 0.75rem;
+}
+
+.suggest-card {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 1rem;
+    line-height: 1.6;
+}
+
+.suggest-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.6rem;
+}
+
+.suggest-band {
+    font-weight: 600;
+    color: #4f46e5;
+}
+
+.suggest-answer {
+    white-space: pre-wrap;
+    font-size: 1.05rem;
+}
+
+.suggest-section {
+    margin-top: 0.85rem;
+}
+
+.suggest-section h4 {
+    margin: 0 0 0.35rem;
+    font-size: 0.9rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.suggest-section ul {
+    margin: 0;
+    padding-left: 1.2rem;
+}

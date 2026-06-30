@@ -101,6 +101,19 @@
                 <textarea id="prompt-text" placeholder="Enter the prompt shown to the test-taker..."></textarea>
             </div>
 
+            <!-- Gợi ý bài nói MẪU band cao cho dạng câu mở (IELTS / tả tranh...).
+                 Ẩn với Read Aloud (bài mẫu chính là reference script). Hiện/ẩn do
+                 syncConditionalFields() trong form.js điều khiển. -->
+            <div class="form-group hidden" id="suggest-group">
+                <label for="target-band">Bài nói mẫu (tham khảo)</label>
+                <div class="suggest-controls">
+                    <select id="target-band"></select>
+                    <button type="button" class="btn btn-secondary" id="suggest-btn" onclick="suggestSample()">💡 Gợi ý bài mẫu</button>
+                </div>
+                <p class="mode-note">Sinh một bài nói mẫu chất lượng cao cho đề + dạng câu hiện tại (không tính điểm). Có thể bấm 🔊 để nghe đọc.</p>
+                <div class="hidden" id="suggest-result"></div>
+            </div>
+
             <div class="row">
                 <div class="form-group">
                     <label for="mode">Grading Mode</label>
@@ -276,7 +289,10 @@
                             <label>Dạng câu</label>
                             <select x-model="q.type">
                                 <template x-for="o in typeOptions()" :key="o.value">
-                                    <option :value="o.value" x-text="o.label"></option>
+                                    <!-- :selected để select hiện đúng dạng câu khi nạp đề mẫu/import:
+                                         option sinh bằng x-for có thể render SAU lúc x-model gán giá trị,
+                                         khiến select hiện nhầm option đầu ("Read Aloud") dù q.type khác. -->
+                                    <option :value="o.value" :selected="o.value === q.type" x-text="o.label"></option>
                                 </template>
                             </select>
                         </div>
@@ -443,6 +459,7 @@
     <script src="js/recording.js?v=accent-default-1"></script>
     <script src="js/form.js?v=accent-default-1"></script>
     <script src="js/grade.js?v=accent-default-1"></script>
+    <script src="js/suggest.js?v=suggest-1"></script>
     <script src="js/report.js?v=accent-default-1"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
