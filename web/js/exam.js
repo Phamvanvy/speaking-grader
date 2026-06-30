@@ -191,7 +191,7 @@ function examSession() {
                 fd.append('file', file);
                 fd.append('exam', this.exam);
                 const res = await fetch(`${examApiBase()}/exam/import`, { method: 'POST', body: fd });
-                const data = await res.json();
+                const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                 this._loadPaper(data);
             } catch (e) {
@@ -204,7 +204,7 @@ function examSession() {
             this.error = ''; this.importing = true;
             try {
                 const res = await fetch(`${examApiBase()}/exam/builtin/${this.exam}`);
-                const data = await res.json();
+                const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                 this._loadPaper(data);
             } catch (e) {
@@ -469,7 +469,7 @@ function examSession() {
                 fd.append('accent', (typeof currentAccent !== 'undefined' ? currentAccent : 'default'));
                 withAudio.forEach(q => fd.append('audios', q._recBlob, q._recName));
                 const res = await fetch(`${examApiBase()}/exam/grade`, { method: 'POST', body: fd });
-                const data = await res.json();
+                const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                 this.result = data; this.step = 'result';
                 this.$nextTick(() => this._renderResults());

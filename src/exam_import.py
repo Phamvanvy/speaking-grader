@@ -239,18 +239,23 @@ def _extract_local(llm_input: LlmInput, exam: str, config: Config) -> "Extracted
     except ImportError as e:  # pragma: no cover
         raise ExamImportError("Backend local cần gói 'openai'. Cài: pip install openai") from e
 
-    # Có text-layer → gửi TEXT-ONLY (bỏ ảnh): model local text thuần (vd Qwen3) sẽ
-    # choke + cực chậm nếu nhồi base64 ảnh trang. Chỉ gửi ảnh khi KHÔNG có text
-    # (cần model local có vision; text-only sẽ lỗi rõ ràng).
+    # Quyết định có gửi ẢNH cho model local không:
+    # - local_vision_extract=True (server có --mmproj): gửi ảnh + text → đọc được
+    #   tranh/bảng/đề scan kể cả khi đã có text-layer.
+    # - Ngược lại: chỉ gửi ảnh khi KHÔNG có text-layer (model text-thuần nhồi base64
+    #   ảnh sẽ choke + cực chậm). Có text-layer → TEXT-ONLY cho nhanh.
     user_text = _extract_user_text(llm_input)
-    if llm_input.text or not llm_input.page_images:
-        user_content: object = user_text
-    else:
-        user_content = [
+    send_images = bool(llm_input.page_images) and (
+        config.local_vision_extract or not llm_input.text
+    )
+    if send_images:
+        user_content: object = [
             *({"type": "image_url", "image_url": {"url": f"data:{media};base64,{b64}"}}
               for b64, media in llm_input.page_images),
             {"type": "text", "text": user_text},
         ]
+    else:
+        user_content = user_text
 
     messages = [
         {"role": "system", "content": _extract_system_prompt(exam)},

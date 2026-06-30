@@ -38,6 +38,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .config import Config, load_config
@@ -75,6 +76,20 @@ app = FastAPI(
 # Nạp config 1 lần lúc khởi động (model Whisper cache trong asr theo process).
 _BASE_CONFIG: Config = load_config()
 setup_logging()
+
+# CORS: cho phép web/app ở origin khác gọi API qua trình duyệt (Swagger ở
+# /docs cùng origin nên không cần CORS, nhưng client ngoài thì cần). Origins
+# cấu hình qua CORS_ALLOW_ORIGINS (CSV). Khi là "*" thì allow_credentials phải
+# tắt theo chuẩn CORS (trình duyệt từ chối "*" + credentials); API này không
+# dùng cookie nên không ảnh hưởng.
+_CORS_ORIGINS = _BASE_CONFIG.cors_origins_list or ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials="*" not in _CORS_ORIGINS,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Trần số file trong 1 batch (chặn lạm dụng; 1 lớp thực tế ~40 em).
 _MAX_BATCH = 100

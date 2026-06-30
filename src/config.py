@@ -72,6 +72,11 @@ class Config:
     # TẮT cho local (vốn là backend dev, đã lệch calibration). Bật lại bằng
     # TOEIC_LOCAL_ENABLE_THINKING=true khi cần reasoning kỹ hơn.
     local_enable_thinking: bool = False
+    # Backend local CÓ vision (llama.cpp chạy kèm --mmproj, vd Qwen-VL): cho phép
+    # bước bóc tách đề (/exam/import) gửi ẢNH trang cho model kể cả khi tài liệu đã
+    # có text-layer → đọc được tranh/bảng/đề scan. Mặc định TẮT vì model local
+    # text-thuần (không mmproj) sẽ LỖI nếu nhận ảnh. Bật qua TOEIC_LOCAL_VISION_EXTRACT.
+    local_vision_extract: bool = False
     # Ngôn ngữ cho phần nhận xét (justification/suggestions/summary_feedback).
     # Mã ngắn ('vi', 'en', 'ja'...) hoặc tên tự do. Mặc định tiếng Việt vì
     # người dùng chính là người học VN.
@@ -158,6 +163,18 @@ class Config:
     # Thư mục cache WAV đã tổng hợp. Key cache có version (xem src/tts.py:CACHE_VERSION)
     # → đổi voice/normalization tự "miss" không cần xoá tay. Đặt qua TTS_CACHE_DIR.
     tts_cache_dir: str = "outputs/tts_cache"
+    # ── CORS (gọi API từ origin khác) ────────────────────────────────────
+    # Danh sách origin được phép gọi API qua trình duyệt, ngăn cách bằng dấu
+    # phẩy (vd "https://app.example.com,https://foo.bar"). Mặc định "*" = mọi
+    # origin (tiện expose API ra ngoài). Khi để "*", trình duyệt CẤM kèm
+    # credentials (cookie) nên allow_credentials tự tắt — API này không dùng
+    # cookie nên không ảnh hưởng. Đặt qua CORS_ALLOW_ORIGINS.
+    cors_allow_origins: str = "*"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Parse cors_allow_origins (CSV) → list origin đã strip, bỏ rỗng."""
+        return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
 
     @property
     def has_api_key(self) -> bool:
@@ -198,6 +215,9 @@ def load_config() -> Config:
         local_api_key=os.getenv("TOEIC_LOCAL_API_KEY", "no-key"),
         local_enable_thinking=(
             os.getenv("TOEIC_LOCAL_ENABLE_THINKING", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        local_vision_extract=(
+            os.getenv("TOEIC_LOCAL_VISION_EXTRACT", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},
         feedback_lang=os.getenv("TOEIC_FEEDBACK_LANG", "vi") or "vi",
         max_tokens=int(os.getenv("TOEIC_MAX_TOKENS", "30000")),
@@ -293,4 +313,5 @@ def load_config() -> Config:
         tts_cache_dir=(
             os.getenv("TTS_CACHE_DIR", "outputs/tts_cache") or "outputs/tts_cache"
         ),
+        cors_allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*") or "*",
     )
