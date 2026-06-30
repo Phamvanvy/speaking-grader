@@ -341,11 +341,18 @@ function examSession() {
             await this._sleep(300, token); if (token !== this._runToken) return;
             const r1 = await this._countdown(t.prep, token);
             if (r1 === 'cancel') return;
-            // RECORDING
-            examBeep(660, 200);
-            await this._sleep(300, token); if (token !== this._runToken) return;
+            // RECORDING — bật recorder TRƯỚC rồi mới mở cửa sổ trả lời. MediaRecorder
+            // mất ~0.5–1s "nóng máy" sau rec.start() mới ghi được mẫu đầu tiên; nếu đếm
+            // ngược ngay thì file ngắn hơn đề ~1s (0:14 thay vì 0:15) → user tưởng bị cắt,
+            // và mất luôn ~1s tiếng nói đầu. Ghi sớm 1 nhịp để nuốt độ trễ này; beep "nói
+            // đi" nằm ở đầu file. Nhờ vậy độ dài thu được ≥ resp (hiện đúng số giây) và
+            // phần đầu/cuối của thí sinh không bị mất.
             this.phase = 'recording'; this.statusKey = 'recording';
             await this.startRec();
+            if (await this._sleep(900, token) === 'cancel') { this.stopRec(); return; }
+            examBeep(660, 200);
+            await this._sleep(300, token);
+            if (token !== this._runToken) { this.stopRec(); return; }
             const r2 = await this._countdown(t.resp, token);
             this.stopRec();
             if (r2 === 'cancel') return;
@@ -404,6 +411,44 @@ function examSession() {
         },
         stopRec() { if (this._recorder && this.recording) this._recorder.stop(); },
         toggleRec() { this.recording ? this.stopRec() : this.startRec(); },
+
+        // Tải file audio có sẵn cho câu hiện tại (thay cho ghi âm trực tiếp) — tiện khi
+        // thí sinh đã thu sẵn ở ngoài. Gán y như onstop của recorder: blob + tên + URL
+        // để nghe lại; submitExam() dùng chung _recBlob/_recName nên không cần sửa gì thêm.
+        uploadRec(ev) {
+            const file = ev.target.files && ev.target.files[0];
+            ev.target.value = '';
+            if (!file) return;
+            const q = this.current;
+            if (!q) return;
+            if (this.recording) this.stopRec();
+            if (q._recUrl) URL.revokeObjectURL(q._recUrl);
+            q._recBlob = file;
+            q._recName = file.name || `${q.id}.webm`;
+            q._recUrl = URL.createObjectURL(file);
+        },
+
+        // Tải NHIỀU file một lượt: gán lần lượt cho các câu theo thứ tự, BẮT ĐẦU TỪ
+        // câu hiện tại (file1→câu hiện tại, file2→câu kế…). Tiện khi đã thu sẵn cả đề.
+        // File sắp theo tên cho ổn định (audio thường đánh số 01,02… theo câu).
+        uploadBatch(ev) {
+            const files = Array.from(ev.target.files || [])
+                .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }));
+            ev.target.value = '';
+            if (!files.length) return;
+            if (this.recording) this.stopRec();
+            let i = this.idx;
+            for (const file of files) {
+                if (i >= this.order.length) break;
+                const q = this.order[i];
+                if (q._recUrl) URL.revokeObjectURL(q._recUrl);
+                q._recBlob = file;
+                q._recName = file.name || `${q.id}.webm`;
+                q._recUrl = URL.createObjectURL(file);
+                i++;
+            }
+            this.idx = Math.min(i - 1, this.order.length - 1);
+        },
 
         _setupWaveform(stream) {
             try {

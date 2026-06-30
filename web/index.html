@@ -376,6 +376,13 @@
                     <div class="exam-runner-meta">
                         <h2 x-text="'Câu ' + (idx+1) + ' / ' + order.length"></h2>
                     </div>
+                    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:1rem;padding:0.75rem;background:#f8fafc;border-radius:8px;">
+                        <label class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;margin:0;cursor:pointer;">
+                            📁📁 Tải nhiều audio cùng lúc
+                            <input type="file" multiple accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4" @change="uploadBatch($event)" style="display:none;">
+                        </label>
+                        <span class="exam-hint" style="margin:0;">Gán lần lượt theo tên file, bắt đầu từ câu hiện tại. Đã có audio: <strong x-text="recordedCount() + '/' + order.length"></strong></span>
+                    </div>
                     <template x-if="current">
                         <div>
                             <div class="exam-prompt-box">
@@ -388,8 +395,12 @@
                             <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;">
                                 <button class="btn btn-primary" style="width:auto;padding:0.6rem 1.2rem;" @click="toggleRec()"
                                         x-text="recording ? '⏹ Dừng ghi' : '🎙 Ghi âm câu này'"></button>
+                                <label class="btn btn-secondary" style="width:auto;padding:0.6rem 1.2rem;margin:0;cursor:pointer;" :class="recording ? 'disabled' : ''">
+                                    📁 Tải audio lên
+                                    <input type="file" accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.mp4" @change="uploadRec($event)" :disabled="recording" style="display:none;">
+                                </label>
                                 <span class="exam-rec-dot" x-show="recording">● đang ghi…</span>
-                                <span style="color:#16a34a;" x-show="current._recBlob && !recording">✓ đã ghi</span>
+                                <span style="color:#16a34a;" x-show="current._recBlob && !recording">✓ đã có audio</span>
                             </div>
                             <audio x-show="current._recUrl" :src="current._recUrl" controls style="margin-top:0.75rem;width:100%;"></audio>
                             <div class="exam-nav">
@@ -463,7 +474,7 @@
     <script src="js/report.js?v=accent-default-1"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
-    <script src="js/exam.js?v=exam-3"></script>
+    <script src="js/exam.js?v=exam-4"></script>
     <script defer src="vendor/alpine.min.js?v=exam-1"></script>
 </body>
 </html>
