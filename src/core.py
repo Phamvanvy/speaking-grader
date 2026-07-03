@@ -25,7 +25,13 @@ from .phoneme.diagnostics import (
 )
 from .phoneme.ipa import text_to_ipa_sequence_with_spans
 from .phoneme.models import PhonemeResult
-from .phoneme.reliability import RecognizerEvidence, assess_reliability
+from .phoneme.reliability import (
+    RecognizerEvidence,
+    SkipDecision,
+    SkipReason,
+    assess_asr_confidence,
+    assess_reliability,
+)
 from .rubrics.base import QuestionType
 
 logger = logging.getLogger("toeic.core")
@@ -187,39 +193,63 @@ def grade_response(
                 recognizer_noise_sim=config.phoneme_recognizer_noise_sim,
                 recognizer_noise_conf=config.phoneme_recognizer_noise_conf,
                 recognizer_noise_conf_vowel=config.phoneme_recognizer_noise_conf_vowel,
+                connected_speech_enabled=config.phoneme_connected_speech_enabled,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về
             # transcript ASR: đo phát âm của chính những từ thí sinh đã nói (kiểu ELSA).
             #
-            # Recognition Reliability (tầng TRÊN scorer): CHỈ khi có script, so transcript
-            # recognizer với script (cross-source) → quyết định từ nào KHÔNG đáng tin để
-            # chấm (vd Son Tinh→Andy). Keyed theo CHỈ SỐ TỪ chuẩn (occurrence) nên "the"
-            # lặp nhiều lần không bị skip oan. reference_words dựng từ cùng hàm mà analyzer
-            # dùng (deterministic) → chỉ số khớp spans của scorer.
+            # Tầng reliability (TRÊN scorer) — quyết định từ nào KHÔNG đáng tin để chấm,
+            # keyed theo CHỈ SỐ TỪ chuẩn (occurrence) nên "the" lặp nhiều lần không bị
+            # skip oan. reference_words dựng từ cùng hàm mà analyzer dùng (deterministic)
+            # → chỉ số khớp spans của scorer. Hai nhánh:
+            #   - Có script: so transcript recognizer với script (cross-source) —
+            #     assess_reliability (vd Son Tinh→Andy).
+            #   - Free-speech (reference == transcript): không có nguồn chéo → gate bằng
+            #     (a) word probability của chính Whisper (assess_asr_confidence) và
+            #     (b) từ OOV lấy IPA từ eSpeak (cả transcript lẫn G2P đều là đoán).
             skips: dict = {}
             word_windows = None
             # reference_text mà scorer dùng (KHỚP analyzer): có script → script; không
             # → transcript (free-speech, đo phát âm của chính từ thí sinh đã nói).
             phoneme_reference_text = reference_script or transcription.text
-            if reference_script:
-                _ph, ref_spans, _st, _ds = text_to_ipa_sequence_with_spans(reference_script)
-                reference_words = [s.word for s in ref_spans]
+            ref_spans: list = []
+            if phoneme_reference_text.strip():
+                _ph, ref_spans, _st, _ds = text_to_ipa_sequence_with_spans(
+                    phoneme_reference_text
+                )
+            reference_words = [s.word for s in ref_spans]
+            if reference_script and reference_words:
                 evidence = RecognizerEvidence.from_transcript(transcription.text)
                 skips = dict(assess_reliability(
                     reference_words, evidence, skip_ratio=config.phoneme_skip_ratio
                 ))
+            elif reference_words:
+                min_prob = (
+                    config.phoneme_asr_conf_min_whisperx
+                    if asr_run.backend_used == "whisperx"
+                    else config.phoneme_asr_conf_min
+                )
+                skips = dict(assess_asr_confidence(
+                    reference_words,
+                    [(w.text, w.probability) for w in transcription.words],
+                    min_probability=min_prob,
+                    transcript_text=phoneme_reference_text,
+                ))
+                # Từ OOV (IPA từ eSpeak) — setdefault để không ghi đè lý do ASR.
+                for k, s in enumerate(ref_spans):
+                    if s.source == "espeak":
+                        skips.setdefault(
+                            k, SkipDecision(k, SkipReason.OOV_ESPEAK)
+                        )
             # Map TỪ THAM CHIẾU → cửa sổ thời gian Whisper (start,end mỗi từ). Áp dụng cho
             # CẢ Read Aloud (có script) lẫn free-speech (reference = transcript). Dùng cùng
             # kỹ thuật difflib với Recognition Reliability (hàm THUẦN, không side-effect) →
             # LUÔN tính khi có từ + transcript word: (a) UI phát lại đoạn audio từng từ, và
             # (b) telemetry drift-vs-hallucination (PR3-0). KHÔNG đụng điểm/skip.
-            if phoneme_reference_text.strip() and transcription.words:
-                _wph, win_spans, _wst, _wds = text_to_ipa_sequence_with_spans(
-                    phoneme_reference_text
-                )
+            if reference_words and transcription.words:
                 word_windows = map_reference_words_to_windows(
-                    [s.word for s in win_spans],
+                    reference_words,
                     [(w.text, w.start, w.end) for w in transcription.words],
                 )
             # Telemetry (PR2): chỉ bật khi config bật — sink ghi JSONL per-word, KHÔNG

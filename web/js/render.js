@@ -146,12 +146,17 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
              : s === 'secondary' ? '<span class="phoneme-stress">ˌ</span>'
              : '';
     };
+    // Âm được CHẤP NHẬN (không tính lỗi) nhưng đánh dấu nhẹ + tooltip giải thích:
+    // biến thể giọng / nối âm. Map penalty_reason → tooltip, cùng style --accent.
+    const acceptedReasonTip = {
+        accent_variant: 'Biến thể giọng được chấp nhận (coda /r/ non-rhotic) — không tính lỗi',
+        connected_speech: 'Nuốt âm cuối khi nối từ (connected speech) — không tính lỗi',
+    };
     const symHtml = p => {
         const sig = isSignificant(p);
-        // Âm được chấp nhận như biến thể giọng (vd coda /r/ non-rhotic ở chế độ default):
-        // không tô đỏ, nhưng đánh dấu nhẹ + tooltip để người dùng hiểu vì sao /r/ vẫn hiện.
-        if (p.penalty_reason === 'accent_variant') {
-            return `${stressMark(p)}<span class="phoneme-sym phoneme-sym--accent" title="Biến thể giọng được chấp nhận (coda /r/ non-rhotic) — không tính lỗi">${escapeHtml(p.symbol)}</span>`;
+        const tip = acceptedReasonTip[p.penalty_reason];
+        if (tip && !sig) {
+            return `${stressMark(p)}<span class="phoneme-sym phoneme-sym--accent" title="${tip}">${escapeHtml(p.symbol)}</span>`;
         }
         const cls = sig && p.status === 'del' ? 'phoneme-sym phoneme-sym--missing'
                   : sig && p.status === 'sub' ? 'phoneme-sym phoneme-sym--bad'
@@ -220,8 +225,12 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
 
     // ── Hidden recognizer noise: từ bị Recognition Reliability bỏ qua (kèm LÝ DO)
     //    + âm severity 'low' — giữ lại để debug, không tô đỏ ──
-    const skipReasonLabel = r =>
-        r === 'whisper_mismatch' ? 'ASR nghe khác script' : (r || 'không khớp');
+    const skipReasonLabels = {
+        whisper_mismatch: 'ASR nghe khác script',
+        asr_low_confidence: 'ASR không chắc đã nghe đúng từ này',
+        oov_espeak: 'Từ hiếm/tên riêng ngoài từ điển — không chấm',
+    };
+    const skipReasonLabel = r => skipReasonLabels[r] || r || 'không khớp';
     // Từ bị skip cả từ (mỗi từ một dòng, kèm lý do); KHÔNG liệt kê per-phoneme.
     const skippedWordItems = words
         .filter(w => w.skip_reason)
@@ -264,7 +273,7 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     const body = `
         ${accentRow}
         <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm · 🔊 = nghe phát âm chuẩn (máy đọc — tham khảo)</div>
-        <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}</div>
+        <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ. Nuốt âm cuối khi nối từ (vd "tes(t) preparation") là nối âm bản xứ hợp lệ — không tính lỗi.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}</div>
         ${truncLine}
         <div class="phoneme-words">${head}</div>${moreCards}
         ${table}

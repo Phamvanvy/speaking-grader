@@ -29,10 +29,15 @@ class WordSpan(NamedTuple):
         word: từ như xuất hiện trong text (giữ nguyên hoa/thường để hiển thị)
         start_idx: index bắt đầu (inclusive) trong reference phoneme list
         end_idx: index kết thúc (exclusive)
+        source: nguồn IPA của từ ("override" | "cmudict" | "espeak") — eSpeak là
+            G2P đoán cho từ ngoài từ điển (OOV/tên riêng) nên IPA kém tin cậy;
+            scoring dùng cờ này để nới lỏng (skip ở free-speech, cap severity khi
+            có script). Default "cmudict" để mọi chỗ dựng 3-positional cũ vẫn chạy.
     """
     word: str
     start_idx: int
     end_idx: int
+    source: str = "cmudict"
 
 
 @dataclass(frozen=True)

@@ -124,6 +124,17 @@ def is_nasal_coda_linking(expected: str, predicted: str) -> bool:
     )
 
 
+# Stop cuối từ có thể NUỐT khi nối từ (connected speech elision): "test preparation"
+# → /tes-prep/ là phát âm bản xứ ĐÚNG khi từ kế bắt đầu bằng phụ âm. CHỈ stop — nuốt
+# fricative/liquid/nasal cuối (/s z l n/...) là lỗi L1 VN kinh điển, KHÔNG được tha.
+_ELIDABLE_FINAL_STOPS: Final[frozenset[str]] = frozenset({"t", "d", "p", "b", "k", "ɡ"})
+
+
+def is_elidable_stop(phoneme: str) -> bool:
+    """True nếu phoneme (sau normalize) là stop được phép nuốt ở cuối từ khi nối từ."""
+    return normalize_ipa(phoneme) in _ELIDABLE_FINAL_STOPS
+
+
 def is_real_error_substitution(expected: str, predicted: str, *, sim_floor: float) -> bool:
     """True nếu cặp sub (expected→predicted) là lỗi học viên THẬT → KHÔNG gate thành noise.
 
@@ -195,6 +206,13 @@ _ALLOPHONE_PAIRS: Final[frozenset[frozenset[str]]] = frozenset({
 # các nguyên âm này hoán đổi cho nhau là chấp nhận được (weak/strong form).
 _REDUCED_VOWELS: Final[frozenset[str]] = frozenset({"ə", "ʊ", "ɪ", "i", "u", "ɜ"})
 
+# Biến thể phát âm hợp lệ THEO TỪ (cả hai dạng đều chuẩn trong từ điển) — vd "with"
+# /wɪθ/ ↔ /wɪð/. Key = từ đã lower/strip; value = các cặp hoán đổi được chấp nhận.
+# Giữ NHỎ + tường minh: chỉ thêm khi cả hai biến thể có trong từ điển phát âm chuẩn.
+_WORD_VARIANT_PAIRS: Final[dict[str, frozenset[frozenset[str]]]] = {
+    "with": frozenset({frozenset({"θ", "ð"})}),
+}
+
 
 def phonemes_match(
     expected: str,
@@ -224,7 +242,11 @@ def phonemes_match(
     pair = frozenset({e, p})
     if pair in _ALLOPHONE_PAIRS:
         return True
-    in_func = bool(word) and word.lower().strip(".,;:!?\"'()[]{}") in FUNCTION_WORDS
+    word_key = word.lower().strip(".,;:!?\"'()[]{}") if word else ""
+    # Biến thể theo từ: cả hai dạng đều là phát âm chuẩn ("with" θ↔ð) → khớp.
+    if word_key and pair in _WORD_VARIANT_PAIRS.get(word_key, frozenset()):
+        return True
+    in_func = word_key in FUNCTION_WORDS
     if reducible is None:
         reducible = stress is None or in_func
     if reducible and e in _REDUCED_VOWELS and p in _REDUCED_VOWELS:
@@ -240,8 +262,10 @@ def phonemes_match(
 # ──────────────────────────────────────────────────────────────────────────────
 
 # Âm wav2vec hay "nuốt" (yếu/ngắn) — mất các âm này thường là lỗi NHẬN DẠNG, không
-# phải lỗi người đọc (dạng đã normalize: ð, h, schwa, ɪ, ʊ).
-_RECOGNIZER_PRONE: Final[frozenset[str]] = frozenset({"ð", "h", "ə", "ɪ", "ʊ"})
+# phải lỗi người đọc (dạng đã normalize: ð, h, schwa, ɪ, ʊ, w). /w/ là glide, wav2vec
+# hay gộp vào nguyên âm kế ("website" → /ebsaɪt/ trên cả giọng máy đọc chuẩn); người
+# học VN hầu như không nuốt /w/ onset nên rủi ro giấu lỗi thật rất thấp.
+_RECOGNIZER_PRONE: Final[frozenset[str]] = frozenset({"ð", "h", "ə", "ɪ", "ʊ", "w"})
 
 _SEVERITY_PENALTY: Final[dict[str, float]] = {"low": 0.1, "medium": 0.5, "high": 0.9}
 

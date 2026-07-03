@@ -137,6 +137,18 @@ class Config:
     phoneme_recognizer_noise_sim: float = 0.2
     phoneme_recognizer_noise_conf: float = 0.6
     phoneme_recognizer_noise_conf_vowel: float = 0.45
+    # Free-speech ASR-confidence gate: khi KHÔNG có script (reference == transcript),
+    # từ mà chính Whisper không chắc (word probability < ngưỡng) → reference không
+    # đáng tin → bỏ qua không chấm phoneme (skip khỏi cả tử lẫn mẫu accuracy).
+    # faster-whisper: từ đúng thường ≥0.85, từ đoán mò (tên riêng nghe nhầm) ~0.2-0.6
+    # → 0.55 cắt đuôi dưới. whisperx dùng thang khác (wav2vec char-align, thấp hơn)
+    # → ngưỡng riêng. Đặt <=0 để TẮT. Qua TOEIC_PHONEME_ASR_CONF_MIN(_WHISPERX).
+    phoneme_asr_conf_min: float = 0.55
+    phoneme_asr_conf_min_whisperx: float = 0.40
+    # Chấp nhận nuốt stop cuối từ khi nối từ (connected speech): "test preparation"
+    # → /tes-prep/ là phát âm bản xứ đúng, không tính lỗi. Tắt (false) → hành vi cũ.
+    # Đặt qua TOEIC_PHONEME_CONNECTED_SPEECH.
+    phoneme_connected_speech_enabled: bool = True
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
@@ -298,6 +310,15 @@ def load_config() -> Config:
         phoneme_recognizer_noise_conf_vowel=float(
             os.getenv("TOEIC_PHONEME_RECOGNIZER_NOISE_CONF_VOWEL", "0.45")
         ),
+        phoneme_asr_conf_min=float(
+            os.getenv("TOEIC_PHONEME_ASR_CONF_MIN", "0.55")
+        ),
+        phoneme_asr_conf_min_whisperx=float(
+            os.getenv("TOEIC_PHONEME_ASR_CONF_MIN_WHISPERX", "0.40")
+        ),
+        phoneme_connected_speech_enabled=(
+            os.getenv("TOEIC_PHONEME_CONNECTED_SPEECH", "true") or "true"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},

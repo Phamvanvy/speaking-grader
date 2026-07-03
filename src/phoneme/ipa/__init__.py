@@ -12,10 +12,12 @@ Tổ chức (package):
   - g2p.py: CMUdict + eSpeak NG + ARPAbet→IPA, stress, place_stress_at_onset
   - __init__.py (đây): pipeline word/text + re-export công khai
 
-LƯU Ý monkeypatch: word_to_ipa_with_stress / text_to_ipa_sequence_with_spans được
-ĐỊNH NGHĨA ở module này, còn _lookup_cmudict / _espeak_word_to_symbols_stress được
-import vào đây từ g2p — nên test patch `ipa._lookup_cmudict`, `ipa.word_to_ipa_with_stress`
-vẫn tác động đúng (caller tra tên trong namespace package lúc gọi).
+LƯU Ý monkeypatch: word_to_ipa_with_stress_source / text_to_ipa_sequence_with_spans
+được ĐỊNH NGHĨA ở module này, còn _lookup_cmudict / _espeak_word_to_symbols_stress được
+import vào đây từ g2p — nên test patch `ipa._lookup_cmudict`,
+`ipa.word_to_ipa_with_stress_source` vẫn tác động đúng (caller tra tên trong namespace
+package lúc gọi). text_to_ipa_sequence_with_spans gọi bản `_source` (không phải wrapper
+word_to_ipa_with_stress) — test muốn can thiệp span phải patch bản `_source`.
 """
 
 from __future__ import annotations
@@ -65,6 +67,7 @@ from .phoneme_set import (
 )
 from .similarity import (
     _ALLOPHONE_PAIRS,
+    _ELIDABLE_FINAL_STOPS,
     _NASAL_CODA_STOP_LINKS,
     _NEAR_PAIRS,
     _REAL_ERROR_SUBS,
@@ -77,6 +80,7 @@ from .similarity import (
     deletion_penalty,
     deletion_severity,
     error_severity,
+    is_elidable_stop,
     is_nasal_coda_linking,
     is_real_error_substitution,
     phoneme_similarity,
@@ -99,57 +103,104 @@ def word_to_ipa(word: str) -> list[str]:
 def word_to_ipa_with_stress(
     word: str,
 ) -> tuple[list[str], list[StressType | None]]:
-    """Convert one English word to IPA symbols + parallel stress list.
+    """Thin wrapper của word_to_ipa_with_stress_source() — giữ chữ ký 2-tuple cũ
+    cho các caller không cần biết nguồn IPA (scripts, tests cũ)."""
+    symbols, stresses, _source = word_to_ipa_with_stress_source(word)
+    return symbols, stresses
 
-    4-layer deterministic pipeline (first match wins):
+
+# Đuôi sở hữu cách/rút gọn 's theo voicing của âm cuối stem (luật hình thái chuẩn):
+# sibilant → /ɪz/ ("boss's"), phụ âm vô thanh → /s/ ("Pat's"), còn lại → /z/ ("com's").
+_SIBILANTS_NORM = frozenset({"s", "z", "ʃ", "ʒ", "tʃ", "dʒ"})
+_VOICELESS_NORM = frozenset({"p", "t", "k", "f", "θ"})
+
+
+def word_to_ipa_with_stress_source(
+    word: str,
+) -> tuple[list[str], list[StressType | None], str]:
+    """Convert one English word to IPA symbols + parallel stress list + source.
+
+    Deterministic pipeline (first match wins), trả thêm nguồn IPA để scoring biết
+    độ tin cậy của reference:
       Layer 1 — _WORD_IPA_OVERRIDES: HARD PRIORITY. Bypasses all validation and
         fallback. For proper nouns not in CMUdict and genuine dialect exceptions.
+        → source "override".
       Layer 2 — CMUdict (~134k words, validated ARPAbet + stress digits).
         Accepted all-or-nothing: if any token base is invalid the entry is rejected
         and falls through. Should never happen with a well-formed CMUdict package.
+        → source "cmudict".
+      Layer 2.5 — clitic 's: từ dạng "<stem>'s" mà stem có trong CMUdict → IPA stem
+        + /ɪz|s|z/ theo voicing âm cuối. Cứu các token kiểu "com's" (tách từ
+        "aehelp.com's") khỏi rơi xuống eSpeak. CHỈ 's — không xử lý n't/'ll/'re.
+        → source "cmudict" (độ tin cậy tương đương tra từ điển).
       Layer 3 — eSpeak NG (deterministic rule-based G2P for OOV words).
         Per-symbol validation against _IPA_PHONEMES_NORM after normalize_ipa().
         Invalid symbols strictly dropped; empty result → falls through.
-      Layer 4 — HARD FAILURE: returns ([], []) + warning log.
+        → source "espeak" (IPA đoán bằng luật — KÉM tin cậy với tên riêng).
+      Layer 4 — HARD FAILURE: returns ([], [], "failed") + warning log.
         Callers must not treat this as a valid (silent) pronunciation.
 
     Stress marks CHỈ dùng để hiển thị — KHÔNG chèn vào chuỗi DTW (wav2vec không
     có dấu nhấn → sẽ lệch). Monosyllabic words (≤1 syllable) get all-None stress
-    per IPA convention. Returns (symbols, stresses) with len(symbols)==len(stresses).
+    per IPA convention. Returns (symbols, stresses, source) with
+    len(symbols)==len(stresses).
 
     Determinism: same input → identical output under fixed versions of CMUdict package,
     espeak-ng binary, and phonemizer library.
     """
     key = word.lower().strip(".,;:!?\"'()[]{}")
     if not key:
-        return [], []
+        return [], [], "failed"
 
     # Layer 1: HARD PRIORITY — bypasses all validation and fallback logic.
     if key in _WORD_IPA_OVERRIDES:
         logger.debug("ipa_resolve word=%r source=override", key)
-        return _finalize_stress(*_arpabet_tokens_to_ipa_stress(_WORD_IPA_OVERRIDES[key]))
+        symbols, stresses = _finalize_stress(
+            *_arpabet_tokens_to_ipa_stress(_WORD_IPA_OVERRIDES[key])
+        )
+        return symbols, stresses, "override"
 
     # Layer 2: CMUdict primary lexicon — all-or-nothing acceptance.
     cmu = _lookup_cmudict(key)
     if cmu is not None:
         if _cmudict_entry_is_valid(cmu):
             logger.debug("ipa_resolve word=%r source=cmudict", key)
-            return _finalize_stress(*_arpabet_tokens_to_ipa_stress(cmu))
+            symbols, stresses = _finalize_stress(*_arpabet_tokens_to_ipa_stress(cmu))
+            return symbols, stresses, "cmudict"
         else:
             logger.warning(
                 "ipa_resolve word=%r source=cmudict INVALID_TOKENS=%r — falling through",
                 key, cmu,
             )
 
+    # Layer 2.5: clitic 's — stem trong CMUdict → stem IPA + đuôi theo voicing.
+    if key.endswith("'s") and len(key) > 2:
+        stem = _lookup_cmudict(key[:-2])
+        if stem is not None and _cmudict_entry_is_valid(stem):
+            logger.debug("ipa_resolve word=%r source=cmudict (clitic 's)", key)
+            symbols, stresses = _finalize_stress(*_arpabet_tokens_to_ipa_stress(stem))
+            if symbols:
+                final = normalize_ipa(symbols[-1])
+                if final in _SIBILANTS_NORM:
+                    clitic = ["ɪ", "z"]
+                elif final in _VOICELESS_NORM:
+                    clitic = ["s"]
+                else:
+                    clitic = ["z"]
+                symbols = symbols + clitic
+                stresses = stresses + [None] * len(clitic)
+                return symbols, stresses, "cmudict"
+
     # Layer 3: eSpeak NG — deterministic rule-based G2P for OOV words.
     espeak = _espeak_word_to_symbols_stress(key)
     if espeak is not None:
         logger.debug("ipa_resolve word=%r source=espeak", key)
-        return espeak
+        symbols, stresses = espeak
+        return symbols, stresses, "espeak"
 
     # Layer 4: hard failure — callers must not treat [] as a valid pronunciation.
     logger.warning("ipa_resolve word=%r source=failed", key)
-    return [], []
+    return [], [], "failed"
 
 
 def text_to_ipa_sequence_with_spans(
@@ -186,14 +237,14 @@ def text_to_ipa_sequence_with_spans(
     display_stress: list[StressType | None] = []
     dropped: list[str] = []
     for word in words:
-        word_phones, word_stress = word_to_ipa_with_stress(word)
+        word_phones, word_stress, word_source = word_to_ipa_with_stress_source(word)
         if word_phones:
             start = len(phonemes)
             phonemes.extend(word_phones)
             stress.extend(word_stress)
             # Nhấn-hiển-thị dời về onset, tính theo PHẠM VI TỪ (onset không vượt biên từ).
             display_stress.extend(place_stress_at_onset(word_phones, word_stress))
-            spans.append(WordSpan(word, start, len(phonemes)))
+            spans.append(WordSpan(word, start, len(phonemes), word_source))
         else:
             # Word không tra được IPA (không có trong dict & g2p) — bỏ qua, ghi log.
             # Không thêm span → indices của các từ sau vẫn khớp với phoneme list.
@@ -240,12 +291,14 @@ __all__ = [
     "phonemes_match",
     "is_nasal_coda_linking",
     "is_real_error_substitution",
+    "is_elidable_stop",
     "deletion_severity",
     "deletion_penalty",
     # g2p
     "place_stress_at_onset",
     "word_to_ipa",
     "word_to_ipa_with_stress",
+    "word_to_ipa_with_stress_source",
     "text_to_ipa_sequence",
     "text_to_ipa_sequence_with_spans",
 ]

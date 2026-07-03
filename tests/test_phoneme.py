@@ -246,13 +246,14 @@ class TestTextToIpaSequenceWithSpans:
 
         # Force the middle word to be unmappable (→ empty) to test alignment stability.
         # CMUdict + eSpeak cover most tokens, so patch directly to trigger the drop path.
-        real = ipa_mod.word_to_ipa_with_stress
+        # spans dựng từ word_to_ipa_with_stress_source (bản _source) → patch bản đó.
+        real = ipa_mod.word_to_ipa_with_stress_source
 
-        def fake_word_to_ipa_with_stress(word):
-            return ([], []) if word.lower() == "drop" else real(word)
+        def fake_word_to_ipa_with_stress_source(word):
+            return ([], [], "failed") if word.lower() == "drop" else real(word)
 
         monkeypatch.setattr(
-            ipa_mod, "word_to_ipa_with_stress", fake_word_to_ipa_with_stress
+            ipa_mod, "word_to_ipa_with_stress_source", fake_word_to_ipa_with_stress_source
         )
 
         phonemes, spans, _stress, _disp = ipa_mod.text_to_ipa_sequence_with_spans("the drop fox")
@@ -1439,11 +1440,11 @@ class TestL1AwareScoring:
         assert match_l1_final_deletion("ʔ").multiplier == L1_MULTIPLIER_CAP
 
     def test_ref_is_coda_detection(self):
-        _, _, _, _, coda = _ref_metadata(["h", "æ", "n", "d"], [WordSpan("hand", 0, 4)], None)
+        _, _, _, _, coda, _, _ = _ref_metadata(["h", "æ", "n", "d"], [WordSpan("hand", 0, 4)], None)
         assert coda == [False, False, True, True]
-        _, _, _, _, coda2 = _ref_metadata(["s", "k", "uː", "l"], [WordSpan("school", 0, 4)], None)
+        _, _, _, _, coda2, _, _ = _ref_metadata(["s", "k", "uː", "l"], [WordSpan("school", 0, 4)], None)
         assert coda2 == [False, False, False, True]
-        _, _, _, _, coda3 = _ref_metadata(["t", "uː"], [WordSpan("to", 0, 2)], None)
+        _, _, _, _, coda3, _, _ = _ref_metadata(["t", "uː"], [WordSpan("to", 0, 2)], None)
         assert coda3 == [False, False]
 
     def test_correspondences_carry_l1_fields(self):

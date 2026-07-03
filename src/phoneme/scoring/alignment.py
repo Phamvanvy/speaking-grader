@@ -20,6 +20,7 @@ from ..ipa import (
 from ..l1_vietnamese import PenaltyReason
 from ..models import PhonemePoint
 from .constants import (
+    PHONEME_G2P_UNCERTAIN_CAP,
     PHONEME_LOW_CONF_FLOOR,
     PHONEME_RECOGNIZER_NOISE_CONF,
     PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
@@ -147,6 +148,8 @@ def _align_points(
     knee: float,
     ref_display_stress: list[str | None],
     *,
+    ref_g2p_uncertain: list[bool] | None = None,
+    ref_r_droppable: list[bool] | None = None,
     l1_enabled: bool = False,
     low_conf_floor: float = PHONEME_LOW_CONF_FLOOR,
     recognizer_noise_sim: float = PHONEME_RECOGNIZER_NOISE_SIM,
@@ -170,6 +173,14 @@ def _align_points(
     result: dict[int, tuple[PhonemePoint, float | None]] = {}
     raw_by_ref: dict[int, float] = {}
     insertion_count = 0
+    if ref_g2p_uncertain is None:
+        ref_g2p_uncertain = [False] * len(reference)
+    if ref_r_droppable is None:
+        # Fallback cho caller cũ: chỉ coda /r/ cuối từ (hành vi trước khi mở rộng).
+        ref_r_droppable = [
+            ref_is_coda[i] and normalize_ipa(reference[i]) == "r"
+            for i in range(len(reference))
+        ]
     for pred_idx, ref_idx in path:
         if ref_idx < 0:
             if pred_idx >= 0:
@@ -196,13 +207,14 @@ def _align_points(
                 penalty = 0.0
             elif (
                 accept_accent_variants
-                and ref_is_coda[ref_idx]
-                and normalize_ipa(ref_ph) == "r"
-                and is_vowel(pred_ph)
+                and ref_r_droppable[ref_idx]
+                and (is_vowel(pred_ph) or normalize_ipa(pred_ph) == "w")
             ):
-                # Accent "default": coda /r/ non-rhotic (Anh-Anh) — predicted là NGUYÊN ÂM
-                # (r-coloring residue / schwa lệch align lên /r/), KHÔNG phải lỗi. CHỈ khoan
-                # dung khi predicted là vowel; phụ âm thay /r/ (l/w/j/n...) VẪN là lỗi thật.
+                # Accent "default": /r/ non-prevocalic (coda âm tiết — cuối từ hoặc trước
+                # phụ âm: car, mo(r)ning) của giọng non-rhotic — predicted là NGUYÊN ÂM
+                # (r-coloring residue / schwa lệch align lên /r/) hoặc GLIDE /w/ (offglide
+                # của ʊə/aʊə: "our" /aʊər/→/ɑːw/), KHÔNG phải lỗi. Phụ âm khác thay /r/
+                # (l/j/n...) VẪN là lỗi thật; /r/ trước nguyên âm (red, very) không droppable.
                 point = PhonemePoint(
                     symbol=ref_ph, status="ok", stress=stress, display_stress=disp,
                     penalty_reason=PenaltyReason.ACCENT_VARIANT.value,
@@ -256,6 +268,15 @@ def _align_points(
                         penalty = 0.0
                         reason = PenaltyReason.LOW_CONFIDENCE_NEUTRALIZED.value
                         adjustment = 0.0
+                # Stage 5 g2p-uncertain cap: IPA chuẩn của từ lấy từ eSpeak (OOV/tên
+                # riêng) → reference tự nó là đoán → cap penalty về "low" (hidden-noise).
+                if (
+                    ref_g2p_uncertain[ref_idx]
+                    and penalty > PHONEME_G2P_UNCERTAIN_CAP
+                ):
+                    penalty = PHONEME_G2P_UNCERTAIN_CAP
+                    adjustment = penalty / base_sub if base_sub > 0 else 0.0
+                    reason = PenaltyReason.G2P_UNCERTAIN.value
                 point = PhonemePoint(
                     symbol=ref_ph, status="sub", heard=pred_ph,
                     severity=_severity_from_penalty(penalty), stress=stress,
@@ -268,6 +289,8 @@ def _align_points(
                 ref_ph, is_onset=ref_is_onset[ref_idx], is_coda=ref_is_coda[ref_idx],
                 stress=stress, display_stress=disp, l1_enabled=l1_enabled,
                 accept_accent_variants=accept_accent_variants,
+                g2p_uncertain=ref_g2p_uncertain[ref_idx],
+                r_droppable=ref_r_droppable[ref_idx],
             )
 
         existing = result.get(ref_idx)

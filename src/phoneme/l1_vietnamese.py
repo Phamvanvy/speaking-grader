@@ -29,6 +29,8 @@ class PenaltyReason(str, Enum):
     RECOGNIZER_NOISE = "recognizer_noise"      # sub bất khả thi + conf thấp → wav2vec hallucinate
     ACCENT_VARIANT = "accent_variant"          # biến thể giọng được chấp nhận (coda /r/ non-rhotic)
     LINKING_VARIANT = "linking_variant"        # nối âm: coda mũi function-word → stop homorganic trước nguyên âm
+    G2P_UNCERTAIN = "g2p_uncertain"            # IPA chuẩn từ eSpeak (OOV/tên riêng) → penalty cap về low
+    CONNECTED_SPEECH = "connected_speech"      # nuốt stop cuối từ khi nối từ (elision bản xứ) → không tính lỗi
 
 
 @dataclass(frozen=True)

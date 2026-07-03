@@ -16,6 +16,7 @@ import logging
 from collections.abc import Callable, Mapping
 
 from ..diagnostics import WordDiagnostic, build_word_diagnostics
+from ..ipa import is_elidable_stop, is_vowel, normalize_ipa
 from ..l1_vietnamese import PenaltyReason
 from ..models import (
     PhonemeError,
@@ -53,6 +54,67 @@ from .word_details import (
 logger = logging.getLogger("toeic.phoneme.scoring")
 
 
+def _connected_ok(point: PhonemePoint) -> PhonemePoint:
+    """Bản sao point với status "ok" + tag connected_speech (giữ symbol/stress)."""
+    return PhonemePoint(
+        symbol=point.symbol, status="ok", stress=point.stress,
+        display_stress=point.display_stress,
+        penalty_reason=PenaltyReason.CONNECTED_SPEECH.value,
+        penalty_adjustment=0.0,
+    )
+
+
+def _apply_connected_speech(
+    result: dict[int, tuple[PhonemePoint, float | None]],
+    raw_by_ref: dict[int, float],
+    reference: list[str],
+    spans: list[WordSpan],
+    ref_skipped: list[bool],
+) -> None:
+    """Chấp nhận nuốt STOP cuối từ khi nối từ (connected speech) — sửa `result` in-place.
+
+    Người bản xứ nuốt stop cuối từ trước phụ âm đầu từ kế ("test preparation" →
+    /tes-prep/). DTW khi đó tạo lỗi ảo theo 2 dạng — xử lý cả hai trên CẶP TỪ KỀ (a, b),
+    i = âm CUỐI của a, j = âm ĐẦU của b, điều kiện chung: reference[i] là stop elidable,
+    reference[j] là PHỤ ÂM, cả hai không bị skip:
+
+      - C1: result[i] là deletion → âm bị nuốt hợp lệ → flip "ok"/connected_speech.
+      - C2: result[i] là sub mà âm NGHE ĐƯỢC chính là onset của từ kế (test /tesp/:
+        t→p vì DTW gán /p/ của "preparation" lệch sang "test") → flip "ok"; và C3
+        (CHỈ đi kèm C2): nếu result[j] là deletion (âm /p/ đã bị "mượn" mất) → trả
+        lại "ok" cho onset từ kế luôn. C3 không bao giờ đứng một mình.
+
+    Guard giữ lỗi thật của học viên: CHỈ âm cuối từ (nuốt giữa từ vẫn bắt); CHỈ stop
+    (/s z l n/... cuối — lỗi L1 VN kinh điển — vẫn bắt); CHỈ khi từ kế mở đầu bằng
+    phụ âm (trước nguyên âm phải nối âm, nuốt là lỗi → vẫn bắt).
+    """
+    n = len(reference)
+    for a, b in zip(spans, spans[1:]):
+        i = a.end_idx - 1
+        j = b.start_idx
+        if i < a.start_idx or i >= n or not (b.start_idx <= j < min(b.end_idx, n)):
+            continue
+        if ref_skipped[i] or i not in result or j not in result:
+            continue
+        if is_vowel(reference[j]) or not is_elidable_stop(reference[i]):
+            continue
+        point, _pen = result[i]
+        if point.status == "del":
+            result[i] = (_connected_ok(point), 0.0)
+            raw_by_ref.pop(i, None)
+        elif (
+            point.status == "sub"
+            and point.heard is not None
+            and normalize_ipa(point.heard) == normalize_ipa(reference[j])
+        ):
+            result[i] = (_connected_ok(point), 0.0)
+            raw_by_ref.pop(i, None)
+            j_point, _jpen = result[j]
+            if j_point.status == "del" and not ref_skipped[j]:
+                result[j] = (_connected_ok(j_point), 0.0)
+                raw_by_ref.pop(j, None)
+
+
 def compute_phoneme_score(
     segments: list[PhonemeSegment],
     reference_phonemes: list[str],
@@ -71,6 +133,7 @@ def compute_phoneme_score(
     recognizer_noise_conf: float = PHONEME_RECOGNIZER_NOISE_CONF,
     recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
     accept_accent_variants: bool = False,
+    connected_speech_enabled: bool = True,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -112,6 +175,9 @@ def compute_phoneme_score(
             coda /r/ non-rhotic (Anh-Anh) — nuốt /r/ hoặc nguyên âm align lên /r/ → "ok" (ACCENT_VARIANT),
             KHÔNG trừ điểm. False (mặc định) = bit-for-bit như cũ. CHƯA phải union GB/US đầy đủ: các khác
             biệt còn lại đã được normalize_ipa() gộp; BATH (æ↔ɑ) cố ý không gộp (xem _score_deletion).
+        connected_speech_enabled: chấp nhận nuốt STOP cuối từ khi từ kế bắt đầu bằng phụ âm
+            (elision bản xứ, vd "test preparation" → /tes-prep/) — xem _apply_connected_speech.
+            False = hành vi cũ bit-for-bit.
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -123,9 +189,10 @@ def compute_phoneme_score(
     avg_confidence = (
         sum(predicted_conf) / len(predicted_conf) if predicted_conf else 0.0
     )
-    ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda = _ref_metadata(
-        reference_phonemes, reference_spans, reference_stress
-    )
+    (
+        ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda,
+        ref_g2p_uncertain, ref_r_droppable,
+    ) = _ref_metadata(reference_phonemes, reference_spans, reference_stress)
     # Nhấn-hiển-thị (dời về onset) song song reference — CHỈ để gắn PhonemePoint.display_stress.
     # Pad/cắt về đúng len(reference) như ref_stress; không tham gia bất kỳ tính toán điểm nào.
     n_ref = len(reference_phonemes)
@@ -152,6 +219,8 @@ def compute_phoneme_score(
             path, predicted_phonemes, predicted_conf, reference_phonemes,
             ref_word, ref_is_onset, ref_stress, ref_reducible, ref_skipped,
             ref_is_coda, confidence_knee, ref_display_stress,
+            ref_g2p_uncertain=ref_g2p_uncertain,
+            ref_r_droppable=ref_r_droppable,
             l1_enabled=l1_enabled, low_conf_floor=low_conf_floor,
             recognizer_noise_sim=recognizer_noise_sim,
             recognizer_noise_conf=recognizer_noise_conf,
@@ -175,9 +244,18 @@ def compute_phoneme_score(
                 is_coda=ref_is_coda[i], stress=stress, display_stress=disp,
                 l1_enabled=l1_enabled,
                 accept_accent_variants=accept_accent_variants,
+                g2p_uncertain=ref_g2p_uncertain[i],
+                r_droppable=ref_r_droppable[i],
             )
             result[i] = (point, pen)
             raw_by_ref[i] = raw
+
+    # Post-pass connected speech (SAU khi mọi ref index đã resolve — cần nhìn điểm
+    # của âm lân cận nên không làm được trong _align_points).
+    if connected_speech_enabled and reference_spans and not empty_prediction:
+        _apply_connected_speech(
+            result, raw_by_ref, reference_phonemes, reference_spans, ref_skipped
+        )
 
     # Tổng hợp: errors + counts + penalty (một nguồn → không lệch nhau).
     errors: list[PhonemeError] = []

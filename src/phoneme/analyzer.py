@@ -88,6 +88,7 @@ class HybridPhonemeAnalyzer:
         recognizer_noise_sim: float = PHONEME_RECOGNIZER_NOISE_SIM,
         recognizer_noise_conf: float = PHONEME_RECOGNIZER_NOISE_CONF,
         recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
+        connected_speech_enabled: bool = True,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         self._max_words = max_words
@@ -98,6 +99,7 @@ class HybridPhonemeAnalyzer:
         self._recognizer_noise_sim = recognizer_noise_sim
         self._recognizer_noise_conf = recognizer_noise_conf
         self._recognizer_noise_conf_vowel = recognizer_noise_conf_vowel
+        self._connected_speech_enabled = connected_speech_enabled
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
@@ -223,6 +225,7 @@ class HybridPhonemeAnalyzer:
                 recognizer_noise_conf=self._recognizer_noise_conf,
                 recognizer_noise_conf_vowel=self._recognizer_noise_conf_vowel,
                 accept_accent_variants=accept_accent_variants,
+                connected_speech_enabled=self._connected_speech_enabled,
             )
 
         logger.info(

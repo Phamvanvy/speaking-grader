@@ -24,7 +24,7 @@ from ..models import (
     WordSpan,
 )
 from ..reliability import SkipDecision
-from .constants import MAX_WORDS_RETURNED
+from .constants import MAX_WORDS_RETURNED, PHONEME_G2P_UNCERTAIN_CAP
 
 logger = logging.getLogger("toeic.phoneme.scoring")
 
@@ -68,8 +68,12 @@ def _ref_metadata(
     reference: list[str],
     spans: list[WordSpan] | None,
     stress: list[str | None] | None,
-) -> tuple[list[str | None], list[bool], list[str | None], list[bool], list[bool]]:
-    """Trả (ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda) song song reference.
+) -> tuple[
+    list[str | None], list[bool], list[str | None], list[bool], list[bool], list[bool],
+    list[bool],
+]:
+    """Trả (ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda,
+    ref_g2p_uncertain, ref_r_droppable) song song reference.
 
     - ref_word[i]: từ chứa âm i (None nếu không có spans / âm rơi ngoài span).
     - ref_is_onset[i]: True nếu âm i là phụ âm thuộc cụm ĐẦU TỪ (từ start tới
@@ -82,6 +86,14 @@ def _ref_metadata(
       NHẤT/đầu tiên → bird /bɜːd/ ɜ KHÔNG reducible (giữ lỗi thật), water -er ɜ thì có.
     - ref_is_coda[i]: True nếu âm i là phụ âm CUỐI TỪ (sau nguyên âm cuối cùng tới hết
       từ) — bổ sung của onset; dùng cho L1 final-consonant tolerance (hand n,d; school l).
+    - ref_g2p_uncertain[i]: True nếu IPA của từ chứa âm i lấy từ eSpeak G2P (OOV/tên
+      riêng, WordSpan.source == "espeak") → reference tự nó kém tin cậy, sub/del bị
+      cap penalty về "low" (PHONEME_G2P_UNCERTAIN_CAP).
+    - ref_r_droppable[i]: True nếu âm i là /r/ KHÔNG đứng trước nguyên âm trong cùng
+      từ (coda âm tiết: cuối từ HOẶC trước phụ âm — mo(r)ning, Satu(r)day). Giọng
+      non-rhotic (Anh-Anh) nuốt /r/ ở MỌI vị trí này chứ không chỉ cuối từ; dùng cho
+      accent_variant khi accept_accent_variants. /r/ trước nguyên âm (red, very)
+      KHÔNG droppable — nuốt là lỗi thật.
     """
     from ..ipa import FUNCTION_WORDS
 
@@ -90,6 +102,8 @@ def _ref_metadata(
     ref_is_onset: list[bool] = [False] * n
     ref_reducible: list[bool] = [False] * n
     ref_is_coda: list[bool] = [False] * n
+    ref_g2p_uncertain: list[bool] = [False] * n
+    ref_r_droppable: list[bool] = [False] * n
     ref_stress: list[str | None] = list(stress) if stress else [None] * n
     if len(ref_stress) < n:
         ref_stress += [None] * (n - len(ref_stress))
@@ -98,8 +112,17 @@ def _ref_metadata(
         for span in spans:
             lo, hi = span.start_idx, min(span.end_idx, n)
             in_func = span.word.lower().strip(".,;:!?\"'()[]{}") in FUNCTION_WORDS
+            g2p_uncertain = getattr(span, "source", "cmudict") == "espeak"
             for i in range(lo, hi):
                 ref_word[i] = span.word
+                if g2p_uncertain:
+                    ref_g2p_uncertain[i] = True
+                # /r/ không đứng trước nguyên âm TRONG CÙNG TỪ (cuối từ / trước phụ
+                # âm) = coda âm tiết → non-rhotic được nuốt (xem docstring).
+                if normalize_ipa(reference[i]) == "r" and (
+                    i == hi - 1 or not is_vowel(reference[i + 1])
+                ):
+                    ref_r_droppable[i] = True
             # Onset = các phụ âm liên tiếp từ đầu từ cho tới nguyên âm đầu tiên.
             for i in range(lo, hi):
                 if is_vowel(reference[i]):
@@ -118,7 +141,10 @@ def _ref_metadata(
                 for i in range(vowels[-1] + 1, hi):
                     ref_is_coda[i] = True
 
-    return ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda
+    return (
+        ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda,
+        ref_g2p_uncertain, ref_r_droppable,
+    )
 
 
 def _resolve_skips(
@@ -311,6 +337,8 @@ def _score_deletion(
     l1_enabled: bool,
     display_stress: str | None = None,
     accept_accent_variants: bool = False,
+    g2p_uncertain: bool = False,
+    r_droppable: bool = False,
 ) -> tuple[PhonemePoint, float, float]:
     """1 âm reference bị THIẾU → (PhonemePoint, penalty đã điều chỉnh, penalty gốc).
 
@@ -319,13 +347,21 @@ def _score_deletion(
     không có predicted segment nên không có confidence. Dùng chung cho _align_points và
     vòng bổ sung deletion trong compute_phoneme_score.
 
-    `accept_accent_variants` (chế độ accent "default"): coda /r/ bị THIẾU = giọng Anh-Anh
-    non-rhotic (car /kɑr/→/kɑ/) → KHÔNG phải lỗi → trả "ok" (penalty 0), tag ACCENT_VARIANT.
-    LƯU Ý: đây CHƯA phải "union" đầy đủ GB/US — chỉ chấp nhận nuốt coda /r/. Các khác biệt
-    hệ thống GB/US còn lại (oʊ↔əʊ, ɒ/ɑ↔ɔ, ɚ/ɝ↔ə, ɛ↔e) đã được normalize_ipa() gộp sẵn nên
-    tự khớp. BATH split (æ↔ɑ) CỐ Ý không gộp (sau normalize thành æ↔ɔ, lẫn với lỗi thật).
+    `accept_accent_variants` (chế độ accent "default"): /r/ non-prevocalic bị THIẾU =
+    giọng Anh-Anh non-rhotic → KHÔNG phải lỗi → trả "ok" (penalty 0), tag ACCENT_VARIANT.
+    Áp cho `r_droppable` (coda ÂM TIẾT: cuối từ HOẶC trước phụ âm trong cùng từ —
+    car /kɑr/→/kɑ/, mo(r)ning, Satu(r)day); giữ thêm điều kiện cũ (is_coda & /r/) làm
+    fallback cho caller chưa truyền r_droppable. LƯU Ý: đây CHƯA phải "union" đầy đủ
+    GB/US. Các khác biệt hệ thống GB/US còn lại (oʊ↔əʊ, ɒ/ɑ↔ɔ, ɚ/ɝ↔ə, ɛ↔e) đã được
+    normalize_ipa() gộp sẵn nên tự khớp. BATH split (æ↔ɑ) CỐ Ý không gộp (sau normalize
+    thành æ↔ɔ, lẫn với lỗi thật).
+
+    `g2p_uncertain`: IPA của từ lấy từ eSpeak (OOV/tên riêng) → reference tự nó là đoán →
+    cap penalty về PHONEME_G2P_UNCERTAIN_CAP (severity "low", vào nhóm hidden-noise).
     """
-    if accept_accent_variants and is_coda and normalize_ipa(ref_ph) == "r":
+    if accept_accent_variants and (
+        r_droppable or (is_coda and normalize_ipa(ref_ph) == "r")
+    ):
         point = PhonemePoint(
             symbol=ref_ph, status="ok", stress=stress, display_stress=display_stress,
             penalty_reason=PenaltyReason.ACCENT_VARIANT.value, penalty_adjustment=0.0,
@@ -344,6 +380,11 @@ def _score_deletion(
             adjustment = match.multiplier
             reason = PenaltyReason.L1_FINAL_DELETION.value
             severity = _severity_from_penalty(penalty)  # severity khớp penalty đã giảm
+    if g2p_uncertain and penalty > PHONEME_G2P_UNCERTAIN_CAP:
+        penalty = PHONEME_G2P_UNCERTAIN_CAP
+        adjustment = (penalty / raw) if raw > 0 else 0.0
+        reason = PenaltyReason.G2P_UNCERTAIN.value
+        severity = _severity_from_penalty(penalty)  # < 0.3 → "low"
     point = PhonemePoint(
         symbol=ref_ph, status="del", severity=severity, stress=stress,
         display_stress=display_stress,

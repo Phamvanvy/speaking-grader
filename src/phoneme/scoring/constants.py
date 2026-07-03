@@ -47,3 +47,10 @@ PHONEME_LOW_CONF_FLOOR: Final[float] = 0.40
 PHONEME_RECOGNIZER_NOISE_SIM: Final[float] = 0.2
 PHONEME_RECOGNIZER_NOISE_CONF: Final[float] = 0.6        # phụ âm
 PHONEME_RECOGNIZER_NOISE_CONF_VOWEL: Final[float] = 0.45  # nguyên âm (confidence nền thấp hơn)
+
+# Từ có IPA chuẩn lấy từ eSpeak G2P (OOV/tên riêng — WordSpan.source == "espeak"):
+# bản thân reference đã là ĐOÁN nên sub/del trên từ đó không đáng tin là lỗi người đọc.
+# Cap penalty dưới ngưỡng "medium" (0.3, xem _severity_from_penalty) → severity "low"
+# → UI xếp vào "Hidden recognizer noise", không tô đỏ. (Free-speech thì các từ này bị
+# skip hẳn ở tầng reliability; cap này chủ yếu cho chế độ CÓ script.)
+PHONEME_G2P_UNCERTAIN_CAP: Final[float] = 0.2
