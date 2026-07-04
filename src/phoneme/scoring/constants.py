@@ -54,3 +54,25 @@ PHONEME_RECOGNIZER_NOISE_CONF_VOWEL: Final[float] = 0.45  # nguyên âm (confide
 # → UI xếp vào "Hidden recognizer noise", không tô đỏ. (Free-speech thì các từ này bị
 # skip hẳn ở tầng reliability; cap này chủ yếu cho chế độ CÓ script.)
 PHONEME_G2P_UNCERTAIN_CAP: Final[float] = 0.2
+
+# Coverage gate (Track A — "Word Reliability Gate" đã hứa ở ghi chú trên): từ có 100%
+# âm KHÔNG-skip là "del" (coverage=0) trong khi Whisper (LM-biased, nguồn ĐỘC LẬP) đã
+# match từ đó trong transcript → khả năng cao wav2vec collapse trên từ ngắn/đọc lướt,
+# không phải học viên bỏ từ. ~4.4% tổng số từ (outputs/phoneme_telemetry.jsonl, 5905 từ).
+# Guard 3 lớp (xem _apply_coverage_gate): (a) chỉ từ ≤ MAX_LEN âm (phủ hầu hết function
+# words, tránh cap nhầm từ NỘI DUNG dài bị bỏ hẳn); (b) KHÔNG có wav2vec segment nào
+# overlap Whisper window của từ (có âm trong vùng đó = drift/lỗi thật, không phải im
+# lặng); (c) Whisper word prob ≥ MIN_ASR_PROB (transcript KHÔNG phải ground truth tuyệt
+# đối — thiếu prob/window thì không cap). Cap dưới "medium" (0.3) → severity "low" →
+# Hidden recognizer noise, không tô đỏ oan.
+PHONEME_COVERAGE_GATE_CAP: Final[float] = 0.2
+PHONEME_COVERAGE_GATE_MAX_LEN: Final[int] = 4
+PHONEME_COVERAGE_GATE_MIN_ASR_PROB: Final[float] = 0.60
+
+# Drift cap (Track B): sub có predicted segment NGOÀI cửa sổ Whisper của chính từ đó
+# (±DRIFT_WINDOW_PAD_SEC, dùng chung is_within_word_window với telemetry) → khả năng
+# DTW "mượn" âm của từ kế bên, không phải lỗi phát âm thật. Đo lại trên 5905 từ:
+# drift_fraction = 711/3324 = 21.4% (vẫn dưới ngưỡng kill 40% của PR3-0 → KHÔNG build
+# lại alignment, chỉ cap severity dựa trên evidence diagnostics đã tính sẵn). Cùng cap
+# 0.2 với G2P_UNCERTAIN để nhất quán UI (Hidden recognizer noise).
+PHONEME_DRIFT_SUB_CAP: Final[float] = 0.2

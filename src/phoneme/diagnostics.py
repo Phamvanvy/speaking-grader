@@ -52,40 +52,53 @@ DRIFT_WINDOW_PAD_SEC: float = 0.08
 _WORD_TOKEN_RE = re.compile(r"[a-z0-9']+")
 
 
+def is_within_word_window(
+    pred_start: float,
+    pred_end: float,
+    window: tuple[float, float],
+    pad: float = DRIFT_WINDOW_PAD_SEC,
+) -> bool:
+    """True nếu predicted segment [pred_start, pred_end] overlap cửa sổ từ (±pad).
+
+    Một nguồn DUY NHẤT cho phép so overlap segment↔window: dùng bởi telemetry drift
+    (build_word_diagnostics) VÀ các gate scoring (coverage/drift cap) để hai bên
+    không bao giờ lệch định nghĩa "trong từ".
+    """
+    return pred_end >= window[0] - pad and pred_start <= window[1] + pad
+
+
 def _normalize_word(text: str) -> str:
     """Chuẩn hoá 1 từ → 1 token (ghép các mảnh [a-z0-9']); '' nếu toàn dấu câu."""
     return "".join(_WORD_TOKEN_RE.findall((text or "").lower()))
 
 
-def map_reference_words_to_windows(
+def map_reference_words_to_indices(
     reference_words: list[str],
-    transcript_words: list[tuple[str, float, float]],
-) -> dict[int, tuple[float, float]]:
-    """Map CHỈ SỐ TỪ THAM CHIẾU (occurrence) → cửa sổ thời gian Whisper (start, end).
+    transcript_texts: list[str],
+) -> dict[int, int]:
+    """Map CHỈ SỐ TỪ THAM CHIẾU (occurrence) → CHỈ SỐ Whisper word đã khớp.
 
-    DIAGNOSTIC ONLY (PR3-0). Dùng CÙNG kỹ thuật difflib.SequenceMatcher trên 2 danh
-    sách từ như Recognition Reliability (reliability.assess_reliability) — KHÔNG tạo
-    alignment thứ hai độc lập; chỉ lấy timestamp của từ transcript đã khớp:
-      - 'equal'  : ref[i] khớp hyp[j] theo vị trí → window = hyp_time[j].
-      - 'replace': mỗi ref[i] lấy hyp[j] có ratio cao nhất trong block → window đó.
-      - 'delete' : từ script không có trong transcript → KHÔNG có window (unalignable;
-        cũng chính là từ Recognition Reliability skip) → bỏ khỏi map.
+    Lõi dùng chung cho map_reference_words_to_windows (timestamp) và word_probs
+    (probability, guard coverage gate) — MỘT alignment duy nhất, hai bên đọc field
+    khác nhau của cùng transcript word, không bao giờ lệch nhau. Dùng CÙNG kỹ thuật
+    difflib.SequenceMatcher trên 2 danh sách từ như Recognition Reliability
+    (reliability.assess_reliability) — KHÔNG tạo alignment thứ hai độc lập:
+      - 'equal'  : ref[i] khớp hyp[j] theo vị trí → index j.
+      - 'replace': mỗi ref[i] lấy hyp[j] có ratio cao nhất trong block.
+      - 'delete' : từ script không có trong transcript → KHÔNG có key (unalignable;
+        cũng chính là từ Recognition Reliability skip).
       - 'insert' : transcript thừa từ → không có ref tương ứng → bỏ qua.
-
-    `transcript_words`: list (text, start_s, end_s) lấy thẳng từ Whisper word timestamps.
-    Trả {word_index: (start_s, end_s)}; chỉ số khớp WordSpan của scorer (cùng nguồn từ).
     """
-    if not reference_words or not transcript_words:
+    if not reference_words or not transcript_texts:
         return {}
     ref_norm = [w.lower() for w in reference_words]
-    hyp_norm = [_normalize_word(t) for (t, _s, _e) in transcript_words]
-    windows: dict[int, tuple[float, float]] = {}
+    hyp_norm = [_normalize_word(t) for t in transcript_texts]
+    indices: dict[int, int] = {}
     matcher = difflib.SequenceMatcher(a=ref_norm, b=hyp_norm, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             for off in range(i2 - i1):
-                _t, s, e = transcript_words[j1 + off]
-                windows[i1 + off] = (float(s), float(e))
+                indices[i1 + off] = j1 + off
         elif tag == "replace":
             for i in range(i1, i2):
                 best_j, best_ratio = -1, -1.0
@@ -94,10 +107,28 @@ def map_reference_words_to_windows(
                     if r > best_ratio:
                         best_j, best_ratio = j, r
                 if best_j >= 0:
-                    _t, s, e = transcript_words[best_j]
-                    windows[i] = (float(s), float(e))
-        # 'delete' / 'insert' → không có window
-    return windows
+                    indices[i] = best_j
+        # 'delete' / 'insert' → không có key
+    return indices
+
+
+def map_reference_words_to_windows(
+    reference_words: list[str],
+    transcript_words: list[tuple[str, float, float]],
+) -> dict[int, tuple[float, float]]:
+    """Map CHỈ SỐ TỪ THAM CHIẾU (occurrence) → cửa sổ thời gian Whisper (start, end).
+
+    Wrapper trên map_reference_words_to_indices (xem docstring đó cho quy tắc khớp).
+    `transcript_words`: list (text, start_s, end_s) lấy thẳng từ Whisper word timestamps.
+    Trả {word_index: (start_s, end_s)}; chỉ số khớp WordSpan của scorer (cùng nguồn từ).
+    """
+    indices = map_reference_words_to_indices(
+        reference_words, [t for (t, _s, _e) in transcript_words]
+    )
+    return {
+        i: (float(transcript_words[j][1]), float(transcript_words[j][2]))
+        for i, j in indices.items()
+    }
 
 
 @dataclass(frozen=True)
@@ -241,7 +272,7 @@ def build_word_diagnostics(
             if (status == "sub" and win is not None and predicted_times is not None
                     and pi is not None and pi < len(predicted_times)):
                 ps, pe = predicted_times[pi]
-                if pe >= win[0] - pad and ps <= win[1] + pad:  # overlap → trong từ
+                if is_within_word_window(ps, pe, win, pad):  # overlap → trong từ
                     sub_in += 1
                 else:
                     sub_out += 1

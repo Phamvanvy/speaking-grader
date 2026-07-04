@@ -6,8 +6,10 @@ cho mỗi reference index (qua phonemes_match / phoneme_similarity / confidence 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Final
 
+from ..diagnostics import DRIFT_WINDOW_PAD_SEC, is_within_word_window
 from ..ipa import (
     FUNCTION_WORDS,
     is_nasal_coda_linking,
@@ -18,8 +20,9 @@ from ..ipa import (
     phonemes_match,
 )
 from ..l1_vietnamese import PenaltyReason
-from ..models import PhonemePoint
+from ..models import PhonemePoint, WordSpan
 from .constants import (
+    PHONEME_DRIFT_SUB_CAP,
     PHONEME_G2P_UNCERTAIN_CAP,
     PHONEME_LOW_CONF_FLOOR,
     PHONEME_RECOGNIZER_NOISE_CONF,
@@ -301,3 +304,70 @@ def _align_points(
             elif ref_idx in raw_by_ref:
                 del raw_by_ref[ref_idx]  # point được thay = ok/skipped → bỏ raw cũ
     return result, insertion_count, raw_by_ref
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Drift cap (Track B): sub có predicted segment NGOÀI window Whisper của từ
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _apply_drift_cap(
+    result: dict[int, tuple[PhonemePoint, float | None]],
+    raw_by_ref: dict[int, float],
+    path: list[tuple[int, int]],
+    reference: list[str],
+    spans: list[WordSpan],
+    predicted_times: list[tuple[float, float]],
+    word_windows: Mapping[int, tuple[float, float]] | None,
+    *,
+    pad: float = DRIFT_WINDOW_PAD_SEC,
+    cap: float = PHONEME_DRIFT_SUB_CAP,
+) -> None:
+    """Cap penalty các sub NGHI DRIFT — predicted segment nằm ngoài cửa sổ Whisper của
+    chính từ đó (±pad) → khả năng DTW "mượn" âm từ kế bên chứ không phải lỗi phát âm.
+    Cùng evidence với telemetry `sub_outside_window` (is_within_word_window dùng chung),
+    nay promote vào scoring (opt-in qua drift_cap_enabled). Mutate `result` in-place.
+
+    Safe no-op khi word_windows None/rỗng (giữ contract hôm nay). Precedence: chỉ HẠ
+    penalty (`penalty > cap`) — sub đã penalty 0 (connected_speech/recognizer_noise/…)
+    hoặc đã cap 0.2 (g2p_uncertain) giữ nguyên reason cũ. Chỉ đụng status "sub" —
+    disjoint với coverage gate (chỉ "del").
+    """
+    if not word_windows or not spans or not path:
+        return
+    n = len(reference)
+    ref_to_span = [-1] * n
+    for k, s in enumerate(spans):
+        for i in range(s.start_idx, min(s.end_idx, n)):
+            ref_to_span[i] = k
+    # Cặp diagonal cuối cùng cho mỗi ref_idx (khớp pred_for_ref của diagnostics).
+    pred_for_ref: dict[int, int] = {}
+    for pred_idx, ref_idx in path:
+        if ref_idx >= 0 and pred_idx >= 0:
+            pred_for_ref[ref_idx] = pred_idx
+
+    for ref_idx, (point, penalty) in result.items():
+        if point.status != "sub" or penalty is None or penalty <= cap:
+            continue
+        if not (0 <= ref_idx < n):
+            continue
+        k = ref_to_span[ref_idx]
+        if k < 0:
+            continue
+        win = word_windows.get(k)
+        pi = pred_for_ref.get(ref_idx)
+        if win is None or pi is None or pi >= len(predicted_times):
+            continue
+        ps, pe = predicted_times[pi]
+        if is_within_word_window(ps, pe, win, pad):
+            continue  # segment trong từ → hallucination/lỗi thật, KHÔNG cap
+        raw = raw_by_ref.get(ref_idx, penalty)
+        result[ref_idx] = (
+            PhonemePoint(
+                symbol=point.symbol, status="sub", heard=point.heard,
+                severity=_severity_from_penalty(cap),
+                stress=point.stress, display_stress=point.display_stress,
+                penalty_reason=PenaltyReason.DRIFT_SUSPECTED.value,
+                penalty_adjustment=round(cap / raw, 4) if raw > 0 else 0.0,
+            ),
+            cap,
+        )

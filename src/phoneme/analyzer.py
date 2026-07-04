@@ -19,7 +19,7 @@ import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from .diagnostics import WordDiagnostic
+from .diagnostics import DRIFT_WINDOW_PAD_SEC, WordDiagnostic
 from .ipa import text_to_ipa_sequence_with_spans
 from .models import PhonemeResult
 from .reliability import SkipDecision
@@ -32,6 +32,12 @@ from .scoring import (
     PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
     PHONEME_RECOGNIZER_NOISE_SIM,
     compute_phoneme_score,
+)
+from .scoring.constants import (
+    PHONEME_COVERAGE_GATE_CAP,
+    PHONEME_COVERAGE_GATE_MAX_LEN,
+    PHONEME_COVERAGE_GATE_MIN_ASR_PROB,
+    PHONEME_DRIFT_SUB_CAP,
 )
 from .wav2vec_backend import (
     DEFAULT_WAV2VEC_MODEL,
@@ -89,6 +95,13 @@ class HybridPhonemeAnalyzer:
         recognizer_noise_conf: float = PHONEME_RECOGNIZER_NOISE_CONF,
         recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
         connected_speech_enabled: bool = True,
+        coverage_gate_enabled: bool = False,
+        coverage_gate_cap: float = PHONEME_COVERAGE_GATE_CAP,
+        coverage_gate_max_len: int = PHONEME_COVERAGE_GATE_MAX_LEN,
+        coverage_gate_min_asr_prob: float = PHONEME_COVERAGE_GATE_MIN_ASR_PROB,
+        drift_cap_enabled: bool = False,
+        drift_sub_cap: float = PHONEME_DRIFT_SUB_CAP,
+        drift_window_pad: float = DRIFT_WINDOW_PAD_SEC,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         self._max_words = max_words
@@ -100,6 +113,13 @@ class HybridPhonemeAnalyzer:
         self._recognizer_noise_conf = recognizer_noise_conf
         self._recognizer_noise_conf_vowel = recognizer_noise_conf_vowel
         self._connected_speech_enabled = connected_speech_enabled
+        self._coverage_gate_enabled = coverage_gate_enabled
+        self._coverage_gate_cap = coverage_gate_cap
+        self._coverage_gate_max_len = coverage_gate_max_len
+        self._coverage_gate_min_asr_prob = coverage_gate_min_asr_prob
+        self._drift_cap_enabled = drift_cap_enabled
+        self._drift_sub_cap = drift_sub_cap
+        self._drift_window_pad = drift_window_pad
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
@@ -126,6 +146,7 @@ class HybridPhonemeAnalyzer:
         skips: Mapping[int, SkipDecision] | None = None,
         diagnostics_sink: Callable[[list[WordDiagnostic]], None] | None = None,
         word_windows: Mapping[int, tuple[float, float]] | None = None,
+        word_probs: Mapping[int, float] | None = None,
         accent: str = "default",
     ) -> PhonemeResult:
         """Phân tích phonemes trong audio, optional so với reference text.
@@ -140,7 +161,11 @@ class HybridPhonemeAnalyzer:
             diagnostics_sink: optional sink nhận WordDiagnostic để ghi telemetry (PR2);
                 chỉ truyền xuống scorer, KHÔNG ảnh hưởng điểm.
             word_windows: optional (PR3-0) — cửa sổ thời gian Whisper theo chỉ số từ chuẩn,
-                cho telemetry drift-vs-hallucination; chỉ truyền xuống scorer, KHÔNG ảnh hưởng điểm.
+                cho telemetry drift-vs-hallucination + evidence cho coverage gate/drift cap
+                (khi flags bật — xem compute_phoneme_score); flags mặc định OFF thì KHÔNG
+                ảnh hưởng điểm.
+            word_probs: optional — Whisper word probability theo chỉ số từ chuẩn (cùng
+                nguồn word_windows); guard cho coverage gate, chỉ truyền xuống scorer.
             accent: "default" | "gb" | "us" (giọng tham chiếu phát âm từ UI). CHỈ "default" bật
                 accept_accent_variants (chấp nhận coda /r/ non-rhotic — xem compute_phoneme_score).
                 "gb"/"us" giữ nguyên cách chấm cũ (chuẩn Mỹ). Map mode-name → bool Ở ĐÂY để scorer
@@ -226,6 +251,14 @@ class HybridPhonemeAnalyzer:
                 recognizer_noise_conf_vowel=self._recognizer_noise_conf_vowel,
                 accept_accent_variants=accept_accent_variants,
                 connected_speech_enabled=self._connected_speech_enabled,
+                word_probs=word_probs,
+                coverage_gate_enabled=self._coverage_gate_enabled,
+                coverage_gate_cap=self._coverage_gate_cap,
+                coverage_gate_max_len=self._coverage_gate_max_len,
+                coverage_gate_min_asr_prob=self._coverage_gate_min_asr_prob,
+                drift_cap_enabled=self._drift_cap_enabled,
+                drift_sub_cap=self._drift_sub_cap,
+                drift_window_pad=self._drift_window_pad,
             )
 
         logger.info(

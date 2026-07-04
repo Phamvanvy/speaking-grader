@@ -15,7 +15,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Mapping
 
-from ..diagnostics import WordDiagnostic, build_word_diagnostics
+from ..diagnostics import (
+    DRIFT_WINDOW_PAD_SEC,
+    WordDiagnostic,
+    build_word_diagnostics,
+)
 from ..ipa import is_elidable_stop, is_vowel, normalize_ipa
 from ..l1_vietnamese import PenaltyReason
 from ..models import (
@@ -27,11 +31,15 @@ from ..models import (
     WordSpan,
 )
 from ..reliability import SkipDecision
-from .alignment import _align_points, _dtw_align
+from .alignment import _align_points, _apply_drift_cap, _dtw_align
 from .constants import (
     MAX_ERRORS_RETURNED,
     MAX_WORDS_RETURNED,
     PHONEME_CONFIDENCE_KNEE,
+    PHONEME_COVERAGE_GATE_CAP,
+    PHONEME_COVERAGE_GATE_MAX_LEN,
+    PHONEME_COVERAGE_GATE_MIN_ASR_PROB,
+    PHONEME_DRIFT_SUB_CAP,
     PHONEME_L1_MIN_CONFIDENCE,
     PHONEME_LOW_CONF_FLOOR,
     PHONEME_RECOGNIZER_NOISE_CONF,
@@ -41,6 +49,7 @@ from .constants import (
 from .word_details import (
     _WORD_PLAY_LEAD,
     _WORD_PLAY_TRAIL,
+    _apply_coverage_gate,
     _build_word_details,
     _pad_and_clamp_windows,
     _ref_metadata,
@@ -134,6 +143,14 @@ def compute_phoneme_score(
     recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
     accept_accent_variants: bool = False,
     connected_speech_enabled: bool = True,
+    word_probs: Mapping[int, float] | None = None,
+    coverage_gate_enabled: bool = False,
+    coverage_gate_cap: float = PHONEME_COVERAGE_GATE_CAP,
+    coverage_gate_max_len: int = PHONEME_COVERAGE_GATE_MAX_LEN,
+    coverage_gate_min_asr_prob: float = PHONEME_COVERAGE_GATE_MIN_ASR_PROB,
+    drift_cap_enabled: bool = False,
+    drift_sub_cap: float = PHONEME_DRIFT_SUB_CAP,
+    drift_window_pad: float = DRIFT_WINDOW_PAD_SEC,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -156,11 +173,14 @@ def compute_phoneme_score(
         diagnostics_sink: optional — nhận list[WordDiagnostic] để ghi telemetry (PR2).
             CHỈ để quan sát; KHÔNG ảnh hưởng điểm. None = không tính telemetry (zero overhead).
         word_windows: optional — cửa sổ thời gian Whisper theo CHỈ SỐ TỪ chuẩn (khớp
-            reference_spans). Dùng cho (a) telemetry drift-vs-hallucination (PR3-0) và
+            reference_spans). Dùng cho (a) telemetry drift-vs-hallucination (PR3-0),
             (b) FALLBACK timestamp phát lại từng từ cho từ toàn deletion (wav2vec không
-            nghe ra segment). Nguồn CHÍNH cho start/end phát lại là wav2vec segment
-            (_word_segment_times); Whisper chỉ bù chỗ thiếu. KHÔNG ảnh hưởng điểm.
-            Telemetry drift vẫn cần thêm diagnostics_sink.
+            nghe ra segment), và (c) evidence cho coverage gate + drift cap KHI các flag
+            tương ứng bật. Nguồn CHÍNH cho start/end phát lại là wav2vec segment
+            (_word_segment_times); Whisper chỉ bù chỗ thiếu. Với flags mặc định (OFF),
+            KHÔNG ảnh hưởng điểm — bật coverage_gate_enabled/drift_cap_enabled thì CÓ
+            (thay đổi có chủ đích, xem 2 gate bên dưới). Telemetry drift vẫn cần thêm
+            diagnostics_sink.
         l1_enabled: bật L1-aware layer (Vietnamese). False (mặc định) = hành vi y hệt trước
             (bit-for-bit). True = giảm penalty cho nuốt phụ âm cuối kiểu L1 + trung hoà sub
             confidence rất thấp; vẫn hiển thị (accent note). KHÔNG skip (Reliability mới được skip).
@@ -178,6 +198,22 @@ def compute_phoneme_score(
         connected_speech_enabled: chấp nhận nuốt STOP cuối từ khi từ kế bắt đầu bằng phụ âm
             (elision bản xứ, vd "test preparation" → /tes-prep/) — xem _apply_connected_speech.
             False = hành vi cũ bit-for-bit.
+        word_probs: optional — Whisper word probability theo CHỈ SỐ TỪ chuẩn (khớp
+            reference_spans, cùng nguồn word_windows). CHỈ dùng làm guard cho coverage
+            gate (không coi transcript là ground truth tuyệt đối).
+        coverage_gate_enabled: bật coverage gate (Track A) — từ bị "del" 100% + wav2vec
+            im lặng trong window + Whisper prob đủ cao → cap penalty về coverage_gate_cap
+            (severity "low", COVERAGE_COLLAPSE). False (mặc định) = bit-for-bit như cũ.
+            Xem _apply_coverage_gate (word_details.py).
+        drift_cap_enabled: bật drift cap (Track B) — sub có predicted segment NGOÀI
+            window Whisper của từ (±drift_window_pad) → cap penalty về drift_sub_cap
+            (severity "low", DRIFT_SUSPECTED). False (mặc định) = bit-for-bit như cũ.
+            Xem _apply_drift_cap (alignment.py). An toàn khi word_windows thiếu (no-op).
+
+    Precedence giữa các gate: mọi gate chỉ HẠ penalty, không nâng; post-pass chạy tuần
+    tự connected_speech → coverage_gate (chỉ del) → drift_cap (chỉ sub); penalty_reason
+    = gate cuối cùng THỰC SỰ thay đổi penalty (point đã 0 hoặc đã cap ≤ mức mới giữ
+    nguyên reason cũ).
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -186,6 +222,8 @@ def compute_phoneme_score(
 
     predicted_phonemes = [s.phoneme for s in segments]
     predicted_conf = [s.confidence for s in segments]
+    # Dùng chung cho coverage gate / drift cap / telemetry (hoist khỏi nhánh diagnostics).
+    predicted_times = [(s.start, s.end) for s in segments]
     avg_confidence = (
         sum(predicted_conf) / len(predicted_conf) if predicted_conf else 0.0
     )
@@ -257,12 +295,32 @@ def compute_phoneme_score(
             result, raw_by_ref, reference_phonemes, reference_spans, ref_skipped
         )
 
+    # Post-pass coverage gate (Track A, chỉ del) rồi drift cap (Track B, chỉ sub) —
+    # disjoint theo status nên thứ tự giao hoán; cả hai chỉ HẠ penalty (precedence).
+    if coverage_gate_enabled and reference_spans and not empty_prediction:
+        # Segment đã có chủ (cặp diagonal với ref BẤT KỲ) không tính là acoustic
+        # evidence — chỉ insertion trong window mới chặn cap (xem _apply_coverage_gate).
+        claimed_preds = frozenset(p for p, r in path if p >= 0 and r >= 0)
+        _apply_coverage_gate(
+            result, raw_by_ref, reference_phonemes, reference_spans, ref_skipped,
+            predicted_times, word_windows, word_probs, claimed_preds,
+            max_len=coverage_gate_max_len, cap=coverage_gate_cap,
+            min_asr_prob=coverage_gate_min_asr_prob, pad=drift_window_pad,
+        )
+    if drift_cap_enabled and reference_spans and not empty_prediction:
+        _apply_drift_cap(
+            result, raw_by_ref, path, reference_phonemes, reference_spans,
+            predicted_times, word_windows,
+            pad=drift_window_pad, cap=drift_sub_cap,
+        )
+
     # Tổng hợp: errors + counts + penalty (một nguồn → không lệch nhau).
     errors: list[PhonemeError] = []
     matches = substitutions = deletions = 0
     total_penalty = 0.0
     raw_penalty_sum = 0.0
     l1_adjusted_count = low_conf_neutralized_count = recognizer_noise_count = 0
+    coverage_collapse_count = drift_capped_count = 0
     scored = 0
     point_by_ref: dict[int, PhonemePoint] = {}
     for i in range(len(reference_phonemes)):
@@ -296,6 +354,10 @@ def compute_phoneme_score(
             low_conf_neutralized_count += 1
         elif point.penalty_reason == PenaltyReason.RECOGNIZER_NOISE.value:
             recognizer_noise_count += 1
+        elif point.penalty_reason == PenaltyReason.COVERAGE_COLLAPSE.value:
+            coverage_collapse_count += 1
+        elif point.penalty_reason == PenaltyReason.DRIFT_SUSPECTED.value:
+            drift_capped_count += 1
 
     if empty_prediction:
         accuracy = 0.0
@@ -322,7 +384,6 @@ def compute_phoneme_score(
 
     # Telemetry (PR2/PR3-0) — DIAGNOSTIC ONLY, chỉ tính khi có sink (zero overhead khi tắt).
     if diagnostics_sink is not None:
-        predicted_times = [(s.start, s.end) for s in segments]
         diagnostics_sink(build_word_diagnostics(
             path, predicted_phonemes, predicted_conf, reference_phonemes,
             reference_spans, result, span_skip_reason,
@@ -340,10 +401,12 @@ def compute_phoneme_score(
 
     logger.info(
         "Phoneme score: accuracy=%.2f | matches=%d | subs=%d | del=%d | ins=%d | "
-        "skipped_words=%d | ref=%d | pred=%d | l1_adj=%d | low_conf_neut=%d | recog_noise=%d",
+        "skipped_words=%d | ref=%d | pred=%d | l1_adj=%d | low_conf_neut=%d | "
+        "recog_noise=%d | cov_collapse=%d | drift_capped=%d",
         accuracy, matches, substitutions, deletions, insertion_count,
         len(span_skip_reason), len(reference_phonemes), len(predicted_phonemes),
         l1_adjusted_count, low_conf_neutralized_count, recognizer_noise_count,
+        coverage_collapse_count, drift_capped_count,
     )
 
     return PhonemeScore(
@@ -364,6 +427,8 @@ def compute_phoneme_score(
         low_conf_neutralized_count=low_conf_neutralized_count,
         recognizer_noise_count=recognizer_noise_count,
         l1_adjustment_ratio=l1_adjustment_ratio,
+        coverage_collapse_count=coverage_collapse_count,
+        drift_capped_count=drift_capped_count,
     )
 
 

@@ -214,6 +214,8 @@ class PhonemeScore:
     low_conf_neutralized_count: int = 0    # số sub bị trung hoà do confidence rất thấp
     recognizer_noise_count: int = 0        # số sub bị gate thành recognizer-noise (hallucinate)
     l1_adjustment_ratio: float = 0.0       # (raw - adjusted) / raw (tỉ lệ penalty được giảm)
+    coverage_collapse_count: int = 0       # số del bị coverage gate cap (từ collapse, Track A)
+    drift_capped_count: int = 0            # số sub bị drift cap (segment ngoài window, Track B)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -234,6 +236,8 @@ class PhonemeScore:
             "low_conf_neutralized_count": self.low_conf_neutralized_count,
             "recognizer_noise_count": self.recognizer_noise_count,
             "l1_adjustment_ratio": round(self.l1_adjustment_ratio, 4),
+            "coverage_collapse_count": self.coverage_collapse_count,
+            "drift_capped_count": self.drift_capped_count,
         }
 
 

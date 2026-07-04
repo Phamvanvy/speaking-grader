@@ -10,6 +10,7 @@ import bisect
 import logging
 from collections.abc import Mapping
 
+from ..diagnostics import DRIFT_WINDOW_PAD_SEC, is_within_word_window
 from ..ipa import (
     deletion_penalty,
     deletion_severity,
@@ -24,7 +25,13 @@ from ..models import (
     WordSpan,
 )
 from ..reliability import SkipDecision
-from .constants import MAX_WORDS_RETURNED, PHONEME_G2P_UNCERTAIN_CAP
+from .constants import (
+    MAX_WORDS_RETURNED,
+    PHONEME_COVERAGE_GATE_CAP,
+    PHONEME_COVERAGE_GATE_MAX_LEN,
+    PHONEME_COVERAGE_GATE_MIN_ASR_PROB,
+    PHONEME_G2P_UNCERTAIN_CAP,
+)
 
 logger = logging.getLogger("toeic.phoneme.scoring")
 
@@ -391,3 +398,93 @@ def _score_deletion(
         penalty_reason=reason, penalty_adjustment=round(adjustment, 4),
     )
     return point, penalty, raw
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Coverage gate (Track A): từ bị "del" toàn bộ + wav2vec im lặng + Whisper tự tin
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _apply_coverage_gate(
+    result: dict[int, tuple[PhonemePoint, float | None]],
+    raw_by_ref: dict[int, float],
+    reference: list[str],
+    spans: list[WordSpan],
+    ref_skipped: list[bool],
+    predicted_times: list[tuple[float, float]],
+    word_windows: Mapping[int, tuple[float, float]] | None,
+    word_probs: Mapping[int, float] | None,
+    claimed_preds: frozenset[int] | set[int] | None = None,
+    *,
+    max_len: int = PHONEME_COVERAGE_GATE_MAX_LEN,
+    cap: float = PHONEME_COVERAGE_GATE_CAP,
+    min_asr_prob: float = PHONEME_COVERAGE_GATE_MIN_ASR_PROB,
+    pad: float = DRIFT_WINDOW_PAD_SEC,
+) -> None:
+    """Cap penalty các từ "coverage collapse" — wav2vec không nhả ÂM NÀO cho từ dù
+    Whisper (nguồn độc lập) tự tin từ đó có trong audio. Mutate `result` in-place.
+
+    CẢ 4 điều kiện phải cùng đúng (định nghĩa chặt — không chỉ "100% del"):
+      1. Từ không bị Reliability skip; 100% âm không-skip là "del"; số âm ≤ max_len.
+      2. KHÔNG có acoustic evidence CHƯA-CÓ-CHỦ: không có segment UNCLAIMED (insertion
+         — DTW không gán cho ref nào) nằm trong window (±pad). Segment trong window
+         nhưng ĐÃ bị từ hàng xóm nhận (diagonal pair, `claimed_preds`) KHÔNG tính —
+         nói liền mạch + window Whisper lệch ±100-300ms nên âm từ kế lem vào window
+         là chuyện thường; đòi "window trống tuyệt đối" làm gate gần như không bao
+         giờ bắn (đo 9.0.mp4: 2/1503 từ). Âm unclaimed trong window mới là bằng chứng
+         "wav2vec CÓ nghe thấy gì đó ở đây mà không từ nào nhận" → có thể lỗi thật,
+         không cap. `claimed_preds=None` (caller cũ) → mọi segment đều tính (chặt như cũ).
+      3. Whisper word prob ≥ min_asr_prob (transcript không phải ground truth tuyệt
+         đối; prob thiếu/≤0 = "không có số liệu" — cùng convention assess_asr_confidence
+         → không cap). LƯU Ý: whisperx dùng thang alignment score thấp hơn — caller
+         truyền ngưỡng riêng (coverage_gate_min_asr_prob_whisperx).
+      4. Từ phải CÓ window (không window → không kiểm chứng được (2) → không cap).
+
+    An toàn của (2) nới lỏng: free-speech thì reference dựng từ CHÍNH transcript nên
+    từ nào cũng được Whisper nghe thấy (không có chuyện "bỏ hẳn từ" lọt vào đây);
+    scripted thì từ bỏ hẳn đã bị assess_reliability skip (delete opcode → không window).
+
+    Precedence: chỉ HẠ penalty (`penalty > cap` mới ghi) — point đã 0 (connected_speech
+    /recognizer_noise/...) hoặc đã cap 0.2 (g2p_uncertain) giữ nguyên reason cũ.
+    KHÔNG đụng raw_by_ref (đây là cap, không phải elimination — l1_adjustment_ratio
+    vẫn phản ánh mức giảm, giống pattern g2p_uncertain).
+    """
+    if not spans or word_windows is None or word_probs is None:
+        return
+    n = len(reference)
+    for k, span in enumerate(spans):
+        win = word_windows.get(k)
+        if win is None:
+            continue
+        prob = word_probs.get(k, 0.0)
+        if prob < min_asr_prob or prob <= 0:
+            continue
+        idxs = [i for i in range(span.start_idx, min(span.end_idx, n))
+                if not ref_skipped[i]]
+        if not idxs or len(idxs) > max_len:
+            continue
+        points = [result[i] for i in idxs if i in result]
+        if len(points) != len(idxs) or any(p.status != "del" for p, _pen in points):
+            continue
+        # (2) acoustic evidence: chỉ segment UNCLAIMED (insertion) trong window mới
+        # chặn cap; segment đã bị từ khác nhận = "stolen" / lem biên → bỏ qua.
+        if any(
+            is_within_word_window(ps, pe, win, pad)
+            for pi, (ps, pe) in enumerate(predicted_times)
+            if claimed_preds is None or pi not in claimed_preds
+        ):
+            continue
+        for i in idxs:
+            point, penalty = result[i]
+            if penalty is None or penalty <= cap:
+                continue
+            raw = raw_by_ref.get(i, penalty)
+            result[i] = (
+                PhonemePoint(
+                    symbol=point.symbol, status="del",
+                    severity=_severity_from_penalty(cap),
+                    stress=point.stress, display_stress=point.display_stress,
+                    penalty_reason=PenaltyReason.COVERAGE_COLLAPSE.value,
+                    penalty_adjustment=round(cap / raw, 4) if raw > 0 else 0.0,
+                ),
+                cap,
+            )

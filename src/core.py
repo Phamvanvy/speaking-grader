@@ -21,7 +21,7 @@ from .phoneme.analyzer import HybridPhonemeAnalyzer
 from .phoneme.diagnostics import (
     DiagnosticsContext,
     TelemetryWriter,
-    map_reference_words_to_windows,
+    map_reference_words_to_indices,
 )
 from .phoneme.ipa import text_to_ipa_sequence_with_spans
 from .phoneme.models import PhonemeResult
@@ -194,6 +194,20 @@ def grade_response(
                 recognizer_noise_conf=config.phoneme_recognizer_noise_conf,
                 recognizer_noise_conf_vowel=config.phoneme_recognizer_noise_conf_vowel,
                 connected_speech_enabled=config.phoneme_connected_speech_enabled,
+                coverage_gate_enabled=config.phoneme_coverage_gate_enabled,
+                coverage_gate_cap=config.phoneme_coverage_gate_cap,
+                coverage_gate_max_len=config.phoneme_coverage_gate_max_len,
+                # whisperx word "probability" là alignment score (thang thấp hơn
+                # logprob faster-whisper) → ngưỡng riêng, cùng pattern
+                # phoneme_asr_conf_min_whisperx bên dưới.
+                coverage_gate_min_asr_prob=(
+                    config.phoneme_coverage_gate_min_asr_prob_whisperx
+                    if asr_run.backend_used == "whisperx"
+                    else config.phoneme_coverage_gate_min_asr_prob
+                ),
+                drift_cap_enabled=config.phoneme_drift_cap_enabled,
+                drift_sub_cap=config.phoneme_drift_sub_cap,
+                drift_window_pad=config.phoneme_drift_window_pad,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về
@@ -242,16 +256,25 @@ def grade_response(
                         skips.setdefault(
                             k, SkipDecision(k, SkipReason.OOV_ESPEAK)
                         )
-            # Map TỪ THAM CHIẾU → cửa sổ thời gian Whisper (start,end mỗi từ). Áp dụng cho
-            # CẢ Read Aloud (có script) lẫn free-speech (reference = transcript). Dùng cùng
-            # kỹ thuật difflib với Recognition Reliability (hàm THUẦN, không side-effect) →
-            # LUÔN tính khi có từ + transcript word: (a) UI phát lại đoạn audio từng từ, và
-            # (b) telemetry drift-vs-hallucination (PR3-0). KHÔNG đụng điểm/skip.
+            # Map TỪ THAM CHIẾU → Whisper word đã khớp (MỘT alignment difflib, cùng kỹ
+            # thuật Recognition Reliability), rồi đọc 2 field: (start,end) → word_windows
+            # cho (a) UI phát lại từng từ, (b) telemetry drift (PR3-0), (c) evidence cho
+            # coverage/drift gate khi flags bật; probability → word_probs làm guard cho
+            # coverage gate (không coi transcript là ground truth tuyệt đối).
+            word_probs = None
             if reference_words and transcription.words:
-                word_windows = map_reference_words_to_windows(
-                    reference_words,
-                    [(w.text, w.start, w.end) for w in transcription.words],
+                _widx = map_reference_words_to_indices(
+                    reference_words, [w.text for w in transcription.words]
                 )
+                word_windows = {
+                    i: (float(transcription.words[j].start),
+                        float(transcription.words[j].end))
+                    for i, j in _widx.items()
+                }
+                word_probs = {
+                    i: float(getattr(transcription.words[j], "probability", 0.0) or 0.0)
+                    for i, j in _widx.items()
+                }
             # Telemetry (PR2): chỉ bật khi config bật — sink ghi JSONL per-word, KHÔNG
             # ảnh hưởng điểm. Tắt → sink None → scorer không tính diagnostics.
             diagnostics_sink = None
@@ -270,6 +293,7 @@ def grade_response(
                 skips=skips,
                 diagnostics_sink=diagnostics_sink,
                 word_windows=word_windows,
+                word_probs=word_probs,
                 accent=accent,
             )
         except Exception:  # noqa: BLE001 - phoneme là phụ trợ, lỗi không fatal

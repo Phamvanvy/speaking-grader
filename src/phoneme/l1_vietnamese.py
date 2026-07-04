@@ -31,6 +31,8 @@ class PenaltyReason(str, Enum):
     LINKING_VARIANT = "linking_variant"        # nối âm: coda mũi function-word → stop homorganic trước nguyên âm
     G2P_UNCERTAIN = "g2p_uncertain"            # IPA chuẩn từ eSpeak (OOV/tên riêng) → penalty cap về low
     CONNECTED_SPEECH = "connected_speech"      # nuốt stop cuối từ khi nối từ (elision bản xứ) → không tính lỗi
+    COVERAGE_COLLAPSE = "coverage_collapse"    # cả từ bị "del" + wav2vec im lặng trong window + Whisper tự tin → cap penalty
+    DRIFT_SUSPECTED = "drift_suspected"        # sub có predicted segment NGOÀI window của từ (nghi DTW mượn âm từ kế) → cap
 
 
 @dataclass(frozen=True)

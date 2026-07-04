@@ -149,6 +149,23 @@ class Config:
     # → /tes-prep/ là phát âm bản xứ đúng, không tính lỗi. Tắt (false) → hành vi cũ.
     # Đặt qua TOEIC_PHONEME_CONNECTED_SPEECH.
     phoneme_connected_speech_enabled: bool = True
+    # Coverage gate (Track A): từ bị "del" 100% + wav2vec im lặng trong Whisper window
+    # + Whisper word prob ≥ min_asr_prob → cap penalty (severity "low", coverage_collapse).
+    # Default OFF = bit-for-bit như cũ. Qua TOEIC_PHONEME_COVERAGE_GATE_ENABLED/CAP/
+    # MAX_LEN/MIN_ASR_PROB. Xem scoring/constants.py cho rationale + số telemetry.
+    phoneme_coverage_gate_enabled: bool = False
+    phoneme_coverage_gate_cap: float = 0.2
+    phoneme_coverage_gate_max_len: int = 4
+    phoneme_coverage_gate_min_asr_prob: float = 0.60
+    # whisperx dùng alignment score (wav2vec char-align) — thang THẤP hơn hẳn logprob
+    # của faster-whisper → ngưỡng riêng, cùng lý do phoneme_asr_conf_min_whisperx.
+    phoneme_coverage_gate_min_asr_prob_whisperx: float = 0.40
+    # Drift cap (Track B): sub có predicted segment NGOÀI window Whisper của từ (±pad)
+    # → nghi DTW mượn âm từ kế → cap penalty (severity "low", drift_suspected).
+    # Default OFF. Qua TOEIC_PHONEME_DRIFT_CAP_ENABLED/SUB_CAP/WINDOW_PAD.
+    phoneme_drift_cap_enabled: bool = False
+    phoneme_drift_sub_cap: float = 0.2
+    phoneme_drift_window_pad: float = 0.08
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
@@ -319,6 +336,30 @@ def load_config() -> Config:
         phoneme_connected_speech_enabled=(
             os.getenv("TOEIC_PHONEME_CONNECTED_SPEECH", "true") or "true"
         ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_coverage_gate_enabled=(
+            os.getenv("TOEIC_PHONEME_COVERAGE_GATE_ENABLED", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_coverage_gate_cap=float(
+            os.getenv("TOEIC_PHONEME_COVERAGE_GATE_CAP", "0.2")
+        ),
+        phoneme_coverage_gate_max_len=int(
+            os.getenv("TOEIC_PHONEME_COVERAGE_GATE_MAX_LEN", "4")
+        ),
+        phoneme_coverage_gate_min_asr_prob=float(
+            os.getenv("TOEIC_PHONEME_COVERAGE_GATE_MIN_ASR_PROB", "0.60")
+        ),
+        phoneme_coverage_gate_min_asr_prob_whisperx=float(
+            os.getenv("TOEIC_PHONEME_COVERAGE_GATE_MIN_ASR_PROB_WHISPERX", "0.40")
+        ),
+        phoneme_drift_cap_enabled=(
+            os.getenv("TOEIC_PHONEME_DRIFT_CAP_ENABLED", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_drift_sub_cap=float(
+            os.getenv("TOEIC_PHONEME_DRIFT_SUB_CAP", "0.2")
+        ),
+        phoneme_drift_window_pad=float(
+            os.getenv("TOEIC_PHONEME_DRIFT_WINDOW_PAD", "0.08")
+        ),
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},

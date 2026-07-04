@@ -13,7 +13,11 @@
 from src.phoneme.ipa import word_to_ipa_with_stress, word_to_ipa_with_stress_source
 from src.phoneme.l1_vietnamese import PenaltyReason
 from src.phoneme.models import PhonemePoint, PhonemeSegment, WordSpan
-from src.phoneme.reliability import SkipReason, assess_asr_confidence
+from src.phoneme.reliability import (
+    SkipDecision,
+    SkipReason,
+    assess_asr_confidence,
+)
 from src.phoneme.scoring import _apply_connected_speech, compute_phoneme_score
 
 
@@ -432,3 +436,217 @@ class TestLearnerRegressionGuards:
         spans = [WordSpan("test", 0, 4), WordSpan("out", 4, 6)]
         score = compute_phoneme_score(_segs(["t", "e", "s", "aʊ", "t"]), ref, spans)
         assert [e for e in score.errors if e.severity in ("medium", "high")]
+
+
+# ── Track A: coverage gate (từ collapse — wav2vec im lặng, Whisper tự tin) ───
+
+def _segs_t(items, conf=0.9):
+    """PhonemeSegment với timing tường minh: items = [(phoneme, start, end), ...]."""
+    return [
+        PhonemeSegment(phoneme=p, start=s, end=e, confidence=conf)
+        for (p, s, e) in items
+    ]
+
+
+class TestCoverageGate:
+    """Từ bị "del" 100% + không acoustic evidence + Whisper prob cao → cap về low.
+
+    Setup chuẩn: "go fish" — ref /ɡ oʊ | f ɪ ʃ/, wav2vec chỉ nghe /ɡ oʊ/ ở 0.1-0.4s;
+    window "fish" (0.9-1.6) không có segment nào → collapse đúng nghĩa. (Từ collapse
+    đặt CUỐI vì DTW gán pred đầu tiên vào ref đầu tiên khi từ đầu bị nuốt — chính là
+    hiện tượng bleed mà Track B xử lý.)
+    """
+
+    REF = ["ɡ", "oʊ", "f", "ɪ", "ʃ"]
+    SPANS = [WordSpan("go", 0, 2), WordSpan("fish", 2, 5)]
+    SEGS = [("ɡ", 0.1, 0.2), ("oʊ", 0.2, 0.4)]
+    WINDOWS = {0: (0.0, 0.5), 1: (0.9, 1.6)}
+    PROBS = {0: 0.9, 1: 0.9}
+
+    def _score(self, **kw):
+        return compute_phoneme_score(
+            _segs_t(self.SEGS), self.REF, self.SPANS,
+            word_windows=kw.pop("word_windows", self.WINDOWS),
+            word_probs=kw.pop("word_probs", self.PROBS),
+            **kw,
+        )
+
+    def test_collapsed_word_capped_low(self):
+        score = self._score(coverage_gate_enabled=True)
+        fish = score.words[1].phonemes
+        assert all(p.status == "del" for p in fish)
+        assert all(p.severity == "low" for p in fish)
+        # f (0.9) và ʃ (0.5) bị cap; ɪ (0.1 ≤ cap) giữ nguyên — không "nâng" reason.
+        capped = [p for p in fish if p.penalty_reason == PenaltyReason.COVERAGE_COLLAPSE.value]
+        assert len(capped) == 2
+        assert score.coverage_collapse_count == 2
+
+    def test_flag_off_keeps_old_behavior(self):
+        score = self._score()
+        assert any(p.severity == "high" for p in score.words[1].phonemes)
+        assert score.coverage_collapse_count == 0
+
+    def test_long_word_not_capped(self):
+        # "splash" 5 âm > max_len 4 → bỏ hẳn từ dài (genuine omission phải giữ lỗi).
+        ref = ["ɡ", "oʊ", "s", "p", "l", "æ", "ʃ"]
+        spans = [WordSpan("go", 0, 2), WordSpan("splash", 2, 7)]
+        score = compute_phoneme_score(
+            _segs_t(self.SEGS), ref, spans,
+            word_windows=self.WINDOWS, word_probs=self.PROBS,
+            coverage_gate_enabled=True,
+        )
+        assert any(p.severity == "high" for p in score.words[1].phonemes)
+        assert score.coverage_collapse_count == 0
+
+    def test_partial_deletion_not_capped(self):
+        # wav2vec nghe được /f/ trong window của "fish" → không phải collapse.
+        segs = self.SEGS + [("f", 1.0, 1.1)]
+        score = compute_phoneme_score(
+            _segs_t(segs), self.REF, self.SPANS,
+            word_windows=self.WINDOWS, word_probs=self.PROBS,
+            coverage_gate_enabled=True,
+        )
+        assert score.coverage_collapse_count == 0
+
+    def test_claimed_segments_in_window_do_not_block(self):
+        # "Stolen phoneme": segment trong window của fish nhưng ĐÃ bị "go" nhận
+        # (diagonal) → KHÔNG tính là acoustic evidence → vẫn cap (case "Let's" thật:
+        # nói liền mạch, âm từ kế lem vào window là chuyện thường).
+        windows = {0: (0.0, 0.5), 1: (0.3, 1.6)}  # window fish chứa segment oʊ@0.2-0.4
+        score = self._score(coverage_gate_enabled=True, word_windows=windows)
+        assert score.coverage_collapse_count == 2
+
+    def test_unclaimed_insertion_in_window_blocks_cap(self):
+        # Unit-level: segment UNCLAIMED (insertion) trong window = wav2vec có nghe
+        # thấy âm không ai nhận → có thể lỗi thật → KHÔNG cap. Cùng input nhưng
+        # segment đã claimed → cap bình thường.
+        from src.phoneme.scoring.word_details import _apply_coverage_gate
+
+        ref = ["f", "ɪ", "ʃ"]
+        spans = [WordSpan("fish", 0, 3)]
+        mk = lambda: {
+            0: (PhonemePoint(symbol="f", status="del", severity="high"), 0.9),
+            1: (PhonemePoint(symbol="ɪ", status="del", severity="low"), 0.1),
+            2: (PhonemePoint(symbol="ʃ", status="del", severity="medium"), 0.5),
+        }
+        common = dict(
+            raw_by_ref={}, reference=ref, spans=spans, ref_skipped=[False] * 3,
+            predicted_times=[(1.0, 1.2)], word_windows={0: (0.9, 1.6)},
+            word_probs={0: 0.9},
+        )
+        # Segment @1.0-1.2 trong window, KHÔNG claimed → chặn cap.
+        result = mk()
+        _apply_coverage_gate(result, claimed_preds=frozenset(), **common)
+        assert result[0][0].penalty_reason is None
+        # Cùng segment nhưng đã claimed (bị từ khác nhận) → cap.
+        result = mk()
+        _apply_coverage_gate(result, claimed_preds=frozenset({0}), **common)
+        assert result[0][0].penalty_reason == PenaltyReason.COVERAGE_COLLAPSE.value
+        assert result[0][1] == 0.2
+
+    def test_low_whisper_prob_blocks_cap(self):
+        # Whisper cũng không chắc từ này có thật → transcript không phải ground truth.
+        score = self._score(
+            coverage_gate_enabled=True, word_probs={0: 0.9, 1: 0.3},
+        )
+        assert score.coverage_collapse_count == 0
+
+    def test_missing_prob_or_window_blocks_cap(self):
+        assert self._score(
+            coverage_gate_enabled=True, word_probs={0: 0.9},  # thiếu prob "fish"
+        ).coverage_collapse_count == 0
+        assert self._score(
+            coverage_gate_enabled=True, word_windows={0: (0.0, 0.5)},  # thiếu window
+        ).coverage_collapse_count == 0
+        assert self._score(
+            coverage_gate_enabled=True, word_windows=None, word_probs=None,
+        ).coverage_collapse_count == 0
+
+    def test_reliability_skipped_word_untouched(self):
+        skips = {1: SkipDecision(1, SkipReason.WHISPER_MISMATCH)}
+        score = self._score(coverage_gate_enabled=True, skips=skips)
+        assert all(p.status == "skipped" for p in score.words[1].phonemes)
+        assert score.coverage_collapse_count == 0
+
+    def test_g2p_uncertain_cap_not_overwritten(self):
+        # Del đã bị g2p_uncertain cap 0.2 → coverage gate (cap 0.2, không nhỏ hơn)
+        # KHÔNG ghi đè reason (precedence: chỉ hạ, reason = gate cuối THỰC SỰ đổi).
+        spans = [WordSpan("go", 0, 2), WordSpan("fish", 2, 5, "espeak")]
+        score = compute_phoneme_score(
+            _segs_t(self.SEGS), self.REF, spans,
+            word_windows=self.WINDOWS, word_probs=self.PROBS,
+            coverage_gate_enabled=True,
+        )
+        fish = score.words[1].phonemes
+        assert all(
+            p.penalty_reason != PenaltyReason.COVERAGE_COLLAPSE.value for p in fish
+        )
+        assert any(
+            p.penalty_reason == PenaltyReason.G2P_UNCERTAIN.value for p in fish
+        )
+        assert score.coverage_collapse_count == 0
+
+
+# ── Track B: drift cap (sub có segment NGOÀI window Whisper của từ) ──────────
+
+class TestDriftCap:
+    """Sub nghi drift (segment ngoài window ±pad) → cap về low; trong window giữ lỗi."""
+
+    REF = ["θ", "ɪ", "n"]
+    SPANS = [WordSpan("thin", 0, 3)]
+
+    def _score(self, seg_at, window=(0.0, 0.6), **kw):
+        # /θ ɪ n/ đọc thành /t ɪ n/ — sub θ→t; segment /t/ đặt tại seg_at.
+        segs = _segs_t([("t", seg_at[0], seg_at[1]),
+                        ("ɪ", seg_at[1], seg_at[1] + 0.2),
+                        ("n", seg_at[1] + 0.2, seg_at[1] + 0.4)])
+        return compute_phoneme_score(
+            segs, self.REF, self.SPANS,
+            word_windows={0: window} if window is not None else None,
+            **kw,
+        )
+
+    def test_sub_outside_window_capped_low(self):
+        score = self._score((5.0, 5.2), drift_cap_enabled=True)
+        point = score.words[0].phonemes[0]
+        assert point.status == "sub"
+        assert point.severity == "low"
+        assert point.penalty_reason == PenaltyReason.DRIFT_SUSPECTED.value
+        assert score.drift_capped_count == 1
+
+    def test_flag_off_keeps_old_behavior(self):
+        score = self._score((5.0, 5.2))
+        point = score.words[0].phonemes[0]
+        assert point.severity in ("medium", "high")
+        assert score.drift_capped_count == 0
+
+    def test_sub_inside_window_not_capped(self):
+        # Segment nằm TRONG window của chính từ → hallucination/lỗi thật — giữ nguyên
+        # (learner guard: lỗi th→t thật vẫn là lỗi khi flag bật).
+        score = self._score((0.1, 0.3), drift_cap_enabled=True)
+        point = score.words[0].phonemes[0]
+        assert point.severity in ("medium", "high")
+        assert point.penalty_reason != PenaltyReason.DRIFT_SUSPECTED.value
+        assert score.drift_capped_count == 0
+
+    def test_no_windows_safe_noop(self):
+        score = self._score((5.0, 5.2), window=None, drift_cap_enabled=True)
+        assert score.words[0].phonemes[0].severity in ("medium", "high")
+        assert score.drift_capped_count == 0
+
+    def test_g2p_uncertain_cap_not_overwritten(self):
+        # Sub đã bị g2p cap 0.2 → drift cap không nhỏ hơn → giữ reason g2p_uncertain.
+        spans = [WordSpan("thin", 0, 3, "espeak")]
+        segs = _segs_t([("t", 5.0, 5.2), ("ɪ", 5.2, 5.4), ("n", 5.4, 5.6)])
+        score = compute_phoneme_score(
+            segs, self.REF, spans,
+            word_windows={0: (0.0, 0.6)}, drift_cap_enabled=True,
+        )
+        point = score.words[0].phonemes[0]
+        assert point.penalty_reason == PenaltyReason.G2P_UNCERTAIN.value
+        assert score.drift_capped_count == 0
+
+    def test_ok_and_del_points_untouched(self):
+        # Drift cap CHỈ đụng sub: các âm ok (ɪ, n) không bị đổi khi flag bật.
+        score = self._score((5.0, 5.2), drift_cap_enabled=True)
+        assert [p.status for p in score.words[0].phonemes] == ["sub", "ok", "ok"]
