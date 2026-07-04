@@ -11,6 +11,46 @@ from enum import Enum
 from typing import Any, NamedTuple
 
 
+# Phiên bản công thức deletion-evidence (shadow probe). Bump khi đổi công thức /
+# margin frame / cách nhóm token — telemetry các đợt không trộn lẫn khi phân tích.
+EVIDENCE_VERSION: str = "v1"
+
+
+@dataclass(frozen=True)
+class EvidenceStats:
+    """Thống kê bằng chứng âm học của 1 âm bị THIẾU (deletion) — SHADOW ONLY.
+
+    Tính từ frame posteriors của wav2vec trong cửa sổ thời gian của từ: mass mỗi
+    frame = tổng probability các token cùng nhóm IPA (sau normalize) với âm bị thiếu.
+    CHỈ telemetry/hiển thị chẩn đoán — KHÔNG bao giờ tham gia penalty/điểm.
+
+    Attributes:
+        max_mass: mass lớn nhất qua các frame trong cửa sổ (0.0 nếu cửa sổ rỗng)
+        top_k_mean: trung bình k=3 frame mass cao nhất (ít hơn 3 frame → trung bình có gì)
+        p90: percentile 90 của mass qua các frame
+        n_frames: số frame trong cửa sổ (0 = cửa sổ rỗng/ngoài biên)
+        argmax_token: token đang "thắng" (argmax) tại frame có mass cao nhất — cho
+            biết wav2vec nghe ra âm gì ở chỗ lẽ ra có âm bị thiếu ("" nếu cửa sổ rỗng)
+        argmax_prob: probability của argmax_token tại frame đó
+    """
+    max_mass: float
+    top_k_mean: float
+    p90: float
+    n_frames: int
+    argmax_token: str = ""
+    argmax_prob: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "max_mass": round(self.max_mass, 4),
+            "top_k_mean": round(self.top_k_mean, 4),
+            "p90": round(self.p90, 4),
+            "n_frames": self.n_frames,
+            "argmax_token": self.argmax_token,
+            "argmax_prob": round(self.argmax_prob, 4),
+        }
+
+
 class PhonemeErrorType(str, Enum):
     """Loại lỗi phoneme khi so với reference."""
     SUBSTITUTION = "substitution"   # phoneme được thay bằng phoneme khác
@@ -120,6 +160,12 @@ class PhonemePoint:
             "hard_error", hoặc None (âm đúng / layer tắt). UI dùng để gắn nhãn accent.
         penalty_adjustment: hệ số ĐÃ áp lên penalty gốc (1.0 = không đổi, <1 = giảm,
             0.0 = trung hoà). TÁCH khỏi `penalty_reason` (why vs how-much).
+        evidence: bằng chứng âm học của âm bị THIẾU (deletion evidence probe, SHADOW —
+            chỉ telemetry, không tham gia điểm). None với ok/sub/skipped hoặc probe tắt.
+        evidence_source: nguồn cửa sổ thời gian dùng để probe: "wav2vec_window" |
+            "whisper_window" | "none" (từ không có cửa sổ → evidence=None). None = probe tắt.
+        evidence_version: phiên bản công thức evidence (EVIDENCE_VERSION) — chỉ set khi
+            probe chạy trên point này.
     """
     symbol: str
     status: str
@@ -129,9 +175,12 @@ class PhonemePoint:
     display_stress: str | None = None
     penalty_reason: str | None = None
     penalty_adjustment: float = 1.0
+    evidence: EvidenceStats | None = None
+    evidence_source: str | None = None
+    evidence_version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "symbol": self.symbol,
             "status": self.status,
             "heard": self.heard,
@@ -141,6 +190,13 @@ class PhonemePoint:
             "penalty_reason": self.penalty_reason,
             "penalty_adjustment": round(self.penalty_adjustment, 4),
         }
+        # Shadow evidence: CHỈ thêm key khi probe đã chạy — payload các point khác
+        # (và toàn bộ payload khi probe tắt) giữ nguyên byte-for-byte như cũ.
+        if self.evidence_source is not None:
+            d["evidence"] = self.evidence.to_dict() if self.evidence else None
+            d["evidence_source"] = self.evidence_source
+            d["evidence_version"] = self.evidence_version
+        return d
 
 
 @dataclass(frozen=True)

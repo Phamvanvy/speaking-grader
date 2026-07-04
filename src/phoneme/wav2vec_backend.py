@@ -27,12 +27,13 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from .models import PhonemeSegment
+from .models import EvidenceStats, PhonemeSegment
 
 logger = logging.getLogger("toeic.phoneme.wav2vec")
 
@@ -52,6 +53,13 @@ PHONEME_CONFIDENCE_THRESHOLD: float = 0.1
 # Số frames liên tiếp cùng phoneme để merge thành 1 segment
 # wav2vec frame rate ~50Hz → 20ms/frame, min_duration=0.1s = 5 frames
 MIN_PHONEME_DURATION_SEC: float = 0.1
+
+# Đệm cửa sổ khi probe deletion-evidence: nới khoảng frame mỗi bên chừng này
+# (~40ms ở 50Hz) để không cắt mất onset/coda do sai số biên segment/window.
+EVIDENCE_WINDOW_MARGIN_FRAMES: int = 2
+
+# Số frame mass cao nhất lấy trung bình cho EvidenceStats.top_k_mean.
+EVIDENCE_TOP_K_FRAMES: int = 3
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ARPAbet → IPA mapping (CHỈ là fallback cho model phoneme dạng ARPAbet)
@@ -136,6 +144,98 @@ def _resolve_ipa(token: str, silence_tokens: frozenset[str]) -> str:
     if token in WAV2VEC_LABEL_TO_IPA:
         return WAV2VEC_LABEL_TO_IPA[token]
     return token.strip()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Deletion-evidence probe (SHADOW): giữ lại frame posteriors + tra mass theo âm
+# ──────────────────────────────────────────────────────────────────────────────
+
+# model_id → {normalized_ipa: frozenset[token_id]} — vocab tĩnh theo model nên cache
+# process-wide (không phụ thuộc audio). Nhóm theo normalize_ipa để /l/ khớp mọi biến
+# thể espeak ('l', 'ɫ', ...) và oʊ↔əʊ tự gộp như phía scoring.
+_ipa_group_cache: dict[str, dict[str, frozenset[int]]] = {}
+_ipa_group_lock = threading.Lock()
+
+
+def _ipa_token_groups(
+    model_id: str, id_to_token: dict[int, str]
+) -> dict[str, frozenset[int]]:
+    """Nhóm token id của vocab theo IPA đã normalize; bỏ silence/blank/special."""
+    cached = _ipa_group_cache.get(model_id)
+    if cached is not None:
+        return cached
+    # Lazy import: giữ wav2vec_backend importable độc lập không kéo chuỗi ipa/g2p.
+    from .ipa import normalize_ipa
+
+    groups: dict[str, set[int]] = {}
+    for idx, token in id_to_token.items():
+        ipa = _resolve_ipa(token, _SILENCE_TOKENS)
+        if not ipa:
+            continue
+        key = normalize_ipa(ipa)
+        if not key:
+            continue
+        groups.setdefault(key, set()).add(idx)
+    frozen = {k: frozenset(v) for k, v in groups.items()}
+    with _ipa_group_lock:
+        _ipa_group_cache[model_id] = frozen
+    return frozen
+
+
+@dataclass(frozen=True)
+class FramePosteriors:
+    """Frame posteriors của 1 lần predict — sống trong request, KHÔNG serialize.
+
+    `probs` (num_frames × vocab, float32) chính là ma trận wav2vec đã tính sẵn cho
+    CTC decode; giữ lại để probe deletion-evidence (SHADOW — chỉ telemetry). ~5MB
+    cho 60s audio, giải phóng khi request kết thúc.
+    """
+
+    probs: np.ndarray
+    frame_duration: float
+    id_to_token: dict[int, str]
+    model_id: str
+
+    def evidence_stats(
+        self, ref_ipa: str, t0: float, t1: float
+    ) -> EvidenceStats | None:
+        """Thống kê mass của nhóm token khớp `ref_ipa` trong cửa sổ [t0, t1].
+
+        Deterministic thuần (chỉ sum/max/percentile trên ma trận đã có). Trả None
+        nếu vocab không có token nào normalize trùng `ref_ipa` (không đo được —
+        khác với "đo được và bằng 0"). Cửa sổ rỗng/ngoài biên → stats toàn 0,
+        n_frames=0. Margin EVIDENCE_WINDOW_MARGIN_FRAMES nới mỗi bên.
+        """
+        from .ipa import normalize_ipa
+
+        groups = _ipa_token_groups(self.model_id, self.id_to_token)
+        token_ids = groups.get(normalize_ipa(ref_ipa))
+        if not token_ids:
+            return None
+        n_frames = self.probs.shape[0]
+        if n_frames == 0 or self.frame_duration <= 0 or t1 <= t0:
+            return EvidenceStats(0.0, 0.0, 0.0, 0)
+        lo = max(0, int(t0 / self.frame_duration) - EVIDENCE_WINDOW_MARGIN_FRAMES)
+        hi = min(
+            n_frames,
+            int(np.ceil(t1 / self.frame_duration)) + EVIDENCE_WINDOW_MARGIN_FRAMES,
+        )
+        if lo >= hi:
+            return EvidenceStats(0.0, 0.0, 0.0, 0)
+        window = self.probs[lo:hi]
+        ids = np.fromiter(sorted(token_ids), dtype=np.int64)
+        mass = window[:, ids].sum(axis=1)  # (hi-lo,) mass nhóm âm mỗi frame
+        best = int(np.argmax(mass))
+        top_k = np.sort(mass)[-EVIDENCE_TOP_K_FRAMES:]
+        argmax_id = int(np.argmax(window[best]))
+        return EvidenceStats(
+            max_mass=float(mass[best]),
+            top_k_mean=float(top_k.mean()),
+            p90=float(np.percentile(mass.astype(np.float64), 90)),
+            n_frames=int(hi - lo),
+            argmax_token=self.id_to_token.get(argmax_id, ""),
+            argmax_prob=float(window[best, argmax_id]),
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -407,11 +507,24 @@ class Wav2VecPhonemePredictor:
         Returns:
             (segments, warning) — warning != None nếu backend không sẵn sàng
         """
+        segments, warning, _posteriors = self.predict_with_posteriors(audio_path)
+        return segments, warning
+
+    def predict_with_posteriors(
+        self,
+        audio_path: str,
+    ) -> tuple[list[PhonemeSegment], str | None, FramePosteriors | None]:
+        """Như `predict` nhưng kèm FramePosteriors (ma trận posterior đã tính sẵn
+        cho CTC decode — không tốn thêm forward pass) để probe deletion-evidence.
+
+        Returns:
+            (segments, warning, posteriors) — posteriors None khi backend lỗi.
+        """
         if not Path(audio_path).exists():
-            return [], f"Audio file không tồn tại: {audio_path}"
+            return [], f"Audio file không tồn tại: {audio_path}", None
 
         if not self.is_available:
-            return [], "wav2vec backend không khả dụng (xem log chi tiết)."
+            return [], "wav2vec backend không khả dụng (xem log chi tiết).", None
 
         try:
             import torch
@@ -477,6 +590,15 @@ class Wav2VecPhonemePredictor:
                 confidence_threshold=self.confidence_threshold,
             )
 
+            # Giữ lại posteriors cho deletion-evidence probe (SHADOW) — ma trận đã
+            # ở CPU sẵn, chỉ là không vứt đi; sống trong request rồi giải phóng.
+            posteriors = FramePosteriors(
+                probs=prob_numpy,
+                frame_duration=frame_duration,
+                id_to_token=id_to_label,
+                model_id=self.model_id,
+            )
+
             # Free CUDA memory after prediction
             if _is_cuda_device(self.device) and torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -491,7 +613,7 @@ class Wav2VecPhonemePredictor:
                 audio_duration,
             )
 
-            return segments, None
+            return segments, None, posteriors
 
         except RuntimeError as e:
             # CUDA OOM: suggest CPU fallback
@@ -505,7 +627,7 @@ class Wav2VecPhonemePredictor:
             raise  # Re-raise for proper upstream handling
         except Exception as e:
             logger.error("wav2vec prediction failed for '%s': %s", audio_path, e, exc_info=True)
-            return [], f"wav2vec prediction error: {e}"
+            return [], f"wav2vec prediction error: {e}", None
 
     def get_predicted_phoneme_list(self, segments: list[PhonemeSegment]) -> list[str]:
         """Trích danh sách phonemes từ segments (cho comparison với reference).

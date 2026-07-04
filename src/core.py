@@ -208,6 +208,7 @@ def grade_response(
                 drift_cap_enabled=config.phoneme_drift_cap_enabled,
                 drift_sub_cap=config.phoneme_drift_sub_cap,
                 drift_window_pad=config.phoneme_drift_window_pad,
+                deletion_evidence_enabled=config.phoneme_deletion_evidence_enabled,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về

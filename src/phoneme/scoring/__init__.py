@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING
 
 from ..diagnostics import (
     DRIFT_WINDOW_PAD_SEC,
@@ -50,6 +51,7 @@ from .word_details import (
     _WORD_PLAY_LEAD,
     _WORD_PLAY_TRAIL,
     _apply_coverage_gate,
+    _attach_deletion_evidence,
     _build_word_details,
     _pad_and_clamp_windows,
     _ref_metadata,
@@ -59,6 +61,9 @@ from .word_details import (
     _word_at,
     _word_segment_times,
 )
+
+if TYPE_CHECKING:
+    from ..wav2vec_backend import FramePosteriors
 
 logger = logging.getLogger("toeic.phoneme.scoring")
 
@@ -151,6 +156,7 @@ def compute_phoneme_score(
     drift_cap_enabled: bool = False,
     drift_sub_cap: float = PHONEME_DRIFT_SUB_CAP,
     drift_window_pad: float = DRIFT_WINDOW_PAD_SEC,
+    posteriors: FramePosteriors | None = None,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -209,6 +215,10 @@ def compute_phoneme_score(
             window Whisper của từ (±drift_window_pad) → cap penalty về drift_sub_cap
             (severity "low", DRIFT_SUSPECTED). False (mặc định) = bit-for-bit như cũ.
             Xem _apply_drift_cap (alignment.py). An toàn khi word_windows thiếu (no-op).
+        posteriors: optional — FramePosteriors từ wav2vec (predict_with_posteriors) cho
+            deletion-evidence probe (SHADOW): gắn EvidenceStats vào mỗi point "del" để
+            telemetry/phân tích. KHÔNG BAO GIỜ ảnh hưởng điểm — chỉ thêm metadata.
+            None = không probe (payload y hệt cũ). Xem _attach_deletion_evidence.
 
     Precedence giữa các gate: mọi gate chỉ HẠ penalty, không nâng; post-pass chạy tuần
     tự connected_speech → coverage_gate (chỉ del) → drift_cap (chỉ sub); penalty_reason
@@ -314,6 +324,19 @@ def compute_phoneme_score(
             pad=drift_window_pad, cap=drift_sub_cap,
         )
 
+    # Cửa sổ phát lại từng từ theo wav2vec segment — tính MỘT lần, dùng cho cả
+    # deletion-evidence probe (dưới) lẫn playback windows (cuối hàm).
+    seg_times = _word_segment_times(path, segments, reference_spans)
+
+    # Deletion-evidence probe (SHADOW) — SAU mọi gate để gắn lên point cuối cùng,
+    # TRƯỚC vòng tổng hợp để point_by_ref/word details/diagnostics cùng thấy.
+    # Chỉ telemetry: không chạm penalty/status — điểm bất biến bit-for-bit.
+    if posteriors is not None and reference_spans:
+        _attach_deletion_evidence(
+            result, reference_phonemes, reference_spans, ref_skipped,
+            path, segments, seg_times, word_windows, posteriors,
+        )
+
     # Tổng hợp: errors + counts + penalty (một nguồn → không lệch nhau).
     errors: list[PhonemeError] = []
     matches = substitutions = deletions = 0
@@ -367,9 +390,8 @@ def compute_phoneme_score(
         accuracy = 1.0  # mọi âm đều skip (ASR nghe nhầm cả) → không có gì để chấm
 
     # Cửa sổ thời gian phát lại từng từ: ưu tiên wav2vec segment (chính xác ~20ms, đúng
-    # "cái wav2vec nghe"), fallback Whisper window cho từ toàn deletion. word_windows
-    # (Whisper) VẪN giữ riêng cho telemetry drift bên dưới — KHÔNG trộn vào đây.
-    seg_times = _word_segment_times(path, segments, reference_spans)
+    # "cái wav2vec nghe" — seg_times tính ở trên), fallback Whisper window cho từ toàn
+    # deletion. word_windows (Whisper) VẪN giữ riêng cho telemetry drift — KHÔNG trộn.
     if word_windows:
         playback_times: dict[int, tuple[float, float]] = {**word_windows, **seg_times}
     else:

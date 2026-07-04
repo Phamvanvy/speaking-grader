@@ -40,7 +40,10 @@ logger = logging.getLogger("toeic.phoneme.diagnostics")
 #     phân tích R-vs-S (hallucination vs L1 error) chi tiết theo từng âm.
 # v4: thêm penalty_reason / penalty_adjustment / l1_rule_id vào mỗi correspondence (L1-aware
 #     scoring layer) → đo l1_adjustment_ratio + đếm rule kích hoạt từ telemetry.
-TELEMETRY_SCHEMA_VERSION: int = 4
+# v5: thêm evidence / evidence_source / evidence_version vào correspondence "del" (deletion-
+#     evidence probe, SHADOW) — dữ liệu gán nhãn cho sprint Word Reliability Gate. Các key
+#     này CHỈ xuất hiện khi probe chạy (evidence_source != None) — record cũ không đổi.
+TELEMETRY_SCHEMA_VERSION: int = 5
 
 # Đệm cửa sổ thời gian khi phân loại drift: predicted segment chạm mép window trong
 # khoảng này vẫn coi là "trong từ". Whisper word timestamps lệch ~±100–300ms; pad nhỏ
@@ -284,7 +287,7 @@ def build_word_diagnostics(
             if reason == PenaltyReason.L1_FINAL_DELETION.value:
                 m = match_l1_final_deletion(reference[i])
                 l1_rule_id = m.rule_id if m is not None else None
-            correspondences.append({
+            entry = {
                 "ref_symbol": reference[i],
                 "pred_symbol": pred_symbol,
                 "confidence": round(conf, 4) if conf is not None else None,
@@ -294,7 +297,16 @@ def build_word_diagnostics(
                 "penalty_reason": reason,
                 "penalty_adjustment": round(point.penalty_adjustment, 4),
                 "l1_rule_id": l1_rule_id,
-            })
+            }
+            # Deletion-evidence probe (SHADOW, v5): chỉ thêm key khi probe đã chạy
+            # trên point này — record khi probe tắt giữ nguyên format cũ.
+            if point.evidence_source is not None:
+                entry["evidence"] = (
+                    point.evidence.to_dict() if point.evidence else None
+                )
+                entry["evidence_source"] = point.evidence_source
+                entry["evidence_version"] = point.evidence_version
+            correspondences.append(entry)
 
         diags.append(WordDiagnostic(
             word=span.word,

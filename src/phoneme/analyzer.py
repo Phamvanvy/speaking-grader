@@ -102,6 +102,7 @@ class HybridPhonemeAnalyzer:
         drift_cap_enabled: bool = False,
         drift_sub_cap: float = PHONEME_DRIFT_SUB_CAP,
         drift_window_pad: float = DRIFT_WINDOW_PAD_SEC,
+        deletion_evidence_enabled: bool = True,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         self._max_words = max_words
@@ -120,6 +121,10 @@ class HybridPhonemeAnalyzer:
         self._drift_cap_enabled = drift_cap_enabled
         self._drift_sub_cap = drift_sub_cap
         self._drift_window_pad = drift_window_pad
+        # Deletion-evidence probe (SHADOW): giữ frame posteriors của wav2vec để đo
+        # bằng chứng âm học cho mỗi âm bị thiếu — CHỈ telemetry, không đổi điểm.
+        # Tắt (false) để tiết kiệm RAM (~5MB/60s audio trong lúc chấm).
+        self._deletion_evidence_enabled = deletion_evidence_enabled
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
@@ -208,7 +213,14 @@ class HybridPhonemeAnalyzer:
             reference_display_stress = []
 
         # ── Phase 1: wav2vec only ─────────────────────────────────────────
-        segments, warning = self._wav2vec.predict(audio_path)
+        # Probe bật → giữ thêm frame posteriors (không tốn forward pass nào thêm).
+        if self._deletion_evidence_enabled:
+            segments, warning, posteriors = self._wav2vec.predict_with_posteriors(
+                audio_path
+            )
+        else:
+            segments, warning = self._wav2vec.predict(audio_path)
+            posteriors = None
 
         if warning and not segments:
             # wav2vec unavailable — return empty with warning
@@ -259,6 +271,7 @@ class HybridPhonemeAnalyzer:
                 drift_cap_enabled=self._drift_cap_enabled,
                 drift_sub_cap=self._drift_sub_cap,
                 drift_window_pad=self._drift_window_pad,
+                posteriors=posteriors,
             )
 
         logger.info(

@@ -166,6 +166,11 @@ class Config:
     phoneme_drift_cap_enabled: bool = False
     phoneme_drift_sub_cap: float = 0.2
     phoneme_drift_window_pad: float = 0.08
+    # Deletion-evidence probe (SHADOW): giữ frame posteriors wav2vec để đo bằng chứng
+    # âm học cho mỗi âm bị thiếu (phân biệt "thiếu âm thật" vs "recognizer hallucinate
+    # deletion"). CHỈ telemetry/log — KHÔNG BAO GIỜ đổi điểm → default ON an toàn.
+    # Tắt (false) để tiết kiệm RAM. Qua TOEIC_PHONEME_DELETION_EVIDENCE.
+    phoneme_deletion_evidence_enabled: bool = True
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
@@ -360,6 +365,9 @@ def load_config() -> Config:
         phoneme_drift_window_pad=float(
             os.getenv("TOEIC_PHONEME_DRIFT_WINDOW_PAD", "0.08")
         ),
+        phoneme_deletion_evidence_enabled=(
+            os.getenv("TOEIC_PHONEME_DELETION_EVIDENCE", "true") or "true"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},
