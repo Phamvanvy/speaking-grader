@@ -166,6 +166,12 @@ class Config:
     phoneme_drift_cap_enabled: bool = False
     phoneme_drift_sub_cap: float = 0.2
     phoneme_drift_window_pad: float = 0.08
+    # Multi-reference homograph: từ đa-entry CMUdict có cửa sổ Whisper → chọn LẠI
+    # entry khớp acoustic nhất trước DTW (fix "project" luôn bị so với dạng động từ
+    # /prədʒekt/; blast radius: 6,068 từ material — xem scoring/homograph.py +
+    # scripts/analyze_homographs.py). Default OFF = bit-for-bit như cũ.
+    # Qua TOEIC_PHONEME_MULTIREF.
+    phoneme_homograph_multiref: bool = False
     # Deletion-evidence probe (SHADOW): giữ frame posteriors wav2vec để đo bằng chứng
     # âm học cho mỗi âm bị thiếu (phân biệt "thiếu âm thật" vs "recognizer hallucinate
     # deletion"). CHỈ telemetry/log — KHÔNG BAO GIỜ đổi điểm → default ON an toàn.
@@ -375,6 +381,9 @@ def load_config() -> Config:
         phoneme_drift_window_pad=float(
             os.getenv("TOEIC_PHONEME_DRIFT_WINDOW_PAD", "0.08")
         ),
+        phoneme_homograph_multiref=(
+            os.getenv("TOEIC_PHONEME_MULTIREF", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         phoneme_deletion_evidence_enabled=(
             os.getenv("TOEIC_PHONEME_DELETION_EVIDENCE", "true") or "true"
         ).strip().lower() in {"1", "true", "yes", "on"},

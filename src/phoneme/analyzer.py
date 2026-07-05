@@ -103,6 +103,7 @@ class HybridPhonemeAnalyzer:
         drift_sub_cap: float = PHONEME_DRIFT_SUB_CAP,
         drift_window_pad: float = DRIFT_WINDOW_PAD_SEC,
         deletion_evidence_enabled: bool = True,
+        homograph_selection_enabled: bool = False,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         self._max_words = max_words
@@ -125,6 +126,9 @@ class HybridPhonemeAnalyzer:
         # bằng chứng âm học cho mỗi âm bị thiếu — CHỈ telemetry, không đổi điểm.
         # Tắt (false) để tiết kiệm RAM (~5MB/60s audio trong lúc chấm).
         self._deletion_evidence_enabled = deletion_evidence_enabled
+        # Multi-reference homograph: chọn lại entry CMUdict khớp acoustic nhất cho
+        # từ đa-entry (xem scoring/homograph.py). Default OFF = bit-for-bit như cũ.
+        self._homograph_selection_enabled = homograph_selection_enabled
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
@@ -281,6 +285,7 @@ class HybridPhonemeAnalyzer:
                 drift_sub_cap=self._drift_sub_cap,
                 drift_window_pad=self._drift_window_pad,
                 posteriors=posteriors,
+                homograph_selection_enabled=self._homograph_selection_enabled,
             )
 
         logger.info(

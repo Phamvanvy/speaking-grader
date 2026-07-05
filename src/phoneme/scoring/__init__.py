@@ -33,6 +33,7 @@ from ..models import (
 )
 from ..reliability import SkipDecision
 from .alignment import _align_points, _apply_drift_cap, _dtw_align
+from .homograph import select_homograph_references
 from .constants import (
     MAX_ERRORS_RETURNED,
     MAX_WORDS_RETURNED,
@@ -157,6 +158,7 @@ def compute_phoneme_score(
     drift_sub_cap: float = PHONEME_DRIFT_SUB_CAP,
     drift_window_pad: float = DRIFT_WINDOW_PAD_SEC,
     posteriors: FramePosteriors | None = None,
+    homograph_selection_enabled: bool = False,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -219,6 +221,12 @@ def compute_phoneme_score(
             deletion-evidence probe (SHADOW): gắn EvidenceStats vào mỗi point "del" để
             telemetry/phân tích. KHÔNG BAO GIỜ ảnh hưởng điểm — chỉ thêm metadata.
             None = không probe (payload y hệt cũ). Xem _attach_deletion_evidence.
+        homograph_selection_enabled: multi-reference homograph — với từ đa-entry
+            CMUdict có cửa sổ Whisper, chọn LẠI entry khớp acoustic nhất (align
+            segments trong window với từng entry, cost = 1 − phoneme_similarity)
+            TRƯỚC khi DTW, thay vì entry ranking context-free (case "project"
+            2026-07-05: luôn bị so với dạng động từ). Cần word_windows + spans.
+            False (mặc định) = bit-for-bit như cũ. Xem scoring/homograph.py.
 
     Precedence giữa các gate: mọi gate chỉ HẠ penalty, không nâng; post-pass chạy tuần
     tự connected_speech → coverage_gate (chỉ del) → drift_cap (chỉ sub); penalty_reason
@@ -229,6 +237,16 @@ def compute_phoneme_score(
     """
     if not reference_phonemes:
         return None
+
+    # Multi-reference homograph (flag OFF = no-op): đổi lát reference của từ
+    # đa-entry sang entry khớp acoustic nhất TRƯỚC DTW. Số span/chỉ số span không
+    # đổi → skips/word_windows/word_probs (keyed span index) vẫn đúng.
+    if homograph_selection_enabled and reference_spans and word_windows and segments:
+        (reference_phonemes, reference_spans, reference_stress,
+         reference_display_stress) = select_homograph_references(
+            reference_phonemes, reference_spans, reference_stress,
+            reference_display_stress, segments, word_windows, skips=skips,
+        )
 
     predicted_phonemes = [s.phoneme for s in segments]
     predicted_conf = [s.confidence for s in segments]
