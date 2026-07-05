@@ -201,17 +201,17 @@ def _arpabet_tokens_to_ipa_stress(
     THUẦN parsing/conversion — KHÔNG áp luật đơn-âm-tiết / length guard (để ở caller).
     - AH split theo nhấn: AH1/AH2 → ʌ; AH0 hoặc thiếu/không hợp lệ digit → ə (fail-soft
       CHỈ cho stress digit của AH, KHÔNG cho base lạ).
-    - ER split theo nhấn: ER1/ER2 (hoặc từ đơn âm tiết) → ɜː ("bird/sir"); ER0 không nhấn
-      trong từ ĐA âm tiết → ə + r (rhotic schwa, như override "favorite") — 1 token sinh
-      2 symbol. Tránh /ˈsætɜːdeɪ/ (sai) cho Saturday; cho /ˈsætərdeɪ/ (đúng).
+    - ER split theo nhấn: ER1/ER2 → ɜː ("bird/sir" — CMUdict gắn ER1 cho mọi từ NURSE
+      đơn âm tiết); ER0 không nhấn → ə + r (rhotic schwa, như override "favorite") —
+      1 token sinh 2 symbol. Áp cả từ ĐƠN âm tiết: ER0 đơn âm tiết trong CMUdict chỉ
+      xuất hiện ở weak form của function word (are/or/for/her ["ER0"]) — map ɜː biến
+      "Are you..." đọc đúng /ɑː/ thành sub ɜː→ɑː oan (case 2026-07-05), và làm fitting
+      alignment của multiref homograph chọn sai entry (sub 0.6 rẻ hơn gap /r/ 1.0).
     - Base không có trong ARPABET_TO_IPA → BỎ QUA (skip), KHÔNG bịa IPA.
     """
     symbols: list[str] = []
     stresses: list[StressType | None] = []
     syllables = 0
-    # ER split cần biết từ đơn hay đa âm tiết: đơn âm tiết "sir/fur" giữ ɜː dù CMUdict gắn
-    # ER0. Số nguyên âm = số token có stress digit (proxy giống cách đếm syllables bên dưới).
-    total_vowels = sum(1 for t in tokens if re.search(r"\d", t))
     for raw in tokens:
         if not raw.strip():
             continue
@@ -221,9 +221,8 @@ def _arpabet_tokens_to_ipa_stress(
             continue  # base lạ → không bịa (override validate lúc import; g2p tự lọc)
         d = digit.group() if digit is not None else None
         stress: StressType | None = "primary" if d == "1" else "secondary" if d == "2" else None
-        # ER split: ER0 không nhấn trong từ đa âm tiết → ə + r (schwa rhotic). Nhấn rõ (1/2)
-        # hoặc từ đơn âm tiết → rơi xuống nhánh chung → ɜː.
-        if base == "ER" and d not in ("1", "2") and total_vowels > 1:
+        # ER split: không nhấn rõ → ə + r (schwa rhotic); nhấn rõ (1/2) → nhánh chung → ɜː.
+        if base == "ER" and d not in ("1", "2"):
             symbols.append("ə")
             stresses.append(stress)
             syllables += 1  # schwa là nguyên âm → đếm âm tiết

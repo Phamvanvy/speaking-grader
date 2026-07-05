@@ -131,9 +131,17 @@ class TestWordToIpa:
             result = word_to_ipa(word)
             assert "ɜː" not in result, f"{word}: ER0 vẫn ra ɜː: {result}"
             assert result[-2:] == ["ə", "r"], f"{word}: đuôi -er sai: {result}"
-        # Từ ĐƠN âm tiết giữ ɜː dù CMUdict gắn ER0 (sir/fur), và ER1/ER2 luôn ɜː.
+        # ER1/ER2 luôn ɜː — CMUdict gắn ER1 cho mọi từ NURSE đơn âm tiết (sir/fur/bird).
         for word in ("bird", "sir", "fur", "work", "person"):
             assert "ɜː" in word_to_ipa(word), word
+        # ER0 đơn âm tiết = weak form của function word (are/or/for ["ER0"], her
+        # [HH ER0]) → ə + r như đa âm tiết, KHÔNG phải nguyên âm NURSE đầy đủ.
+        # Map ɜː cũ biến "Are you...?" đọc đúng /ɑː/ thành sub ɜː→ɑː oan
+        # (case 2026-07-05) và làm multiref homograph chọn sai entry.
+        assert word_to_ipa("are") == ["ə", "r"]
+        assert word_to_ipa("or") == ["ə", "r"]
+        assert word_to_ipa("for") == ["f", "ə", "r"]
+        assert word_to_ipa("her") == ["h", "ə", "r"]
 
     def test_determinism(self):
         # Same input must produce identical output on every call.

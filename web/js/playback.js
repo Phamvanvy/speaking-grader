@@ -13,13 +13,31 @@
 let wordAudio = null;
 let wordPlayToken = 0;
 let wordStopTimer = null;
+let wordGainNode = null;
+let wordAudioCtx = null;
+
+// Bản ghi của người học thường nhỏ hơn hẳn audio mẫu TTS (🔊) → khuếch đại bằng
+// Web Audio API GainNode (thẻ <audio>.volume bị giới hạn tối đa 1.0, không đủ to).
+const WORD_SEGMENT_GAIN = 1.5;
+
+function ensureWordGain() {
+    if (wordGainNode) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return; // trình duyệt không hỗ trợ → phát bình thường, không khuếch đại
+    wordAudioCtx = new Ctx();
+    const source = wordAudioCtx.createMediaElementSource(wordAudio);
+    wordGainNode = wordAudioCtx.createGain();
+    wordGainNode.gain.value = WORD_SEGMENT_GAIN;
+    source.connect(wordGainNode).connect(wordAudioCtx.destination);
+}
 
 function playWordSegment(start, end, srcUrl) {
     // srcUrl: audio câu cụ thể (kết quả cả đề — mỗi câu một Blob). Bỏ trống → dùng
     // Blob single global (playbackUrl) như cũ.
     const url = srcUrl || playbackUrl();
     if (!url) return;
-    if (!wordAudio) wordAudio = new Audio();
+    if (!wordAudio) { wordAudio = new Audio(); ensureWordGain(); }
+    if (wordAudioCtx && wordAudioCtx.state === 'suspended') wordAudioCtx.resume();
     const myToken = ++wordPlayToken;
     if (wordStopTimer) { clearTimeout(wordStopTimer); wordStopTimer = null; }
     wordAudio.pause();
