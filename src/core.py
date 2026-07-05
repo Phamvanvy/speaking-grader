@@ -18,6 +18,7 @@ from typing import Any
 from . import asr, features as features_mod, gating, report, scoring
 from .config import Config
 from .phoneme.analyzer import HybridPhonemeAnalyzer
+from .phoneme.chunking import CHUNKING_STRATEGIES, compute_chunk_spans
 from .phoneme.diagnostics import (
     DiagnosticsContext,
     TelemetryWriter,
@@ -276,6 +277,35 @@ def grade_response(
                     i: float(getattr(transcription.words[j], "probability", 0.0) or 0.0)
                     for i, j in _widx.items()
                 }
+            # Chunk audio TRƯỚC wav2vec (fix IPA "lem" trên audio dài — model suy
+            # giảm khi nhận cả bài trong 1 forward pass). Chunk theo Whisper word
+            # timestamps (khoảng lặng/câu); CHỈ đổi đầu vào segments — scoring
+            # bất biến. "off"/không có words → None = single-pass như cũ. Strategy
+            # lạ (env gõ sai) → cảnh báo + fallback single-pass, không chết request.
+            chunk_spans = None
+            _chunk_strategy = config.phoneme_chunking_strategy
+            if _chunk_strategy != "off" and transcription.words:
+                if _chunk_strategy in CHUNKING_STRATEGIES:
+                    chunk_spans = compute_chunk_spans(
+                        [(w.text, float(w.start), float(w.end))
+                         for w in transcription.words],
+                        float(transcription.duration or 0.0),
+                        strategy=_chunk_strategy,
+                        max_chunk_sec=config.phoneme_chunk_max_sec,
+                        min_pause_sec=config.phoneme_chunk_min_pause_sec,
+                        pad_sec=config.phoneme_chunk_pad_sec,
+                    ) or None
+                    logger.info(
+                        "Phoneme | question=%s | chunking=%s → %d chunks",
+                        question_id, _chunk_strategy, len(chunk_spans or []),
+                    )
+                else:
+                    logger.warning(
+                        "Phoneme | question=%s | TOEIC_PHONEME_CHUNKING=%r không hợp lệ "
+                        "(hợp lệ: off, %s) — fallback single-pass.",
+                        question_id, _chunk_strategy,
+                        ", ".join(sorted(CHUNKING_STRATEGIES)),
+                    )
             # Telemetry (PR2): chỉ bật khi config bật — sink ghi JSONL per-word, KHÔNG
             # ảnh hưởng điểm. Tắt → sink None → scorer không tính diagnostics.
             diagnostics_sink = None
@@ -296,6 +326,7 @@ def grade_response(
                 word_windows=word_windows,
                 word_probs=word_probs,
                 accent=accent,
+                chunk_spans=chunk_spans,
             )
         except Exception:  # noqa: BLE001 - phoneme là phụ trợ, lỗi không fatal
             logger.exception("Phoneme | question=%s | analyzer crashed", question_id)

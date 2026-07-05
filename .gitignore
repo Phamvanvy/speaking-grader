@@ -20,3 +20,4 @@ data/audio/*.m4a
 tel3.jsonl
 unknown_cases.jsonl
 data/
+outputs/

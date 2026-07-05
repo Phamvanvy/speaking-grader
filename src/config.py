@@ -171,6 +171,16 @@ class Config:
     # deletion"). CHỈ telemetry/log — KHÔNG BAO GIỜ đổi điểm → default ON an toàn.
     # Tắt (false) để tiết kiệm RAM. Qua TOEIC_PHONEME_DELETION_EVIDENCE.
     phoneme_deletion_evidence_enabled: bool = True
+    # Chunk audio TRƯỚC wav2vec theo Whisper word timestamps — fix IPA "lem" trên
+    # audio dài (model suy giảm khi nhận cả bài trong 1 forward pass; xem
+    # phoneme/chunking.py). "off" (default, bit-for-bit như cũ) | "pause" (cắt tại
+    # khoảng lặng ≥ min_pause) | "hybrid" (pause → ranh giới câu → hard-cut khi chunk
+    # vượt max). KHÔNG đổi scoring. Qua TOEIC_PHONEME_CHUNKING/CHUNK_MAX_SEC/
+    # CHUNK_MIN_PAUSE_SEC/CHUNK_PAD_SEC.
+    phoneme_chunking_strategy: str = "off"
+    phoneme_chunk_max_sec: float = 30.0
+    phoneme_chunk_min_pause_sec: float = 0.5
+    phoneme_chunk_pad_sec: float = 0.25
     # Log prompts and AI responses to outputs/prompt_logs/ for debugging.
     # Enable with TOEIC_LOG_PROMPTS=1.
     log_prompts: bool = False
@@ -368,6 +378,18 @@ def load_config() -> Config:
         phoneme_deletion_evidence_enabled=(
             os.getenv("TOEIC_PHONEME_DELETION_EVIDENCE", "true") or "true"
         ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_chunking_strategy=(
+            os.getenv("TOEIC_PHONEME_CHUNKING", "off") or "off"
+        ).strip().lower(),
+        phoneme_chunk_max_sec=float(
+            os.getenv("TOEIC_PHONEME_CHUNK_MAX_SEC", "30.0")
+        ),
+        phoneme_chunk_min_pause_sec=float(
+            os.getenv("TOEIC_PHONEME_CHUNK_MIN_PAUSE_SEC", "0.5")
+        ),
+        phoneme_chunk_pad_sec=float(
+            os.getenv("TOEIC_PHONEME_CHUNK_PAD_SEC", "0.25")
+        ),
         log_prompts=(
             os.getenv("TOEIC_LOG_PROMPTS", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},

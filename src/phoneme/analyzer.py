@@ -153,6 +153,7 @@ class HybridPhonemeAnalyzer:
         word_windows: Mapping[int, tuple[float, float]] | None = None,
         word_probs: Mapping[int, float] | None = None,
         accent: str = "default",
+        chunk_spans: list[tuple[float, float]] | None = None,
     ) -> PhonemeResult:
         """Phân tích phonemes trong audio, optional so với reference text.
 
@@ -175,6 +176,12 @@ class HybridPhonemeAnalyzer:
                 accept_accent_variants (chấp nhận coda /r/ non-rhotic — xem compute_phoneme_score).
                 "gb"/"us" giữ nguyên cách chấm cũ (chuẩn Mỹ). Map mode-name → bool Ở ĐÂY để scorer
                 không phụ thuộc tên mode của frontend.
+            chunk_spans: optional — danh sách (start, end) giây từ
+                chunking.compute_chunk_spans (caller tính từ Whisper word timestamps).
+                None (mặc định) = wav2vec single-pass như cũ. Có spans = predict theo
+                từng chunk rồi ghép (fix IPA "lem" trên audio dài) — CHỈ đổi đầu vào
+                segments/posteriors, KHÔNG đổi scoring. Analyzer chỉ truyền xuống —
+                KHÔNG tự tính chunk (không biết Whisper).
 
         Returns:
             PhonemeResult với segments, reference_phonemes, score, warning.
@@ -216,10 +223,12 @@ class HybridPhonemeAnalyzer:
         # Probe bật → giữ thêm frame posteriors (không tốn forward pass nào thêm).
         if self._deletion_evidence_enabled:
             segments, warning, posteriors = self._wav2vec.predict_with_posteriors(
-                audio_path
+                audio_path, chunk_spans=chunk_spans
             )
         else:
-            segments, warning = self._wav2vec.predict(audio_path)
+            segments, warning = self._wav2vec.predict(
+                audio_path, chunk_spans=chunk_spans
+            )
             posteriors = None
 
         if warning and not segments:

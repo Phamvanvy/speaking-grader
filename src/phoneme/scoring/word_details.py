@@ -194,20 +194,22 @@ def _word_segment_times(
     segments: list[PhonemeSegment],
     spans: list[WordSpan] | None,
 ) -> dict[int, tuple[float, float]]:
-    """Cửa sổ thời gian PHÁT LẠI của từng từ, suy từ wav2vec phoneme segment.
+    """Cửa sổ thời gian theo wav2vec phoneme segment của từng từ.
 
-    Vì sao: wav2vec chạy 1 forward pass trên toàn waveform nên mỗi `PhonemeSegment.
-    start/end` là timestamp TUYỆT ĐỐI (~20ms) — chính xác và đúng "cái wav2vec nghe"
-    hơn hẳn Whisper word window (±100–300ms, đôi khi rỗng → playback bị bíp/lẹm từ kế).
+    Hai người dùng: (a) deletion-evidence probe (cửa sổ nền — xem
+    _attach_deletion_evidence), (b) FALLBACK playback cho từ KHÔNG có Whisper word
+    window. Playback ưu tiên Whisper word timestamp (xem compute_phoneme_score):
+    cửa sổ segment phụ thuộc DTW attribution — khi DTW "mượn" âm từ từ kế, min/max
+    phình ra cả cụm (bug "discount" phát thành "20 percent discount") nên KHÔNG
+    dùng làm nguồn chính cho playback.
 
     Cách gán: CHỈ lấy cặp ĐƯỜNG CHÉO của DTW path (`pred_idx>=0 AND ref_idx>=0`) — mỗi
     segment ghép tối đa MỘT ref index (xem backtrace `_dtw_align`) nên thuộc đúng MỘT từ;
     bỏ insertion (`ref_idx<0`) để không nới biên sang từ kế. Cửa sổ từ = (min start, max
-    end) các segment của nó. Path đơn điệu + segment xếp theo thời gian ⇒ cửa sổ các từ
-    liên tiếp không chồng lấn.
+    end) các segment của nó.
 
     Trả {span_index: (start, end)} — CHỈ chứa key của từ có ≥1 segment (không bao giờ gọi
-    min/max trên rỗng). Từ toàn deletion ⇒ không có key ⇒ caller fallback Whisper window.
+    min/max trên rỗng). Từ toàn deletion ⇒ không có key.
     """
     if not spans or not segments or not path:
         return {}
@@ -239,11 +241,13 @@ def _word_segment_times(
     return {k: (v[0], v[1]) for k, v in acc.items()}
 
 
-# Đệm phát lại (giây). Lead lớn hơn để bắt trọn onset (wav2vec hay cắt sát mép âm đầu);
-# trail nhỏ vì từ kế thường bắt đầu ngay sau coda. CẢ HAI đều bị CLAMP theo từ liền kề
-# nên không bao giờ lẹm sang từ khác — đây là chỗ DUY NHẤT tinh chỉnh đệm (không phải FE).
-_WORD_PLAY_LEAD: float = 0.10
-_WORD_PLAY_TRAIL: float = 0.04
+# Đệm phát lại (giây) — "rất nhỏ, 50–100ms mỗi phía": cửa sổ nguồn giờ là Whisper
+# WORD timestamp (ranh giới từ, không phải segment) nên chỉ cần đệm bù sai số biên
+# ±100–300ms của Whisper một phần; đệm to hơn sẽ nghe lẹm từ kế. CẢ HAI đều bị CLAMP
+# theo từ liền kề nên không bao giờ lẹm sang từ khác — đây là chỗ DUY NHẤT tinh chỉnh
+# đệm (không phải FE).
+_WORD_PLAY_LEAD: float = 0.08
+_WORD_PLAY_TRAIL: float = 0.08
 
 
 def _pad_and_clamp_windows(
@@ -297,8 +301,9 @@ def _build_word_details(
     span chuẩn) gắn `skip_reason` cho từ bị Recognition Reliability bỏ qua.
 
     `word_times` (optional): cửa sổ thời gian PHÁT LẠI (start, end giây) theo CHỈ SỐ TỪ
-    chuẩn (khớp `spans`). Caller dựng sẵn từ wav2vec segment (chính xác ~20ms), fallback
-    Whisper window — xem `compute_phoneme_score`. Có → gắn start/end cho WordPronunciation
+    chuẩn (khớp `spans`). Caller dựng sẵn từ Whisper WORD timestamp (ranh giới từ ổn
+    định), fallback wav2vec segment cho từ không map được transcript — xem
+    `compute_phoneme_score`. Có → gắn start/end cho WordPronunciation
     để UI phát lại đoạn audio của riêng từ đó. Thiếu cho 1 từ → start/end = None.
 
     Returns (words, truncated, total_words).

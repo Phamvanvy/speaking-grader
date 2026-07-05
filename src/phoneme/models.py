@@ -210,10 +210,12 @@ class WordPronunciation:
         accuracy: tỉ lệ âm đúng trong từ (ok_count / len(phonemes))
         skip_reason: nếu từ bị Recognition Reliability bỏ qua (không chấm phoneme),
             đây là lý do (vd "whisper_mismatch"); None nếu từ được chấm bình thường.
-        start, end: cửa sổ thời gian (giây) của từ trong audio, lấy từ Whisper word
-            timestamp (xem map_reference_words_to_windows). Cho UI phát lại đoạn audio
-            của RIÊNG từ này. None nếu từ không map được sang transcript word (vd từ bị
-            skip / thí sinh không đọc) hoặc payload cũ — UI khi đó không hiện nút nghe lại.
+        start, end: cửa sổ thời gian (giây) của từ trong audio, lấy từ Whisper WORD
+            timestamp (xem map_reference_words_to_windows; đã đệm ~50–100ms mỗi phía +
+            clamp theo từ kề — _pad_and_clamp_windows), fallback wav2vec segment khi từ
+            không có Whisper window. Cho UI phát lại đoạn audio của RIÊNG từ này. None
+            nếu không có nguồn timing nào (vd từ bị skip / thí sinh không đọc) hoặc
+            payload cũ — UI khi đó không hiện nút nghe lại.
     """
     word: str
     ipa: str

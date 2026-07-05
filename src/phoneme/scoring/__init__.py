@@ -389,11 +389,15 @@ def compute_phoneme_score(
     else:
         accuracy = 1.0  # mọi âm đều skip (ASR nghe nhầm cả) → không có gì để chấm
 
-    # Cửa sổ thời gian phát lại từng từ: ưu tiên wav2vec segment (chính xác ~20ms, đúng
-    # "cái wav2vec nghe" — seg_times tính ở trên), fallback Whisper window cho từ toàn
-    # deletion. word_windows (Whisper) VẪN giữ riêng cho telemetry drift — KHÔNG trộn.
+    # Cửa sổ thời gian phát lại từng từ: ưu tiên Whisper WORD window — ranh giới TỪ
+    # là nguồn ổn định cho playback. wav2vec seg_times CHỈ là fallback cho từ không
+    # map được sang transcript word: seg_times = min/max các segment DTW gán cho từ,
+    # nên khi DTW "mượn" âm từ từ kế thì cửa sổ phình ra cả cụm (bug "discount" phát
+    # thành "20 percent discount" — cửa sổ phát lố >1s dù _pad_and_clamp chỉ clamp
+    # phần ĐỆM, không sửa được cửa sổ thô đã phình). Scoring/telemetry vẫn dùng
+    # word_windows/seg_times như cũ — merge này CHỈ cho playback.
     if word_windows:
-        playback_times: dict[int, tuple[float, float]] = {**word_windows, **seg_times}
+        playback_times: dict[int, tuple[float, float]] = {**seg_times, **word_windows}
     else:
         playback_times = seg_times
     # Đệm + clamp theo từ liền kề → cửa sổ phát lại không lẹm sang từ khác (frontend phát

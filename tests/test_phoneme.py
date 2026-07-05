@@ -1274,10 +1274,12 @@ class TestDriftClassification:
 class TestWordPlaybackWindows:
     """start/end mỗi WordPronunciation (cho UI nghe lại từng từ).
 
-    Nguồn CHÍNH: wav2vec segment (min start / max end các segment DTW gán cho từ — chính
-    xác ~20ms). Fallback: Whisper word_windows cho từ toàn deletion. Cửa sổ ĐÃ được đệm
-    (lead/trail) + CLAMP theo từ liền kề (_pad_and_clamp_windows) nên không lẹm sang từ
-    khác; frontend phát verbatim. (Không cần diagnostics_sink.)"""
+    Nguồn CHÍNH: Whisper WORD window (ranh giới từ ổn định). Fallback: wav2vec segment
+    cho từ KHÔNG có Whisper window — cửa sổ segment suy từ DTW attribution nên khi DTW
+    mượn âm từ từ kế sẽ phình ra cả cụm (bug "discount" phát thành "20 percent
+    discount"), không được làm nguồn chính. Cửa sổ ĐÃ được đệm (lead/trail ~50–100ms)
+    + CLAMP theo từ liền kề (_pad_and_clamp_windows) nên không lẹm sang từ khác;
+    frontend phát verbatim. (Không cần diagnostics_sink.)"""
 
     def _segs(self, pred):
         # segment i có start=i, end=i+1 (giây) — để assert min/max dễ đọc.
@@ -1293,16 +1295,35 @@ class TestWordPlaybackWindows:
         assert score.words[0].start == max(0.0, 0.0 - _WORD_PLAY_LEAD)  # = 0.0
         assert score.words[0].end == round(4.0 + _WORD_PLAY_TRAIL, 3)
 
-    def test_segment_preferred_over_whisper_window(self):
-        # Có cả segment lẫn Whisper window cho cùng từ → segment THẮNG (raw 0..4, đã đệm).
-        from src.phoneme.scoring import _WORD_PLAY_TRAIL
+    def test_whisper_window_preferred_over_segment(self):
+        # Có cả segment lẫn Whisper window cho cùng từ → Whisper WORD window THẮNG
+        # (raw 10..12, đã đệm); segment (0..4) chỉ là fallback khi thiếu window.
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
         ref = ["f", "ɒ", "k", "s"]
         spans = [WordSpan("fox", 0, 4)]
         score = compute_phoneme_score(
             self._segs(["f", "ɒ", "k", "s"]), ref, spans,
-            word_windows={0: (10.0, 12.0)},  # chỉ dùng làm fallback — bị segment override
+            word_windows={0: (10.0, 12.0)},
         )
-        assert (score.words[0].start, score.words[0].end) == (0.0, round(4.0 + _WORD_PLAY_TRAIL, 3))
+        assert (score.words[0].start, score.words[0].end) == (
+            round(10.0 - _WORD_PLAY_LEAD, 3), round(12.0 + _WORD_PLAY_TRAIL, 3))
+
+    def test_playback_not_inflated_by_dtw_borrowed_segments(self):
+        # Bug "discount → 20 percent discount": DTW gán cả segment của từ TRƯỚC cho
+        # từ này → cửa sổ segment phình (0..4 = 4s) dù Whisper nghe từ ở [3.0, 4.0].
+        # Playback phải theo Whisper word window (+đệm), KHÔNG theo cửa sổ segment phình.
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        score = compute_phoneme_score(
+            self._segs(["f", "ɒ", "k", "s"]),  # segments trải 0..4s (mượn từ từ kế)
+            ref, spans,
+            word_windows={0: (3.0, 4.0)},      # Whisper: từ chỉ nằm ở giây 3–4
+        )
+        w = score.words[0]
+        assert (w.start, w.end) == (
+            round(3.0 - _WORD_PLAY_LEAD, 3), round(4.0 + _WORD_PLAY_TRAIL, 3))
+        assert w.end - w.start <= 1.0 + _WORD_PLAY_LEAD + _WORD_PLAY_TRAIL + 1e-9
 
     def test_whisper_fallback_when_word_all_deletion(self):
         # predicted chỉ phủ "cat"; "dog" toàn deletion (không segment) → fallback Whisper.

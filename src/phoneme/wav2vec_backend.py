@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -236,6 +237,46 @@ class FramePosteriors:
             argmax_token=self.id_to_token.get(argmax_id, ""),
             argmax_prob=float(window[best, argmax_id]),
         )
+
+
+@dataclass(frozen=True)
+class ChunkedFramePosteriors:
+    """Posteriors của predict CHUNKED — cùng interface `evidence_stats` với
+    FramePosteriors (consumer duy nhất: _attach_deletion_evidence).
+
+    `chunks`: list (chunk_start_sec, FramePosteriors) theo thứ tự thời gian; mỗi
+    FramePosteriors sống trong toạ độ THỜI GIAN LOCAL của chunk đó. Query bằng
+    thời gian tuyệt đối: trừ offset rồi hỏi từng chunk overlap, trả stats có
+    max_mass LỚN HƠN (đơn giản, deterministic — cửa sổ vắt 2 chunk lấy evidence
+    mạnh hơn). Cửa sổ rơi hoàn toàn vào gap im lặng giữa các chunk →
+    EvidenceStats toàn 0, n_frames=0 (cùng ngữ nghĩa out-of-range của bản đơn).
+    """
+
+    chunks: tuple[tuple[float, "FramePosteriors"], ...]
+
+    def evidence_stats(
+        self, ref_ipa: str, t0: float, t1: float
+    ) -> EvidenceStats | None:
+        best: EvidenceStats | None = None
+        for chunk_start, post in self.chunks:
+            chunk_end = chunk_start + post.probs.shape[0] * post.frame_duration
+            if t1 < chunk_start or t0 > chunk_end:
+                continue
+            stats = post.evidence_stats(ref_ipa, t0 - chunk_start, t1 - chunk_start)
+            if stats is None:
+                continue  # vocab thiếu token — thử chunk khác (vocab chung, hiếm)
+            if best is None or stats.max_mass > best.max_mass:
+                best = stats
+        if best is not None:
+            return best
+        # Không chunk nào đo được: hoặc cửa sổ rơi vào gap im lặng ("đo được và
+        # bằng 0"), hoặc vocab không có token khớp (None như bản đơn) — phân biệt
+        # bằng probe cửa sổ rỗng trên chunk đầu (vocab dùng chung 1 model).
+        if self.chunks:
+            probe = self.chunks[0][1].evidence_stats(ref_ipa, 0.0, 0.0)
+            if probe is None:
+                return None
+        return EvidenceStats(0.0, 0.0, 0.0, 0)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -501,21 +542,139 @@ class Wav2VecPhonemePredictor:
     def predict(
         self,
         audio_path: str,
+        chunk_spans: list[tuple[float, float]] | None = None,
     ) -> tuple[list[PhonemeSegment], str | None]:
         """Predict phoneme segments từ audio file.
 
         Returns:
             (segments, warning) — warning != None nếu backend không sẵn sàng
         """
-        segments, warning, _posteriors = self.predict_with_posteriors(audio_path)
+        segments, warning, _posteriors = self.predict_with_posteriors(
+            audio_path, chunk_spans=chunk_spans
+        )
         return segments, warning
+
+    def _forward_decode(
+        self,
+        waveform: np.ndarray,
+        feature_extractor: Any,
+        model: Any,
+        id_to_label: dict[int, str],
+        torch: Any,
+    ) -> tuple[list[PhonemeSegment], FramePosteriors]:
+        """Một forward pass wav2vec trên waveform → (segments, posteriors).
+
+        Lõi dùng chung cho cả predict single-pass lẫn per-chunk — đúng trình tự
+        ops của bản single-pass cũ (feature extract → cast dtype → forward →
+        softmax → CTC greedy decode) để hành vi không đổi.
+        """
+        audio_duration = len(waveform) / WAV2VEC_SAMPLE_RATE
+
+        inputs = feature_extractor(
+            waveform, sampling_rate=WAV2VEC_SAMPLE_RATE, return_tensors="pt"
+        )
+        input_values = inputs.input_values
+
+        if _is_cuda_device(self.device) and torch.cuda.is_available():
+            input_values = input_values.to(self.device)
+
+        # Cast input theo dtype thật của model (float16 trên CUDA, float32 CPU).
+        model_dtype = next(model.parameters()).dtype
+        input_values = input_values.to(dtype=model_dtype)
+
+        with torch.no_grad():
+            logits = model(input_values).logits
+
+        probs = torch.softmax(logits, dim=-1)
+        prob_numpy = probs[0].cpu().numpy()  # (num_frames, num_labels)
+        num_frames = prob_numpy.shape[0]
+
+        pred_ids = np.argmax(prob_numpy, axis=-1)
+        pred_probs = prob_numpy[np.arange(num_frames), pred_ids]
+
+        if num_frames > 0 and audio_duration > 0:
+            frame_duration = audio_duration / num_frames
+        else:
+            frame_duration = 0.02  # fallback: 50Hz
+
+        segments = _ctc_decode_segments(
+            pred_ids,
+            pred_probs,
+            id_to_label,
+            frame_duration=frame_duration,
+            audio_duration=audio_duration,
+            confidence_threshold=self.confidence_threshold,
+        )
+        posteriors = FramePosteriors(
+            probs=prob_numpy,
+            frame_duration=frame_duration,
+            id_to_token=id_to_label,
+            model_id=self.model_id,
+        )
+        return segments, posteriors
+
+    # Chunk ngắn hơn ngưỡng này bị bỏ qua: conv feature encoder của wav2vec cần
+    # tối thiểu ~25ms sample; chunk gần rỗng không mang thông tin phoneme.
+    _MIN_CHUNK_SEC: float = 0.05
+
+    def _predict_chunked(
+        self,
+        waveform: np.ndarray,
+        chunk_spans: list[tuple[float, float]],
+        feature_extractor: Any,
+        model: Any,
+        id_to_label: dict[int, str],
+        torch: Any,
+    ) -> tuple[list[PhonemeSegment], ChunkedFramePosteriors]:
+        """Predict theo từng chunk span (giây, thời gian tuyệt đối) rồi ghép:
+        segment times CỘNG offset chunk_start; posteriors gói ChunkedFramePosteriors
+        (cùng interface evidence_stats). Spans không hợp lệ/quá ngắn bị bỏ qua.
+        """
+        n_samples = len(waveform)
+        segments: list[PhonemeSegment] = []
+        chunk_posts: list[tuple[float, FramePosteriors]] = []
+        for span_start, span_end in chunk_spans:
+            s0 = max(0, int(span_start * WAV2VEC_SAMPLE_RATE))
+            s1 = min(n_samples, int(span_end * WAV2VEC_SAMPLE_RATE))
+            if (s1 - s0) < self._MIN_CHUNK_SEC * WAV2VEC_SAMPLE_RATE:
+                continue
+            t0 = s0 / WAV2VEC_SAMPLE_RATE  # offset thật sau clamp
+            chunk_started = time.perf_counter()
+            chunk_segments, chunk_post = self._forward_decode(
+                waveform[s0:s1], feature_extractor, model, id_to_label, torch
+            )
+            logger.debug(
+                "wav2vec chunk [%.2f-%.2f]s: %d segments, %d frames, %.2fs",
+                t0, s1 / WAV2VEC_SAMPLE_RATE, len(chunk_segments),
+                chunk_post.probs.shape[0], time.perf_counter() - chunk_started,
+            )
+            for seg in chunk_segments:
+                segments.append(PhonemeSegment(
+                    phoneme=seg.phoneme,
+                    start=round(seg.start + t0, 3),
+                    end=round(seg.end + t0, 3),
+                    confidence=seg.confidence,
+                    backend=seg.backend,
+                ))
+            chunk_posts.append((t0, chunk_post))
+        return segments, ChunkedFramePosteriors(chunks=tuple(chunk_posts))
 
     def predict_with_posteriors(
         self,
         audio_path: str,
-    ) -> tuple[list[PhonemeSegment], str | None, FramePosteriors | None]:
-        """Như `predict` nhưng kèm FramePosteriors (ma trận posterior đã tính sẵn
-        cho CTC decode — không tốn thêm forward pass) để probe deletion-evidence.
+        chunk_spans: list[tuple[float, float]] | None = None,
+    ) -> tuple[
+        list[PhonemeSegment], str | None, FramePosteriors | ChunkedFramePosteriors | None
+    ]:
+        """Như `predict` nhưng kèm posteriors (ma trận đã tính sẵn cho CTC decode —
+        không tốn thêm forward pass) để probe deletion-evidence.
+
+        Args:
+            chunk_spans: optional — danh sách (start, end) giây (từ
+                chunking.compute_chunk_spans). None/rỗng = single-pass như cũ
+                (bit-for-bit). Có spans = forward từng chunk rồi ghép (fix suy
+                giảm wav2vec trên audio dài); segment times là thời gian tuyệt
+                đối; posteriors là ChunkedFramePosteriors (cùng interface).
 
         Returns:
             (segments, warning, posteriors) — posteriors None khi backend lỗi.
@@ -544,60 +703,26 @@ class Wav2VecPhonemePredictor:
                 self.model_id, self.device
             )
 
-            # Extract features
-            inputs = feature_extractor(waveform, sampling_rate=WAV2VEC_SAMPLE_RATE, return_tensors="pt")
-            input_values = inputs.input_values
-
-            # Move input to device and cast precision to match model
-            if _is_cuda_device(self.device) and torch.cuda.is_available():
-                input_values = input_values.to(self.device)
-                
-            # --- ĐOẠN THÊM VÀO ĐỂ FIX LỖI ---
-            # Kiểm tra xem tham số của model đang dùng kiểu dữ liệu nào (float16 hay float32)
-            model_dtype = next(model.parameters()).dtype
-            input_values = input_values.to(dtype=model_dtype)
-            # --------------------------------
-
-            # Forward pass (no grad)
-            with torch.no_grad():
-                logits = model(input_values).logits
-
-            # Move results back to CPU before freeing GPU memory
-            probs = torch.softmax(logits, dim=-1)
-            prob_numpy = probs[0].cpu().numpy()  # (num_frames, num_labels)
-            num_frames = prob_numpy.shape[0]
-
-            # Per-frame argmax token id + prob (CTC decode dùng cả blank frames)
-            pred_ids = np.argmax(prob_numpy, axis=-1)
-            pred_probs = prob_numpy[np.arange(num_frames), pred_ids]
-
-            # Calculate frame duration
-            # wav2vec output frames ≠ input frames; need to estimate
-            # The feature extractor downsamples ~by 320 (for 16kHz → ~50Hz)
-            if num_frames > 0 and audio_duration > 0:
-                frame_duration = audio_duration / num_frames
+            posteriors: FramePosteriors | ChunkedFramePosteriors
+            if chunk_spans:
+                # Chunked: forward từng span rồi ghép (fix suy giảm trên audio
+                # dài). Load audio MỘT lần ở trên; times cộng offset trong helper.
+                segments, posteriors = self._predict_chunked(
+                    waveform, chunk_spans, feature_extractor, model,
+                    id_to_label, torch,
+                )
+                num_frames = sum(
+                    p.probs.shape[0] for _t, p in posteriors.chunks
+                )
+                mode = f"chunked×{len(posteriors.chunks)}"
             else:
-                frame_duration = 0.02  # fallback: 50Hz
-
-            # CTC greedy decode → segments. id_to_label đến từ vocab.json
-            # (model espeak: token = IPA). _resolve_ipa bỏ silence/blank.
-            segments = _ctc_decode_segments(
-                pred_ids,
-                pred_probs,
-                id_to_label,
-                frame_duration=frame_duration,
-                audio_duration=audio_duration,
-                confidence_threshold=self.confidence_threshold,
-            )
-
-            # Giữ lại posteriors cho deletion-evidence probe (SHADOW) — ma trận đã
-            # ở CPU sẵn, chỉ là không vứt đi; sống trong request rồi giải phóng.
-            posteriors = FramePosteriors(
-                probs=prob_numpy,
-                frame_duration=frame_duration,
-                id_to_token=id_to_label,
-                model_id=self.model_id,
-            )
+                # Single-pass (đường cũ) — giữ lại posteriors cho deletion-
+                # evidence probe (SHADOW): ma trận đã ở CPU sẵn, không vứt đi.
+                segments, posteriors = self._forward_decode(
+                    waveform, feature_extractor, model, id_to_label, torch
+                )
+                num_frames = posteriors.probs.shape[0]
+                mode = "single"
 
             # Free CUDA memory after prediction
             if _is_cuda_device(self.device) and torch.cuda.is_available():
@@ -606,7 +731,8 @@ class Wav2VecPhonemePredictor:
                 logger.debug("CUDA free memory after wav2vec: %.2f GB", free_mem)
 
             logger.info(
-                "wav2vec predict: %s → %d phoneme segments (%d frames, %.1fs audio)",
+                "wav2vec predict [%s]: %s → %d phoneme segments (%d frames, %.1fs audio)",
+                mode,
                 audio_path,
                 len(segments),
                 num_frames,
