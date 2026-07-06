@@ -165,7 +165,9 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     };
     // Full reference IPA, wrapped in /…/ here (backend stores symbols without slashes).
     // `_hidden` (coda /r/ ở chế độ Anh-Anh) bị bỏ qua nhưng KHÔNG đổi chiều dài mảng gốc.
-    const ipaHtml = w => `<span class="phoneme-ipa">/${(w.phonemes || []).filter(p => !p._hidden).map(symHtml).join('')}/</span>`;
+    // Nối các span âm vị bằng thin space (U+2009) → "zz"/"dɪd" tách thành /z z/, /d ɪ d/;
+    // diphthong (aɪ) là MỘT span nên không bị tách; stressMark dính liền âm của nó.
+    const ipaHtml = w => `<span class="phoneme-ipa">/${(w.phonemes || []).filter(p => !p._hidden).map(symHtml).join(' ')}/</span>`;
     // Heard transcription: ok→symbol, sub significant→heard (bold+red), sub low→heard
     // neutral, del→omitted.
     const heardHtml = w => {
@@ -173,7 +175,7 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
             isSignificant(p) && p.status === 'sub'
                 ? `<span class="phoneme-sym phoneme-sym--bad">${escapeHtml(p.heard ?? '')}</span>`
                 : `<span class="phoneme-sym">${escapeHtml(p.status === 'sub' ? (p.heard ?? '') : p.symbol)}</span>`);
-        return `<span class="phoneme-ipa">/${parts.join('')}/</span>`;
+        return `<span class="phoneme-ipa">/${parts.join(' ')}/</span>`;
     };
 
     // ── Per-word cards (all words) ──

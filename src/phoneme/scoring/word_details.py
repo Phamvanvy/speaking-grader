@@ -250,6 +250,38 @@ _WORD_PLAY_LEAD: float = 0.08
 _WORD_PLAY_TRAIL: float = 0.08
 
 
+def _merge_playback_windows(
+    seg_times: dict[int, tuple[float, float]],
+    word_windows: dict[int, tuple[float, float]],
+) -> dict[int, tuple[float, float]]:
+    """Gộp cửa sổ phát lại: Whisper WORD window (ranh giới TỪ) SIẾT theo cửa sổ wav2vec
+    segment (âm vị THỰC của từ) khi cả hai chồng nhau.
+
+    Whisper word timestamp ổn định về VỊ TRÍ từ nhưng có thể "lem" sang từ kế khi nối âm
+    hoặc gộp token (vd "9 am" → 1 token → "am" phát cả "9 am"; "helps me" → "helps" phát
+    cả "me"): cửa sổ Whisper thô nuốt luôn từ hàng xóm. Cửa sổ segment (min/max các
+    segment DTW gán đúng âm vị của từ — xem _word_segment_times) bám sát âm vị thực nên
+    dùng để SIẾT biên: `start = max(whisper.start, seg.start)`, `end = min(whisper.end,
+    seg.end)`. Chỉ siết khi giao HỢP LỆ (`start < end`, tức hai cửa sổ thực sự chồng nhau);
+    nếu rời nhau (mapping lệch / segment phình lệch hẳn) → GIỮ NGUYÊN Whisper (an toàn, không
+    tạo cửa sổ rỗng). Siết chỉ cắt phần Whisper nằm NGOÀI âm vị của từ — phần bị cắt cùng
+    lắm là âm bị deletion (không có segment ⇒ audio vốn vắng/nuốt) nên không mất tiếng thật.
+    Từ chỉ có MỘT nguồn (Whisper-only: từ toàn deletion; seg-only: không map transcript) →
+    dùng nguyên nguồn đó. Trả dict theo CHỈ SỐ TỪ chuẩn, đưa thẳng vào _pad_and_clamp_windows.
+    """
+    if not word_windows:
+        return dict(seg_times)
+    out: dict[int, tuple[float, float]] = dict(seg_times)
+    for k, (ws, we) in word_windows.items():
+        seg = seg_times.get(k)
+        if seg is None:                    # từ toàn deletion → chỉ có Whisper
+            out[k] = (ws, we)
+            continue
+        ns, ne = max(ws, seg[0]), min(we, seg[1])
+        out[k] = (ns, ne) if ns < ne else (ws, we)  # giao rỗng → giữ Whisper
+    return out
+
+
 def _pad_and_clamp_windows(
     times: dict[int, tuple[float, float]],
     lead: float = _WORD_PLAY_LEAD,

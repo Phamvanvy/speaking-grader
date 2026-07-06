@@ -79,6 +79,14 @@ _WORD_IPA_OVERRIDES: Final[dict[str, list[str]]] = {
     # ex- family uses IH0 (→ɪ). EH0→e gives wrong /ekˈstriːm.../; pin IH0 → /ɪkˈstriːm.../.
     "extreme": ["IH0", "K", "S", "T", "R", "IY1", "M"],
     "extremely": ["IH0", "K", "S", "T", "R", "IY1", "M", "L", "IY0"],
+    # CMUdict has only EH0-initial entries for the enhance family (→ wrong /en.../) while
+    # the target accent is /ɪn.../ — same class as extreme/especially. ("enhanced" is NOT
+    # listed: CMUdict already carries an IH0 variant the ranker picks.) Pin IH0 → /ɪnˈhæns/.
+    "enhance": ["IH0", "N", "HH", "AE1", "N", "S"],
+    "enhancement": ["IH0", "N", "HH", "AE1", "N", "S", "M", "AH0", "N", "T"],
+    "enhances": ["IH0", "N", "HH", "AE1", "N", "S", "IH0", "Z"],
+    "enhancing": ["IH0", "N", "HH", "AE1", "N", "S", "IH0", "NG"],
+    "enhancer": ["IH0", "N", "HH", "AE1", "N", "S", "ER0"],
     # Proper nouns not in CMUdict — must stay permanently.
     "vietnamese": ["V", "IY2", "EH0", "T", "N", "AH0", "M", "IY1", "Z"],
     "vietnam": ["V", "IY2", "EH0", "T", "N", "AA1", "M"],

@@ -54,6 +54,7 @@ from .word_details import (
     _apply_coverage_gate,
     _attach_deletion_evidence,
     _build_word_details,
+    _merge_playback_windows,
     _pad_and_clamp_windows,
     _ref_metadata,
     _resolve_skips,
@@ -407,17 +408,14 @@ def compute_phoneme_score(
     else:
         accuracy = 1.0  # mọi âm đều skip (ASR nghe nhầm cả) → không có gì để chấm
 
-    # Cửa sổ thời gian phát lại từng từ: ưu tiên Whisper WORD window — ranh giới TỪ
-    # là nguồn ổn định cho playback. wav2vec seg_times CHỈ là fallback cho từ không
-    # map được sang transcript word: seg_times = min/max các segment DTW gán cho từ,
-    # nên khi DTW "mượn" âm từ từ kế thì cửa sổ phình ra cả cụm (bug "discount" phát
-    # thành "20 percent discount" — cửa sổ phát lố >1s dù _pad_and_clamp chỉ clamp
-    # phần ĐỆM, không sửa được cửa sổ thô đã phình). Scoring/telemetry vẫn dùng
-    # word_windows/seg_times như cũ — merge này CHỈ cho playback.
-    if word_windows:
-        playback_times: dict[int, tuple[float, float]] = {**seg_times, **word_windows}
-    else:
-        playback_times = seg_times
+    # Cửa sổ thời gian phát lại từng từ: Whisper WORD window là nguồn ranh giới TỪ, nhưng
+    # bị SIẾT theo cửa sổ wav2vec segment (âm vị thực của từ) khi cả hai chồng nhau —
+    # chặn cả 2 chiều "lem": Whisper gộp token/lem sang từ kế (bug "am" phát "9 am",
+    # "helps" phát "helps me") LẪN seg phình do DTW mượn âm (bug "discount" phát "20
+    # percent discount"). Giao rỗng → giữ Whisper; từ chỉ 1 nguồn → dùng nguồn đó (xem
+    # _merge_playback_windows). Scoring/telemetry vẫn dùng word_windows/seg_times như
+    # cũ — merge này CHỈ cho playback.
+    playback_times = _merge_playback_windows(seg_times, word_windows or {})
     # Đệm + clamp theo từ liền kề → cửa sổ phát lại không lẹm sang từ khác (frontend phát
     # verbatim). Backend là nơi DUY NHẤT biết ranh giới từ kề nên đệm phải nằm ở đây.
     playback_times = _pad_and_clamp_windows(playback_times)

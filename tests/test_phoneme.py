@@ -1333,6 +1333,45 @@ class TestWordPlaybackWindows:
             round(3.0 - _WORD_PLAY_LEAD, 3), round(4.0 + _WORD_PLAY_TRAIL, 3))
         assert w.end - w.start <= 1.0 + _WORD_PLAY_LEAD + _WORD_PLAY_TRAIL + 1e-9
 
+    def test_whisper_window_tightened_by_segment_left_bleed(self):
+        # Bug "am → 9 am": Whisper gộp "9 am" thành cửa sổ thô [1.0, 4.0] (lem sang "9"
+        # ở bên trái), nhưng âm vị /æ//m/ của "am" chỉ ở segment giây 3–4. Siết theo seg →
+        # start bám 3.0 (bỏ "9"), không còn phát cả "9 am".
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
+        ref = ["æ", "m"]
+        spans = [WordSpan("am", 0, 2)]
+        segs = [PhonemeSegment(phoneme=p, start=float(i + 3), end=float(i + 4), confidence=0.9)
+                for i, p in enumerate(["æ", "m"])]  # âm vị "am" ở giây 3–5
+        score = compute_phoneme_score(segs, ref, spans, word_windows={0: (1.0, 5.0)})
+        w = score.words[0]
+        assert (w.start, w.end) == (
+            round(3.0 - _WORD_PLAY_LEAD, 3), round(5.0 + _WORD_PLAY_TRAIL, 3))
+
+    def test_whisper_window_tightened_by_segment_right_bleed(self):
+        # Bug "helps → helps me": Whisper thô [0.0, 6.0] lem sang "me" bên phải; âm vị của
+        # "helps" chỉ ở giây 0–4. Siết theo seg → end bám 4.0, không phát lấn "me".
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
+        ref = ["h", "e", "l", "p", "s"]
+        spans = [WordSpan("helps", 0, 5)]
+        score = compute_phoneme_score(
+            self._segs(["h", "e", "l", "p", "s"]), ref, spans,  # segments giây 0–5
+            word_windows={0: (0.0, 6.0)},                        # Whisper lem tới "me"
+        )
+        w = score.words[0]
+        assert (w.start, w.end) == (0.0, round(5.0 + _WORD_PLAY_TRAIL, 3))
+
+    def test_disjoint_whisper_and_segment_keeps_whisper(self):
+        # Whisper và segment rời hẳn nhau (mapping lệch) → giữ Whisper, KHÔNG tạo cửa sổ rỗng.
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
+        ref = ["f", "ɒ", "k", "s"]
+        spans = [WordSpan("fox", 0, 4)]
+        score = compute_phoneme_score(
+            self._segs(["f", "ɒ", "k", "s"]), ref, spans,  # seg 0–4
+            word_windows={0: (10.0, 12.0)},                 # Whisper 10–12 (rời seg)
+        )
+        assert (score.words[0].start, score.words[0].end) == (
+            round(10.0 - _WORD_PLAY_LEAD, 3), round(12.0 + _WORD_PLAY_TRAIL, 3))
+
     def test_whisper_fallback_when_word_all_deletion(self):
         # predicted chỉ phủ "cat"; "dog" toàn deletion (không segment) → fallback Whisper.
         from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
@@ -1621,6 +1660,16 @@ class TestReferenceIpaAccuracy:
         sym, st = word_to_ipa_with_stress("especially")
         assert sym == ["ɪ", "s", "p", "e", "ʃ", "ə", "l", "iː"]  # /ɪspˈeʃəliː/
         assert "primary" in st
+
+    def test_enhance_family_override(self):
+        # CMUdict has only EH0-initial entries (→ wrong /en.../); override pins IH0 → /ɪn.../.
+        sym, st = word_to_ipa_with_stress("enhance")
+        assert sym == ["ɪ", "n", "h", "æ", "n", "s"]  # /ɪnˈhæns/
+        assert "primary" in st
+        for w in ("enhancement", "enhances", "enhancing", "enhancer"):
+            assert word_to_ipa_with_stress(w)[0][:2] == ["ɪ", "n"], w  # /ɪn.../ not /en.../
+        # "enhanced" already has an IH0 CMUdict variant the ranker picks — must stay /ɪn.../.
+        assert word_to_ipa_with_stress("enhanced")[0][:2] == ["ɪ", "n"]
 
     def test_override_validation_passes_and_rejects_bad_token(self):
         import re

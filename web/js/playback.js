@@ -18,7 +18,7 @@ let wordAudioCtx = null;
 
 // Bản ghi của người học thường nhỏ hơn hẳn audio mẫu TTS (🔊) → khuếch đại bằng
 // Web Audio API GainNode (thẻ <audio>.volume bị giới hạn tối đa 1.0, không đủ to).
-const WORD_SEGMENT_GAIN = 1.5;
+const WORD_SEGMENT_GAIN = 1;
 
 function ensureWordGain() {
     if (wordGainNode) return;

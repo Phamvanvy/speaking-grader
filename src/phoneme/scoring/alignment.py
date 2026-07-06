@@ -47,63 +47,73 @@ _RECOGNIZER_DROP_CONS: Final[frozenset[str]] = frozenset({"ð", "h"})
 # DTW alignment (simplified, pure Python — không cần numpy dependency)
 # ──────────────────────────────────────────────────────────────────────────────
 
+# Gap cost cho indel (insertion/deletion) trong DTW. = chi phí substitution TỆ NHẤT
+# (1 − sim ∈ [0,1]) nên del+ins (2·GAP = 2.0) KHÔNG BAO GIỜ rẻ hơn 1 substitution
+# thật (≤1.0) → sub thật không bao giờ vỡ thành del+ins. Nhưng khi 1 âm reference bị
+# NUỐT và âm của từ kế lấp vào chỗ đó, del(âm nuốt)+match(âm từ kế) THẮNG sub+del méo
+# — sửa mis-attribution biên từ (vd non-rhotic "are you": /r/ nuốt, /j/ của "you" lấp
+# vào; trước đây r→j sub oan + /j/ của "you" thành deletion).
+_DTW_GAP_COST: Final[float] = 1.0
+
+
 def _dtw_align(
     predicted: list[str],
     reference: list[str],
 ) -> list[tuple[int, int]]:
-    """Dynamic Time Warping: align predicted → reference phoneme sequences.
+    """Global alignment (Needleman–Wunsch) predicted → reference phoneme sequences.
 
-    Returns list of (pred_idx, ref_idx) pairs theo optimal path.
+    Returns list of (pred_idx, ref_idx) pairs theo optimal path (-1 = gap).
+
+    Sub cost = 1 − phoneme_similarity (cùng nguồn chân lý với scoring); indel = _DTW_GAP_COST
+    CỐ ĐỊNH (KHÔNG phải local match_cost — công thức cũ cộng match_cost vào cả nước indel làm
+    aligner ưu tiên substitution hơn deletion+match dù del+match đúng và rẻ hơn thật).
+    Biên inf (góc neo hai đầu) giữ endpoint constraint như DTW cũ — không mở gap đầu/cuối.
+    Backpointer lưu trong forward pass (thay vì suy lại từ cumulative cost) → tie-break rõ:
+    ưu tiên diagonal (sub/match) khi hoà, giữ hành vi cũ.
     """
     if not predicted or not reference:
         return []
 
     n, m = len(predicted), len(reference)
 
-    # Cost matrix: 0 = match, 1-m similarity = mismatch cost
-    cost = [[0.0] * (m + 1) for _ in range(n + 1)]
+    inf = float("inf")
+    cost = [[inf] * (m + 1) for _ in range(n + 1)]
     cost[0][0] = 0.0
-    for i in range(1, n + 1):
-        cost[i][0] = float("inf")
-    for j in range(1, m + 1):
-        cost[0][j] = float("inf")
+    # move[i][j]: hướng đi tới ô này — 'D' diagonal (sub/match), 'U' insertion, 'L' deletion.
+    move: list[list[str | None]] = [[None] * (m + 1) for _ in range(n + 1)]
 
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            sim = phoneme_similarity(predicted[i - 1], reference[j - 1])
-            match_cost = 1.0 - sim  # 0.0 = match, 1.0 = hoàn toàn khác
-            cost[i][j] = match_cost + min(
-                cost[i - 1][j - 1],   # match/substitution (diagonal)
-                cost[i - 1][j],       # insertion in predicted (vertical)
-                cost[i][j - 1],       # deletion from reference (horizontal)
+            sub = cost[i - 1][j - 1] + (
+                1.0 - phoneme_similarity(predicted[i - 1], reference[j - 1])
             )
+            up = cost[i - 1][j] + _DTW_GAP_COST      # insertion (predicted i, no reference)
+            left = cost[i][j - 1] + _DTW_GAP_COST    # deletion (reference j, no predicted)
+            best = min(sub, up, left)
+            cost[i][j] = best
+            # Hoà → ưu tiên diagonal trước, rồi insertion (khớp thứ tự cũ).
+            move[i][j] = "D" if best == sub else ("U" if best == up else "L")
 
-    # Backtrace
+    # Backtrace theo backpointer.
     path: list[tuple[int, int]] = []
     i, j = n, m
     while i > 0 or j > 0:
         if i == 0:
             j -= 1
-            path.append((-1, j))  # deletion
+            path.append((-1, j))  # deletion (biên trên)
         elif j == 0:
             i -= 1
-            path.append((i, -1))  # insertion
+            path.append((i, -1))  # insertion (biên trái)
+        elif move[i][j] == "D":
+            i -= 1
+            j -= 1
+            path.append((i, j))   # match or substitution
+        elif move[i][j] == "U":
+            i -= 1
+            path.append((i, -1))  # insertion (predicted i, không có reference)
         else:
-            # Find which predecessor gave the min cost (excluding match_cost)
-            cum_diag = cost[i - 1][j - 1]
-            cum_up = cost[i - 1][j]
-            cum_left = cost[i][j - 1]
-            minimum = min(cum_diag, cum_up, cum_left)
-            if cum_diag == minimum:
-                i -= 1
-                j -= 1
-                path.append((i, j))  # match or substitution
-            elif cum_up == minimum:
-                i -= 1
-                path.append((i, -1))  # insertion (predicted i, không có reference)
-            else:
-                j -= 1
-                path.append((-1, j))  # deletion
+            j -= 1
+            path.append((-1, j))  # deletion
 
     path.reverse()
     return path
