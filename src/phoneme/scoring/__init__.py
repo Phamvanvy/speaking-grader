@@ -13,7 +13,7 @@ Tổ chức (package):
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from typing import TYPE_CHECKING
 
 from ..diagnostics import (
@@ -56,6 +56,7 @@ from .word_details import (
     _build_word_details,
     _merge_playback_windows,
     _pad_and_clamp_windows,
+    _reanchor_locked_windows,
     _ref_metadata,
     _resolve_skips,
     _score_deletion,
@@ -142,6 +143,7 @@ def compute_phoneme_score(
     confidence_knee: float = PHONEME_CONFIDENCE_KNEE,
     diagnostics_sink: Callable[[list[WordDiagnostic]], None] | None = None,
     word_windows: Mapping[int, tuple[float, float]] | None = None,
+    word_windows_locked: Collection[int] | None = None,
     l1_enabled: bool = False,
     l1_min_confidence: float = PHONEME_L1_MIN_CONFIDENCE,
     low_conf_floor: float = PHONEME_LOW_CONF_FLOOR,
@@ -190,6 +192,12 @@ def compute_phoneme_score(
             KHÔNG ảnh hưởng điểm — bật coverage_gate_enabled/drift_cap_enabled thì CÓ
             (thay đổi có chủ đích, xem 2 gate bên dưới). Telemetry drift vẫn cần thêm
             diagnostics_sink.
+        word_windows_locked: optional — CHỈ SỐ TỪ có cửa sổ Whisper đã bị CẮT sub-token
+            từ upstream (diagnostics.subtoken_window — token alphanumeric "9am" mà
+            reference chỉ còn "am"). Với các từ này DTW attribution KHÔNG đáng tin (âm
+            của phần số bị rơi không có trong reference, bị "hút" vào từ) → playback
+            BỎ QUA bước siết theo seg_times, dùng nguyên cửa sổ đã cắt (đảm bảo chứa
+            từ thật). CHỈ ảnh hưởng playback — scoring/telemetry không đổi.
         l1_enabled: bật L1-aware layer (Vietnamese). False (mặc định) = hành vi y hệt trước
             (bit-for-bit). True = giảm penalty cho nuốt phụ âm cuối kiểu L1 + trung hoà sub
             confidence rất thấp; vẫn hiển thị (accent note). KHÔNG skip (Reliability mới được skip).
@@ -415,7 +423,18 @@ def compute_phoneme_score(
     # percent discount"). Giao rỗng → giữ Whisper; từ chỉ 1 nguồn → dùng nguồn đó (xem
     # _merge_playback_windows). Scoring/telemetry vẫn dùng word_windows/seg_times như
     # cũ — merge này CHỈ cho playback.
-    playback_times = _merge_playback_windows(seg_times, word_windows or {})
+    playback_times = _merge_playback_windows(
+        seg_times, word_windows or {}, locked=word_windows_locked
+    )
+    # Từ locked (cửa sổ cắt sub-token "9am"→"am"): cắt theo tỉ lệ ký tự chỉ XẤP XỈ
+    # (ngập ngừng/kéo dài phần số → vẫn dính "nine"), DTW attribution thì nhiễm →
+    # neo lại theo acoustic: fitting-align âm vị của từ vào segments trong cửa sổ,
+    # lấy đúng khoảng đoạn khớp (xem _reanchor_locked_windows). CHỈ playback.
+    if word_windows_locked and reference_spans:
+        _reanchor_locked_windows(
+            playback_times, word_windows_locked, segments,
+            reference_phonemes, reference_spans,
+        )
     # Đệm + clamp theo từ liền kề → cửa sổ phát lại không lẹm sang từ khác (frontend phát
     # verbatim). Backend là nơi DUY NHẤT biết ranh giới từ kề nên đệm phải nằm ở đây.
     playback_times = _pad_and_clamp_windows(playback_times)

@@ -75,6 +75,42 @@ def _normalize_word(text: str) -> str:
     return "".join(_WORD_TOKEN_RE.findall((text or "").lower()))
 
 
+def subtoken_window(
+    ref_word: str,
+    hyp_text: str,
+    start: float,
+    end: float,
+) -> tuple[float, float]:
+    """Cắt cửa sổ Whisper theo tỉ lệ ký tự khi ref word chỉ là MỘT PHẦN của token.
+
+    Tokenizer reference ([a-zA-Z'-]+, xem text_to_ipa_sequence_with_spans) BỎ chữ số
+    nên token alphanumeric của Whisper ("9am", "10pm") chỉ còn phần chữ trong danh
+    sách từ tham chiếu ("am") — cửa sổ nguyên token phát cả phần số ("nine"). Khi hyp
+    token CÓ chữ số và ref (normalized) là substring thật sự của nó → cắt cửa sổ theo
+    vị trí ký tự của ref trong token (xấp xỉ: "9am" nói "nine ei em" ~3 âm tiết, 1/3
+    cuối rơi sát hết "nine"); _merge_playback_windows vẫn siết tiếp bằng wav2vec sau.
+    Guard chữ số là BẮT BUỘC: substring giữa hai từ thuần chữ (fuzzy match "at"↔"late")
+    là trùng hợp chính tả, không nói lên vị trí thời gian → giữ nguyên cửa sổ. Ref lặp
+    lại nhiều lần trong token → lấy occurrence ĐẦU (hiếm, chấp nhận xấp xỉ).
+    """
+    ref_norm = (ref_word or "").lower()
+    hyp_norm = _normalize_word(hyp_text)
+    if (
+        not ref_norm
+        or ref_norm == hyp_norm
+        or not any(c.isdigit() for c in hyp_norm)
+        or ref_norm not in hyp_norm
+    ):
+        return (start, end)
+    pos = hyp_norm.find(ref_norm)
+    dur = end - start
+    n = len(hyp_norm)
+    return (
+        start + dur * (pos / n),
+        start + dur * ((pos + len(ref_norm)) / n),
+    )
+
+
 def map_reference_words_to_indices(
     reference_words: list[str],
     transcript_texts: list[str],
@@ -123,13 +159,20 @@ def map_reference_words_to_windows(
 
     Wrapper trên map_reference_words_to_indices (xem docstring đó cho quy tắc khớp).
     `transcript_words`: list (text, start_s, end_s) lấy thẳng từ Whisper word timestamps.
+    Cửa sổ đi qua subtoken_window: token alphanumeric ("9am") bị cắt còn đúng phần
+    ref word — CÙNG định nghĩa cửa sổ với đường UI playback (core), không lệch nhau.
     Trả {word_index: (start_s, end_s)}; chỉ số khớp WordSpan của scorer (cùng nguồn từ).
     """
     indices = map_reference_words_to_indices(
         reference_words, [t for (t, _s, _e) in transcript_words]
     )
     return {
-        i: (float(transcript_words[j][1]), float(transcript_words[j][2]))
+        i: subtoken_window(
+            reference_words[i],
+            transcript_words[j][0],
+            float(transcript_words[j][1]),
+            float(transcript_words[j][2]),
+        )
         for i, j in indices.items()
     }
 

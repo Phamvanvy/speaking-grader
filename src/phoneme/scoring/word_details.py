@@ -9,7 +9,7 @@ from __future__ import annotations
 import bisect
 import dataclasses
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING
 
 from ..diagnostics import DRIFT_WINDOW_PAD_SEC, is_within_word_window
@@ -18,6 +18,7 @@ from ..ipa import (
     deletion_severity,
     is_vowel,
     normalize_ipa,
+    phoneme_similarity,
 )
 from ..l1_vietnamese import PenaltyReason, match_l1_final_deletion
 from ..models import (
@@ -248,38 +249,149 @@ def _word_segment_times(
 # đệm (không phải FE).
 _WORD_PLAY_LEAD: float = 0.08
 _WORD_PLAY_TRAIL: float = 0.08
+# Sàn thời lượng cho cửa sổ ĐÃ SIẾT trong _merge_playback_windows: giao Whisper∩segment
+# ngắn hơn mức này coi như seg_times gán THIẾU (âm bị DTW "mượn" sang từ kế / deletion giả
+# của wav2vec) → không tin intersection, giữ nguyên Whisper. ~2 âm vị (60–120ms/âm).
+_MERGE_MIN_DUR: float = 0.2
 
 
 def _merge_playback_windows(
     seg_times: dict[int, tuple[float, float]],
     word_windows: dict[int, tuple[float, float]],
+    locked: Collection[int] | None = None,
 ) -> dict[int, tuple[float, float]]:
     """Gộp cửa sổ phát lại: Whisper WORD window (ranh giới TỪ) SIẾT theo cửa sổ wav2vec
     segment (âm vị THỰC của từ) khi cả hai chồng nhau.
 
     Whisper word timestamp ổn định về VỊ TRÍ từ nhưng có thể "lem" sang từ kế khi nối âm
-    hoặc gộp token (vd "9 am" → 1 token → "am" phát cả "9 am"; "helps me" → "helps" phát
-    cả "me"): cửa sổ Whisper thô nuốt luôn từ hàng xóm. Cửa sổ segment (min/max các
+    hoặc gộp token (vd "helps me" → "helps" phát cả "me"): cửa sổ Whisper thô nuốt luôn
+    từ hàng xóm. Riêng token alphanumeric ("9am" → ref "am") đã được CẮT từ upstream
+    (diagnostics.subtoken_window) trước khi tới đây — merge chỉ còn là lớp siết thêm. Cửa sổ segment (min/max các
     segment DTW gán đúng âm vị của từ — xem _word_segment_times) bám sát âm vị thực nên
     dùng để SIẾT biên: `start = max(whisper.start, seg.start)`, `end = min(whisper.end,
-    seg.end)`. Chỉ siết khi giao HỢP LỆ (`start < end`, tức hai cửa sổ thực sự chồng nhau);
-    nếu rời nhau (mapping lệch / segment phình lệch hẳn) → GIỮ NGUYÊN Whisper (an toàn, không
-    tạo cửa sổ rỗng). Siết chỉ cắt phần Whisper nằm NGOÀI âm vị của từ — phần bị cắt cùng
-    lắm là âm bị deletion (không có segment ⇒ audio vốn vắng/nuốt) nên không mất tiếng thật.
+    seg.end)`. Chỉ siết khi giao đủ dài (`>= _MERGE_MIN_DUR`); giao rỗng/quá ngắn (mapping
+    lệch / seg_times gán thiếu vì âm bị DTW "mượn" sang từ kế hoặc deletion giả) → GIỮ NGUYÊN
+    Whisper — siết theo cửa sổ thiếu sẽ cắt mất tiếng thật, tệ nhất co về một mẩu sub-word.
+    Limitation còn lại: mất MỘT âm biên khi seg thiếu đúng âm đó vẫn có thể xảy ra (đệm
+    _WORD_PLAY_TRAIL bù một phần) — chấp nhận, không chặn được rẻ hơn.
     Từ chỉ có MỘT nguồn (Whisper-only: từ toàn deletion; seg-only: không map transcript) →
-    dùng nguyên nguồn đó. Trả dict theo CHỈ SỐ TỪ chuẩn, đưa thẳng vào _pad_and_clamp_windows.
+    dùng nguyên nguồn đó. `locked`: chỉ số từ có cửa sổ ĐÃ CẮT sub-token từ upstream
+    (token alphanumeric "9am" → ref "am") — DTW attribution của các từ này KHÔNG đáng tin
+    (âm phần số bị rơi không có trong reference, bị "hút" vào từ, seg_times trỏ nhầm chỗ)
+    → BỎ QUA siết, giữ nguyên cửa sổ đã cắt (đảm bảo chứa từ thật).
+    Trả dict theo CHỈ SỐ TỪ chuẩn, đưa thẳng vào _pad_and_clamp_windows.
     """
     if not word_windows:
         return dict(seg_times)
     out: dict[int, tuple[float, float]] = dict(seg_times)
+    locked_set = frozenset(locked or ())
     for k, (ws, we) in word_windows.items():
         seg = seg_times.get(k)
-        if seg is None:                    # từ toàn deletion → chỉ có Whisper
-            out[k] = (ws, we)
+        if seg is None or k in locked_set:  # toàn deletion / cửa sổ đã cắt sub-token
+            out[k] = (ws, we)               # → chỉ dùng Whisper
             continue
         ns, ne = max(ws, seg[0]), min(we, seg[1])
-        out[k] = (ns, ne) if ns < ne else (ws, we)  # giao rỗng → giữ Whisper
+        out[k] = (ns, ne) if ne - ns >= _MERGE_MIN_DUR else (ws, we)  # giao rỗng/sliver → giữ Whisper
     return out
+
+
+# Gap cost cho fitting alignment re-anchor — CÙNG thang với homograph._GAP_COST
+# (sub cost tối đa = 1 − similarity ∈ [0,1]) để indel không rẻ hơn sub tệ nhất.
+_REANCHOR_GAP_COST: float = 1.0
+# Trần cost TRUNG BÌNH mỗi âm reference để chấp nhận vùng khớp: vượt trần nghĩa là
+# trong cửa sổ không có đoạn nào giống từ (học viên không đọc / wav2vec không nghe
+# ra) → đừng neo vào rác, giữ cửa sổ Whisper đã cắt (fallback an toàn).
+_REANCHOR_MAX_AVG_COST: float = 0.6
+
+
+def _fit_word_segments(
+    predicted: list[str], reference: list[str]
+) -> tuple[int, int, float] | None:
+    """FITTING alignment (reference khớp TRỌN VẸN vào 1 đoạn predicted) + traceback.
+
+    Cùng công thức với homograph._alignment_cost (sub = 1 − phoneme_similarity,
+    gap = _REANCHOR_GAP_COST, prefix/suffix predicted bỏ TỰ DO) nhưng trả thêm VỊ TRÍ:
+    (i0, i1, cost) — [i0, i1) là đoạn predicted mà reference khớp vào, cost là tổng
+    cost vùng khớp. None nếu reference khớp toàn gap (không có bằng chứng segment nào).
+    Nhỏ (từ ~7 âm × window ~10 segment) nên O(n·m) bảng đầy đủ không đáng kể.
+    """
+    n, m = len(predicted), len(reference)
+    if not n or not m:
+        return None
+    dp = [[0.0] * (m + 1) for _ in range(n + 1)]
+    dp[0] = [j * _REANCHOR_GAP_COST for j in range(m + 1)]
+    for i in range(1, n + 1):
+        # dp[i][0] = 0: bỏ predicted prefix miễn phí (fitting)
+        for j in range(1, m + 1):
+            sub = dp[i - 1][j - 1] + (
+                1.0 - phoneme_similarity(predicted[i - 1], reference[j - 1])
+            )
+            dp[i][j] = min(sub, dp[i - 1][j] + _REANCHOR_GAP_COST,
+                           dp[i][j - 1] + _REANCHOR_GAP_COST)
+    # Kết thúc tại i bất kỳ (bỏ suffix miễn phí): lấy i nhỏ nhất đạt cost min —
+    # deterministic, ưu tiên occurrence đầu.
+    best_i = min(range(n + 1), key=lambda i: dp[i][m])
+    cost = dp[best_i][m]
+    # Traceback về j=0, ghi các predicted index đi qua nhánh sub (diagonal). So sánh
+    # float bằng == an toàn: tính lại đúng biểu thức đã điền bảng.
+    matched: list[int] = []
+    i, j = best_i, m
+    while j > 0:
+        if i > 0 and dp[i][j] == dp[i - 1][j - 1] + (
+            1.0 - phoneme_similarity(predicted[i - 1], reference[j - 1])
+        ):
+            matched.append(i - 1)
+            i, j = i - 1, j - 1
+        elif i > 0 and dp[i][j] == dp[i - 1][j] + _REANCHOR_GAP_COST:
+            i -= 1
+        else:
+            j -= 1
+    if not matched:
+        return None
+    return (min(matched), max(matched) + 1, cost)
+
+
+def _reanchor_locked_windows(
+    times: dict[int, tuple[float, float]],
+    locked: Collection[int],
+    segments: list[PhonemeSegment],
+    reference_phonemes: list[str],
+    reference_spans: list[WordSpan],
+    pad: float = DRIFT_WINDOW_PAD_SEC,
+) -> None:
+    """Neo lại cửa sổ phát lại của từ LOCKED theo acoustic (sửa `times` in-place).
+
+    Từ locked = ref chỉ là PHẦN CHỮ của token alphanumeric ("9am" → "am"): cửa sổ
+    Whisper đã cắt theo tỉ lệ ký tự chỉ là XẤP XỈ — học viên ngập ngừng/kéo dài phần
+    số thì phần cắt vẫn dính "nine". DTW attribution cũng không tin được (âm phần số
+    bị "hút" vào từ). Nguồn đáng tin duy nhất: fitting-align âm vị THAM CHIẾU của từ
+    vào các segment trong cửa sổ (±pad, cùng phép overlap với các gate) rồi lấy đúng
+    khoảng thời gian đoạn khớp — vd ref /æ m/ giữa [ə n aɪ aɪ ɛ m] khớp /ɛ m/ →
+    phát đúng "A-M", bỏ "nine". Khớp quá tệ (> _REANCHOR_MAX_AVG_COST/âm) hoặc không
+    có segment → giữ cửa sổ đã cắt. CHỈ playback — scoring/telemetry không đổi.
+    """
+    for k in locked:
+        win = times.get(k)
+        if win is None or not (0 <= k < len(reference_spans)):
+            continue
+        span = reference_spans[k]
+        ref = reference_phonemes[span.start_idx:span.end_idx]
+        cands = [
+            s for s in segments
+            if is_within_word_window(s.start, s.end, win, pad)
+        ]
+        if not ref or not cands:
+            continue
+        fit = _fit_word_segments([s.phoneme for s in cands], ref)
+        if fit is None:
+            continue
+        i0, i1, cost = fit
+        if cost / len(ref) > _REANCHOR_MAX_AVG_COST:
+            continue
+        ns = min(s.start for s in cands[i0:i1])
+        ne = max(s.end for s in cands[i0:i1])
+        if ne > ns:
+            times[k] = (ns, ne)
 
 
 def _pad_and_clamp_windows(
@@ -295,7 +407,9 @@ def _pad_and_clamp_windows(
       - end   KHÔNG vượt `start` THÔ của từ k+1 (không lấn onset từ kế — chặn "in→order").
     Đọc hàng xóm từ `times` GỐC (chưa đệm) để clamp đối xứng, không lan truyền sai số. Từ
     không có hàng xóm trong dict (đầu/cuối hoặc hàng xóm thiếu timing) → chỉ đệm tự do
-    (start clamp về ≥0; end để playback tự dừng ở cuối file). Backend phát ra cửa sổ ĐÃ
+    (start clamp về ≥0; end để playback tự dừng ở cuối file). Hàng xóm chồng ĐÈ cả cửa sổ
+    làm clamp đảo chiều (start ≥ end) → bỏ clamp hàng xóm, giữ cửa sổ đệm của chính từ —
+    KHÔNG BAO GIỜ trả cửa sổ rỗng/âm (frontend sẽ phát 0ms). Backend phát ra cửa sổ ĐÃ
     sẵn sàng phát → frontend chỉ việc phát verbatim [start, end].
     """
     if not times:
@@ -312,6 +426,10 @@ def _pad_and_clamp_windows(
             ne = min(ne, nxt[0])       # không lấn onset từ kế
         if ne < e:                     # hàng xóm chồng (Whisper fallback) → ưu tiên ranh giới
             ne = nxt[0] if nxt is not None else e
+        if ns >= ne:                   # hàng xóm ĐÈ cả cửa sổ (vd prev Whisper thô phủ qua
+            # từ đã siết theo segment) → clamp đảo chiều (start ≥ end), frontend phát 0ms.
+            # Ranh giới hàng xóm vô nghĩa ở đây → bỏ clamp, giữ cửa sổ đệm của chính từ.
+            ns, ne = max(0.0, s - lead), e + trail
         out[k] = (round(ns, 3), round(ne, 3))
     return out
 

@@ -1148,7 +1148,44 @@ class TestTelemetryWriter:
 
 # ── PR3-0: word-window mapping + drift-vs-hallucination classification ─────────
 
-from src.phoneme.diagnostics import map_reference_words_to_windows
+from src.phoneme.diagnostics import map_reference_words_to_windows, subtoken_window
+
+
+class TestSubtokenWindow:
+    """subtoken_window — cắt cửa sổ khi ref word chỉ là phần chữ của token alphanumeric.
+
+    Case gốc: transcript "9am" → tokenizer reference rơi "9", ref "am" map vào nguyên
+    token → nút phát lại của "am" phát cả "nine". Guard chữ số chặn false positive
+    substring giữa hai từ thuần chữ (fuzzy match "at"↔"late").
+    """
+
+    def test_digit_token_slices_ref_portion(self):
+        # "am" chiếm ký tự 1..3 của "9am" → 1/3 cuối cửa sổ.
+        s, e = subtoken_window("am", "9am", 0.0, 0.9)
+        assert s == pytest.approx(0.3)
+        assert e == pytest.approx(0.9)
+
+    def test_pure_alpha_token_never_sliced(self):
+        # Regression: "at" là substring của "late" nhưng token KHÔNG có chữ số →
+        # trùng hợp chính tả, giữ nguyên cửa sổ (hành vi trước fix).
+        assert subtoken_window("at", "late", 1.0, 1.6) == (1.0, 1.6)
+
+    def test_equal_after_normalization_unchanged(self):
+        assert subtoken_window("will", "Will.", 0.5, 1.0) == (0.5, 1.0)
+
+    def test_non_substring_replace_unchanged(self):
+        # Fuzzy replace thật ("there"↔"their") — không phải substring → nguyên vẹn.
+        assert subtoken_window("there", "their", 2.0, 2.5) == (2.0, 2.5)
+
+    def test_prefix_in_digit_token_slices_head(self):
+        # "test" là 4/7 ký tự đầu của "test123" (có chữ số → guard cho qua).
+        s, e = subtoken_window("test", "test123", 0.0, 0.7)
+        assert s == pytest.approx(0.0)
+        assert e == pytest.approx(0.4)
+
+    def test_punctuation_only_token_unchanged(self):
+        # hyp_norm rỗng → không chia 0, giữ nguyên.
+        assert subtoken_window("am", "...", 0.0, 1.0) == (0.0, 1.0)
 
 
 class TestMapReferenceWordsToWindows:
@@ -1187,6 +1224,16 @@ class TestMapReferenceWordsToWindows:
     def test_empty_inputs(self):
         assert map_reference_words_to_windows([], [("x", 0.0, 1.0)]) == {}
         assert map_reference_words_to_windows(["x"], []) == {}
+
+    def test_alphanumeric_token_window_sliced_to_ref(self):
+        # "9am" gộp "nine"+"am" trong 1 token; ref chỉ có "am" (tokenizer rơi số)
+        # → cửa sổ của "am" là 1/3 cuối token (2.0 + 1.2/3 = 2.4), KHÔNG phủ "nine".
+        win = map_reference_words_to_windows(
+            ["at", "am"], [("at", 1.0, 2.0), ("9am", 2.0, 3.2)]
+        )
+        assert win[0] == (1.0, 2.0)
+        assert win[1][0] == pytest.approx(2.4)
+        assert win[1][1] == pytest.approx(3.2)
 
 
 class TestDriftClassification:
@@ -1371,6 +1418,97 @@ class TestWordPlaybackWindows:
         )
         assert (score.words[0].start, score.words[0].end) == (
             round(10.0 - _WORD_PLAY_LEAD, 3), round(12.0 + _WORD_PLAY_TRAIL, 3))
+
+    def test_sliver_intersection_keeps_whisper(self):
+        # seg_times gán THIẾU (chỉ một mẩu âm đầu, vd âm sau bị DTW mượn / deletion giả):
+        # giao 0.15s < sàn _MERGE_MIN_DUR → KHÔNG tin intersection (sẽ phát sub-word),
+        # giữ nguyên Whisper. Giao đủ dài (≥ sàn) vẫn siết bình thường.
+        from src.phoneme.scoring import _merge_playback_windows
+        assert _merge_playback_windows({0: (3.0, 3.15)}, {0: (3.0, 3.8)}) == {0: (3.0, 3.8)}
+        assert _merge_playback_windows({0: (3.0, 3.2)}, {0: (3.0, 3.8)}) == {0: (3.0, 3.2)}
+
+    def test_locked_window_skips_segment_tightening(self):
+        # Từ có cửa sổ đã CẮT sub-token ("9am" → ref "am"): DTW attribution không đáng
+        # tin (âm phần số bị rơi bị "hút" vào từ) → locked BỎ QUA siết theo seg_times,
+        # giữ nguyên cửa sổ đã cắt dù giao đủ dài. Không locked → siết như thường.
+        from src.phoneme.scoring import _merge_playback_windows
+        seg, win = {0: (10.5, 11.1)}, {0: (10.8, 11.8)}
+        assert _merge_playback_windows(seg, win) == {0: (10.8, 11.1)}
+        assert _merge_playback_windows(seg, win, locked={0}) == {0: (10.8, 11.8)}
+
+    def test_fit_word_segments_finds_matching_region(self):
+        # Case "9am": trong token có [ə n aɪ aɪ ɛ m] (nine + A-M), ref "am" = /æ m/
+        # → fitting alignment khớp vào /ɛ m/ (2 segment CUỐI), bỏ prefix "nine" tự do.
+        from src.phoneme.scoring.word_details import _fit_word_segments
+        fit = _fit_word_segments(["ə", "n", "aɪ", "aɪ", "ɛ", "m"], ["æ", "m"])
+        assert fit is not None
+        i0, i1, cost = fit
+        assert (i0, i1) == (4, 6)
+        assert cost / 2 <= 0.6
+
+    def test_locked_window_reanchored_to_word_phonemes(self):
+        # E2E case "9am": học viên ngập ngừng nên slice ký tự vẫn dính "nine" — locked
+        # word được NEO LẠI theo acoustic: playback = đúng khoảng segment khớp /æ m/
+        # (ɛ@2.6–2.8, m@2.9–3.1) + pad, KHÔNG phải cửa sổ Whisper đã cắt (0.5–3.5).
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
+        ref = ["æ", "m"]
+        spans = [WordSpan("am", 0, 2)]
+        segs = [
+            PhonemeSegment(phoneme=p, start=s, end=e, confidence=0.9)
+            for p, s, e in [("n", 1.0, 1.2), ("aɪ", 1.3, 1.5),
+                            ("ɛ", 2.6, 2.8), ("m", 2.9, 3.1)]
+        ]
+        score = compute_phoneme_score(
+            segs, ref, spans,
+            word_windows={0: (0.5, 3.5)},                 # cửa sổ đã cắt (vẫn dính "nine")
+            word_windows_locked={0},
+        )
+        assert (score.words[0].start, score.words[0].end) == (
+            round(2.6 - _WORD_PLAY_LEAD, 3), round(3.1 + _WORD_PLAY_TRAIL, 3))
+
+    def test_locked_no_segments_in_window_keeps_sliced_whisper(self):
+        # Locked nhưng cửa sổ không có segment nào (wav2vec không nghe ra vùng đó)
+        # → fallback giữ cửa sổ Whisper đã cắt + pad, không neo vào rác.
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
+        ref = ["æ", "m"]
+        spans = [WordSpan("am", 0, 2)]
+        score = compute_phoneme_score(
+            self._segs(["æ", "m"]), ref, spans,           # seg 0–2, NGOÀI window
+            word_windows={0: (10.0, 12.0)},
+            word_windows_locked={0},
+        )
+        assert (score.words[0].start, score.words[0].end) == (
+            round(10.0 - _WORD_PLAY_LEAD, 3), round(12.0 + _WORD_PLAY_TRAIL, 3))
+
+    def test_locked_bad_match_keeps_sliced_whisper(self):
+        # Segments trong cửa sổ nhưng KHÔNG giống từ (vd toàn âm gió) → cost trung
+        # bình vượt trần → không neo, giữ cửa sổ đã cắt.
+        from src.phoneme.scoring import _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL
+        ref = ["æ", "m"]
+        spans = [WordSpan("am", 0, 2)]
+        segs = [
+            PhonemeSegment(phoneme=p, start=s, end=e, confidence=0.9)
+            for p, s, e in [("s", 1.0, 1.2), ("ʃ", 1.4, 1.6)]
+        ]
+        score = compute_phoneme_score(
+            segs, ref, spans,
+            word_windows={0: (0.5, 3.5)},
+            word_windows_locked={0},
+        )
+        assert (score.words[0].start, score.words[0].end) == (
+            round(0.5 - _WORD_PLAY_LEAD, 3), round(3.5 + _WORD_PLAY_TRAIL, 3))
+
+    def test_inverted_clamp_falls_back_to_padded_window(self):
+        # prev giữ cửa sổ Whisper thô phủ QUA từ k đã siết theo segment: clamp start theo
+        # prev[1]=6.0 > end đệm 4.08 → đảo chiều (start ≥ end), frontend phát 0ms.
+        # Guard: bỏ clamp hàng xóm, giữ cửa sổ đệm của chính từ.
+        from src.phoneme.scoring import (
+            _WORD_PLAY_LEAD, _WORD_PLAY_TRAIL, _pad_and_clamp_windows)
+        out = _pad_and_clamp_windows({0: (0.5, 6.0), 1: (3.0, 4.0)})
+        s, e = out[1]
+        assert s < e
+        assert (s, e) == (
+            round(3.0 - _WORD_PLAY_LEAD, 3), round(4.0 + _WORD_PLAY_TRAIL, 3))
 
     def test_whisper_fallback_when_word_all_deletion(self):
         # predicted chỉ phủ "cat"; "dog" toàn deletion (không segment) → fallback Whisper.

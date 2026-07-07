@@ -16,7 +16,7 @@ Architecture (hybrid-ready):
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 
 from .diagnostics import DRIFT_WINDOW_PAD_SEC, WordDiagnostic
@@ -155,6 +155,7 @@ class HybridPhonemeAnalyzer:
         skips: Mapping[int, SkipDecision] | None = None,
         diagnostics_sink: Callable[[list[WordDiagnostic]], None] | None = None,
         word_windows: Mapping[int, tuple[float, float]] | None = None,
+        word_windows_locked: Collection[int] | None = None,
         word_probs: Mapping[int, float] | None = None,
         accent: str = "default",
         chunk_spans: list[tuple[float, float]] | None = None,
@@ -174,6 +175,9 @@ class HybridPhonemeAnalyzer:
                 cho telemetry drift-vs-hallucination + evidence cho coverage gate/drift cap
                 (khi flags bật — xem compute_phoneme_score); flags mặc định OFF thì KHÔNG
                 ảnh hưởng điểm.
+            word_windows_locked: optional — chỉ số từ có cửa sổ đã CẮT sub-token (token
+                alphanumeric "9am" → ref "am", xem diagnostics.subtoken_window); playback
+                bỏ qua siết seg_times cho các từ này. Chỉ truyền xuống scorer.
             word_probs: optional — Whisper word probability theo chỉ số từ chuẩn (cùng
                 nguồn word_windows); guard cho coverage gate, chỉ truyền xuống scorer.
             accent: "default" | "gb" | "us" (giọng tham chiếu phát âm từ UI). CHỈ "default" bật
@@ -268,6 +272,7 @@ class HybridPhonemeAnalyzer:
                 confidence_knee=self._confidence_knee,
                 diagnostics_sink=diagnostics_sink,
                 word_windows=word_windows,
+                word_windows_locked=word_windows_locked,
                 l1_enabled=self._l1_enabled,
                 l1_min_confidence=self._l1_min_confidence,
                 low_conf_floor=self._low_conf_floor,

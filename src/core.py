@@ -23,6 +23,7 @@ from .phoneme.diagnostics import (
     DiagnosticsContext,
     TelemetryWriter,
     map_reference_words_to_indices,
+    subtoken_window,
 )
 from .phoneme.ipa import text_to_ipa_sequence_with_spans
 from .phoneme.models import PhonemeResult
@@ -227,6 +228,7 @@ def grade_response(
             #     (b) từ OOV lấy IPA từ eSpeak (cả transcript lẫn G2P đều là đoán).
             skips: dict = {}
             word_windows = None
+            word_windows_locked = None
             # reference_text mà scorer dùng (KHỚP analyzer): có script → script; không
             # → transcript (free-speech, đo phát âm của chính từ thí sinh đã nói).
             phoneme_reference_text = reference_script or transcription.text
@@ -269,11 +271,24 @@ def grade_response(
                 _widx = map_reference_words_to_indices(
                     reference_words, [w.text for w in transcription.words]
                 )
-                word_windows = {
-                    i: (float(transcription.words[j].start),
-                        float(transcription.words[j].end))
-                    for i, j in _widx.items()
-                }
+                # Cửa sổ qua subtoken_window: token alphanumeric của Whisper ("9am")
+                # bị tokenizer reference rơi phần số → ref "am" map vào NGUYÊN token,
+                # cửa sổ thô phát cả "nine"; cắt còn đúng phần ref theo tỉ lệ ký tự.
+                # word_windows cũng feed telemetry drift + evidence coverage/drift
+                # gate (flags default OFF) — cửa sổ cắt chính xác hơn cho từ bị token
+                # gộp, chấp nhận telemetry đổi cho các case này. word_probs GIỮ NGUYÊN
+                # probability cả token. Từ bị cắt → word_windows_locked: playback
+                # KHÔNG siết theo seg_times (DTW attribution nhiễm vì âm phần số bị
+                # rơi không có trong reference — xem _merge_playback_windows).
+                word_windows = {}
+                word_windows_locked = set()
+                for i, j in _widx.items():
+                    w = transcription.words[j]
+                    raw = (float(w.start), float(w.end))
+                    win = subtoken_window(reference_words[i], w.text, *raw)
+                    word_windows[i] = win
+                    if win != raw:
+                        word_windows_locked.add(i)
                 word_probs = {
                     i: float(getattr(transcription.words[j], "probability", 0.0) or 0.0)
                     for i, j in _widx.items()
@@ -325,6 +340,7 @@ def grade_response(
                 skips=skips,
                 diagnostics_sink=diagnostics_sink,
                 word_windows=word_windows,
+                word_windows_locked=word_windows_locked,
                 word_probs=word_probs,
                 accent=accent,
                 chunk_spans=chunk_spans,

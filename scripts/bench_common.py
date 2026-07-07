@@ -21,7 +21,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.phoneme.diagnostics import map_reference_words_to_indices  # noqa: E402
+from src.phoneme.diagnostics import (  # noqa: E402
+    map_reference_words_to_indices,
+    subtoken_window,
+)
 from src.phoneme.ipa import (  # noqa: E402
     normalize_ipa,
     phoneme_similarity,
@@ -164,7 +167,8 @@ def segment_comparison(full_segs: list[dict], slice_segs: list[dict],
 
 def run_scoring(config, segments, posteriors, reference_text: str,
                 skips: dict, word_windows: dict | None, word_probs: dict | None,
-                gates_on: bool, homograph_on: bool | None = None) -> dict:
+                gates_on: bool, homograph_on: bool | None = None,
+                word_windows_locked: set | None = None) -> dict:
     """Gọi compute_phoneme_score với đúng tham số analyzer truyền (accent default),
     capture diagnostics in-memory. Trả {score, diags}.
 
@@ -180,6 +184,7 @@ def run_scoring(config, segments, posteriors, reference_text: str,
         confidence_knee=config.phoneme_confidence_knee,
         diagnostics_sink=captured.extend,
         word_windows=word_windows,
+        word_windows_locked=word_windows_locked,
         l1_enabled=config.phoneme_l1_enabled,
         l1_min_confidence=config.phoneme_l1_min_confidence,
         low_conf_floor=config.phoneme_l1_low_conf_floor,
@@ -295,10 +300,17 @@ def build_reference_context(config, asr_data: dict) -> dict:
             skips.setdefault(k, SkipDecision(k, SkipReason.OOV_ESPEAK))
     widx = map_reference_words_to_indices(
         reference_words, [w["text"] for w in asr_data["words"]])
-    word_windows = {
-        i: (float(asr_data["words"][j]["start"]), float(asr_data["words"][j]["end"]))
-        for i, j in widx.items()
-    }
+    # subtoken_window: token alphanumeric ("9am") cắt còn đúng phần ref word; từ bị
+    # cắt → locked (playback không siết seg_times) — KHỚP grade_response (core.py).
+    word_windows = {}
+    word_windows_locked = set()
+    for i, j in widx.items():
+        w = asr_data["words"][j]
+        raw = (float(w["start"]), float(w["end"]))
+        win = subtoken_window(reference_words[i], w["text"], *raw)
+        word_windows[i] = win
+        if win != raw:
+            word_windows_locked.add(i)
     word_probs = {
         i: float(asr_data["words"][j]["probability"] or 0.0)
         for i, j in widx.items()
@@ -306,6 +318,7 @@ def build_reference_context(config, asr_data: dict) -> dict:
     return {
         "transcript": transcript, "phonemes": phonemes, "spans": spans,
         "skips": skips, "word_windows": word_windows, "word_probs": word_probs,
+        "word_windows_locked": word_windows_locked,
     }
 
 
