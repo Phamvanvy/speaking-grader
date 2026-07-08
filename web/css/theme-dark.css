@@ -138,7 +138,8 @@ body.dark .preview-img {
 }
 
 /* Brighten the native audio controls on dark cards so they're legible. */
-body.dark .file-item-audio audio {
+body.dark .file-item-audio audio,
+body.dark .phoneme-sentence-audio {
     filter: invert(0.9) hue-rotate(180deg);
 }
 

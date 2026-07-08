@@ -30,7 +30,7 @@ logger = logging.getLogger("toeic.tts")
 
 # Bump khi đổi voice mặc định, cách chuẩn hoá input, hoặc format output → cache cũ
 # tự bị bỏ qua (key đổi) mà không cần xoá thủ công.
-CACHE_VERSION = "v1"
+CACHE_VERSION = "v2"
 
 # Trần độ dài text TTS (ký tự). Đây là mức từ/cụm ngắn, không phải câu — đủ rộng cho
 # cụm nhiều từ nhưng vẫn chặn lạm dụng. (Endpoint cũng validate; đây là lớp thứ hai.)
@@ -99,15 +99,28 @@ def _load_voice(model_path: str):
 
 
 def _synthesize_wav_bytes(voice, text: str) -> bytes:
-    """Tổng hợp `text` → WAV bytes. Bao quát thay đổi API giữa các phiên bản Piper."""
+    """Tổng hợp `text` → WAV bytes. Bao quát thay đổi API giữa các phiên bản Piper.
+
+    noise_w_scale=0.0: tắt nhiễu ngẫu nhiên ở bộ dự đoán trường độ (duration
+    predictor) của VITS. Mặc định có nhiễu → thỉnh thoảng gán trường độ ~0 cho
+    phụ âm đầu từ (đo được: "starting"/"studying" im lặng 40-80ms đầu, "s" gần
+    như biến mất), và vì synthesize() cache WAV xuống đĩa vĩnh viễn nên 1 lần
+    "trúng" draw xấu sẽ làm từ đó bị lỗi mãi cho mọi người dùng. Deterministic
+    (noise_w_scale=0) chặn worst-case xuống còn ~20-40ms, verify bằng lặp lại
+    nhiều lần trên starting/stopping/studying/student/stop/start.
+    """
+    from piper.config import SynthesisConfig
+
+    syn_config = SynthesisConfig(noise_w_scale=0.0)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav_file:
         # Piper đổi API giữa các bản:
         # - <=1.2.x: voice.synthesize(text, wave.Wave_write)
         # - >=1.3.x: voice.synthesize_wav(text, wave.Wave_write)
         if hasattr(voice, "synthesize_wav"):
-            voice.synthesize_wav(text, wav_file)
+            voice.synthesize_wav(text, wav_file, syn_config=syn_config)
         else:
+            # API cũ (<=1.2.x) không nhận SynthesisConfig — giữ nguyên hành vi cũ.
             voice.synthesize(text, wav_file)
     return buf.getvalue()
 

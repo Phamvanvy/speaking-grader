@@ -34,6 +34,28 @@ details.phoneme-detail[open] > summary.phoneme-detail__title {
     margin-bottom: 0.5rem;
 }
 
+/* "Nghe lại cả câu": native <audio controls> — có sẵn thanh tua nên không cần
+   dựng progress bar riêng. */
+.phoneme-sentence-audio-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.6rem;
+    margin-bottom: 0.6rem;
+}
+
+.phoneme-sentence-audio-label {
+    font-size: 0.82rem;
+    color: #555;
+    font-weight: 600;
+}
+
+.phoneme-sentence-audio {
+    flex: 1 1 260px;
+    min-width: 220px;
+    height: 32px;
+}
+
 /* Chọn giọng IPA tham chiếu (Anh-Anh / Anh-Mỹ) ngay trong Pronunciation detail. */
 .accent-row {
     display: flex;

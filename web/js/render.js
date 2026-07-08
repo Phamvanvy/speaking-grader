@@ -111,6 +111,16 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     // nút để click phát đúng audio câu đó; single bỏ trống → playback.js fallback Blob global.
     const playbackSrc = opts.playbackSrc || '';
     const srcAttr = playbackSrc ? ` data-src="${escapeHtml(playbackSrc)}"` : '';
+    // "Nghe lại cả câu": native <audio controls> (đã có thanh tua sẵn) dùng CHUNG
+    // nguồn Blob với nút ▶ từng từ — playbackSrc (batch/exam) hoặc playbackUrl() global
+    // (single). Chỉ hiện khi playback bật (xem lý do ở comment trên) và có nguồn phát.
+    const sentenceSrc = playbackSrc || (playback ? playbackUrl() : null);
+    const sentenceAudioHtml = (playback && sentenceSrc)
+        ? `<div class="phoneme-sentence-audio-row">
+            <span class="phoneme-sentence-audio-label">Nghe lại cả câu:</span>
+            <audio class="phoneme-sentence-audio" controls preload="metadata" src="${escapeHtml(sentenceSrc)}"></audio>
+        </div>`
+        : '';
     const playBtn = w => (playback && w.start != null && w.end != null)
         ? `<button type="button" class="phoneme-play" data-start="${w.start}" data-end="${w.end}"${srcAttr} title="Nghe lại từ này" aria-label="Nghe lại từ ${escapeHtml(w.word)}">▶</button>`
         : '';
@@ -274,6 +284,7 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         </div>`;
     const body = `
         ${accentRow}
+        ${sentenceAudioHtml}
         <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm · 🔊 = nghe phát âm chuẩn (máy đọc — tham khảo)</div>
         <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ. Nuốt âm cuối khi nối từ (vd "tes(t) preparation") là nối âm bản xứ hợp lệ — không tính lỗi.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}</div>
         ${truncLine}
