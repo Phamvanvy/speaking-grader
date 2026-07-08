@@ -173,7 +173,9 @@ class TestG2PSource:
 
         monkeypatch.setattr(ipa_mod, "word_to_ipa_with_stress_source", fake)
         _ph, spans, _st, _ds = ipa_mod.text_to_ipa_sequence_with_spans("the zorgle cat")
-        assert [s.source for s in spans] == ["cmudict", "espeak", "cmudict"]
+        # "the" bị pin citation form theo ngữ cảnh → source "context" (xem
+        # _apply_context_forms); espeak/cmudict giữ nguyên nguồn tra.
+        assert [s.source for s in spans] == ["context", "espeak", "cmudict"]
 
 
 class TestG2PUncertainScoring:

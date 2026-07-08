@@ -154,6 +154,8 @@ function examSession() {
         warnings: [],
         importing: false,
         error: '',
+        builtinSets: [],          // [{id, title}] bộ đề mẫu có sẵn cho kỳ thi đang chọn
+        builtinSetId: 'set1',
 
         // làm bài
         timed: true,
@@ -222,10 +224,24 @@ function examSession() {
                 this.importing = false; ev.target.value = '';
             }
         },
+        // Nạp danh sách bộ đề mẫu có sẵn cho kỳ thi đang chọn (gọi lại khi đổi kỳ thi).
+        async loadBuiltinSets() {
+            try {
+                const res = await fetch(`${examApiBase()}/exam/builtin/${this.exam}/sets`);
+                const data = await examParseResponse(res);
+                if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+                this.builtinSets = data.sets || [];
+                if (!this.builtinSets.some(s => s.id === this.builtinSetId)) {
+                    this.builtinSetId = (this.builtinSets[0] || {}).id || 'set1';
+                }
+            } catch (e) {
+                this.builtinSets = [];   // không chặn luồng import thủ công nếu lỗi
+            }
+        },
         async loadBuiltin() {
             this.error = ''; this.importing = true;
             try {
-                const res = await fetch(`${examApiBase()}/exam/builtin/${this.exam}`);
+                const res = await fetch(`${examApiBase()}/exam/builtin/${this.exam}?set_id=${encodeURIComponent(this.builtinSetId)}`);
                 const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                 this._loadPaper(data);

@@ -716,13 +716,25 @@ def _load_builtin_image(image_path: str | None) -> tuple[str | None, str | None]
     return base64.b64encode(path.read_bytes()).decode("ascii"), media
 
 
-@app.get("/exam/builtin/{exam}")
-def exam_builtin(exam: str) -> dict:
-    """Xuất ngân hàng câu hỏi sẵn có thành 1 đề mẫu (test nhanh không cần upload)."""
+@app.get("/exam/builtin/{exam}/sets")
+def exam_builtin_sets(exam: str) -> dict:
+    """Danh sách bộ đề mẫu có sẵn cho 1 kỳ thi (để UI cho user chọn trước khi thi)."""
     exam = _validate_exam(exam)
-    from .questions import _load_all  # ngân hàng câu hỏi tĩnh
+    from .questions import list_sets  # ngân hàng câu hỏi tĩnh
 
-    bank = _load_all(exam)
+    return {"exam": exam, "sets": list_sets(exam)}
+
+
+@app.get("/exam/builtin/{exam}")
+def exam_builtin(exam: str, set_id: str = "set1") -> dict:
+    """Xuất 1 bộ đề mẫu có sẵn thành đề để thi (test nhanh không cần upload)."""
+    exam = _validate_exam(exam)
+    from .questions import _load_set  # ngân hàng câu hỏi tĩnh
+
+    try:
+        title, bank = _load_set(exam, set_id)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     questions = []
     for seq, q in enumerate(bank.values(), start=1):
         image_b64, image_media_type = _load_builtin_image(q.image_path)
@@ -739,7 +751,7 @@ def exam_builtin(exam: str) -> dict:
                 "image_media_type": image_media_type,
             }
         )
-    return {"exam": exam, "title": f"Đề mẫu {exam.upper()}", "questions": questions, "warnings": []}
+    return {"exam": exam, "title": title, "questions": questions, "warnings": []}
 
 
 @app.post("/exam/overall")

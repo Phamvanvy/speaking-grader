@@ -235,15 +235,23 @@
         <div id="mode-exam" class="hidden" x-data="examSession()" x-cloak>
 
             <!-- BƯỚC 1: nạp đề -->
-            <div class="card" x-show="step==='setup'">
+            <div class="card" x-show="step==='setup'" x-init="loadBuiltinSets()">
                 <h2>📄 Thi cả đề — import đề</h2>
                 <p class="exam-hint">Import tài liệu đề thi (PDF / ảnh / Word). Hệ thống tự bóc tách thành từng câu để bạn review, chỉnh sửa rồi làm bài tuần tự như thi thật. Điểm cuối là <strong>ước tính nội bộ</strong>, không thay thế kết quả thi chính thức.</p>
                 <div class="row">
                     <div class="form-group">
                         <label>Kỳ thi</label>
-                        <select x-model="exam">
+                        <select x-model="exam" @change="loadBuiltinSets()">
                             <option value="toeic">TOEIC</option>
                             <option value="ielts">IELTS</option>
+                        </select>
+                    </div>
+                    <div class="form-group" x-show="builtinSets.length">
+                        <label>Bộ đề mẫu</label>
+                        <select x-model="builtinSetId">
+                            <template x-for="s in builtinSets" :key="s.id">
+                                <option :value="s.id" x-text="s.title"></option>
+                            </template>
                         </select>
                     </div>
                 </div>

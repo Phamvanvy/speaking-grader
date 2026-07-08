@@ -203,6 +203,67 @@ def word_to_ipa_with_stress_source(
     return [], [], "failed"
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Context-dependent citation forms — quyết định bằng VỊ TRÍ TRONG CÂU, không phải
+# acoustic. Từ được pin ở đây mang source="context": multiref homograph
+# (select_homograph_references) sẽ BỎ QUA (chỉ swap source=="cmudict") — ngữ cảnh
+# chắc chắn hơn acoustic của học viên (case "lead" 2026-07-08: học viên đọc /leɪt/,
+# acoustic không cứu được entry /led/ do tie-break CMUdict chọn sai với ngữ cảnh).
+# ──────────────────────────────────────────────────────────────────────────────
+
+_WORD_STRIP = ".,;:!?\"'()[]{}"
+
+# "the": dạng mạnh /ðiː/ TRƯỚC NGUYÊN ÂM ("the evening"), dạng yếu /ðə/ còn lại —
+# luật citation chuẩn (Cambridge). Pin CẢ HAI dạng để multiref không swap ngược
+# ðə→ðiː trước phụ âm theo lỗi đọc của học viên (case "the" 2026-07-08).
+_THE_STRONG: list[str] = ["DH", "IY0"]
+_THE_WEAK: list[str] = ["DH", "AH0"]
+
+# Homograph động từ ≠ danh từ/quá khứ: sau infinitive marker "to" hoặc modal thì
+# chắc chắn là ĐỘNG TỪ nguyên thể → pin entry động từ. Ngoài ngữ cảnh trigger,
+# giữ nguyên ranker + multiref (không đủ bằng chứng ngữ pháp).
+_VERB_CONTEXT_ENTRIES: dict[str, list[str]] = {
+    "lead": ["L", "IY1", "D"],   # verb /liːd/; tie-break CMUdict mặc định rơi vào /led/
+    "read": ["R", "IY1", "D"],   # verb nguyên thể /riːd/; mặc định rơi vào /red/ (quá khứ)
+}
+_VERB_TRIGGERS: frozenset[str] = frozenset({
+    "to", "will", "would", "can", "could", "shall", "should", "must", "may",
+    "might", "won't", "wouldn't", "can't", "cannot", "couldn't", "shouldn't",
+    "mustn't", "don't", "doesn't", "didn't",
+})
+
+
+def _apply_context_forms(
+    resolved: list[list],  # mỗi phần tử [word, phones, stress, source] — mutate in place
+) -> None:
+    """Pin citation form theo ngữ cảnh câu (deterministic, bảng tĩnh — không NLP).
+
+    Chỉ đụng từ source=="cmudict" (override/espeak giữ nguyên). Từ bị pin đổi
+    source thành "context" → multiref homograph bỏ qua, g2p_uncertain không áp
+    (reference đáng tin như tra từ điển), reliability không skip.
+    """
+    for i, item in enumerate(resolved):
+        word, phones, _stress, source = item
+        if source != "cmudict" or not phones:
+            continue
+        key = word.lower().strip(_WORD_STRIP)
+        if key == "the":
+            nxt = next((r for r in resolved[i + 1:] if r[1]), None)
+            entry = _THE_STRONG if (nxt and is_vowel(nxt[1][0])) else _THE_WEAK
+        elif key in _VERB_CONTEXT_ENTRIES:
+            prev_key = (
+                resolved[i - 1][0].lower().strip(_WORD_STRIP) if i > 0 else ""
+            )
+            if prev_key not in _VERB_TRIGGERS:
+                continue
+            entry = _VERB_CONTEXT_ENTRIES[key]
+        else:
+            continue
+        symbols, stresses = _finalize_stress(*_arpabet_tokens_to_ipa_stress(entry))
+        if symbols:
+            item[1], item[2], item[3] = symbols, stresses, "context"
+
+
 def text_to_ipa_sequence_with_spans(
     text: str,
 ) -> tuple[list[str], list[WordSpan], list[StressType | None], list[StressType | None]]:
@@ -231,13 +292,21 @@ def text_to_ipa_sequence_with_spans(
         return [], [], [], []
 
     words = re.findall(r"[a-zA-Z'-]+", text)
+    # Pass 1: tra IPA từng từ; Pass 2: pin citation form theo ngữ cảnh câu
+    # (the trước nguyên âm, homograph động từ sau to/modal) — cần thấy từ kề
+    # nên không làm được trong vòng tra đơn lẻ.
+    resolved: list[list] = []
+    for word in words:
+        word_phones, word_stress, word_source = word_to_ipa_with_stress_source(word)
+        resolved.append([word, word_phones, word_stress, word_source])
+    _apply_context_forms(resolved)
+
     phonemes: list[str] = []
     spans: list[WordSpan] = []
     stress: list[StressType | None] = []
     display_stress: list[StressType | None] = []
     dropped: list[str] = []
-    for word in words:
-        word_phones, word_stress, word_source = word_to_ipa_with_stress_source(word)
+    for word, word_phones, word_stress, word_source in resolved:
         if word_phones:
             start = len(phonemes)
             phonemes.extend(word_phones)

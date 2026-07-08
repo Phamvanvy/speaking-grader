@@ -1427,6 +1427,29 @@ class TestWordPlaybackWindows:
         assert _merge_playback_windows({0: (3.0, 3.15)}, {0: (3.0, 3.8)}) == {0: (3.0, 3.8)}
         assert _merge_playback_windows({0: (3.0, 3.2)}, {0: (3.0, 3.8)}) == {0: (3.0, 3.2)}
 
+    def test_sliver_intersection_trusted_when_attribution_complete(self):
+        # Case "through" phát "day through" (2026-07-08): từ ngắn có segment wav2vec là
+        # spike ~20ms → giao Whisper∩seg không bao giờ đạt sàn, nhưng DTW đã gán ĐỦ âm
+        # (đo bằng seg_counts vs ref_lens) → tin intersection, siết biên khỏi từ kề.
+        from src.phoneme.scoring import _merge_playback_windows
+        seg, win = {0: (11.379, 11.539)}, {0: (10.92, 11.6)}
+        # đủ 3/3 âm hoặc thiếu 1 (2/3 — đúng mức limitation "mất MỘT âm biên") → siết
+        assert _merge_playback_windows(
+            seg, win, seg_counts={0: 3}, ref_lens={0: 3}) == {0: (11.379, 11.539)}
+        assert _merge_playback_windows(
+            seg, win, seg_counts={0: 2}, ref_lens={0: 3}) == {0: (11.379, 11.539)}
+        # thiếu ≥2 âm (1/3) = gán thiếu thật → giữ Whisper như sàn cũ
+        assert _merge_playback_windows(
+            seg, win, seg_counts={0: 1}, ref_lens={0: 3}) == {0: (10.92, 11.6)}
+
+    def test_word_segment_counts_only_diagonal_pairs(self):
+        # Đếm cặp đường chéo theo từ: insertion (ref<0) / deletion (pred<0) không tính —
+        # cùng filter với _word_segment_times để hai số liệu nói về cùng tập segment.
+        from src.phoneme.scoring.word_details import _word_segment_counts
+        spans = [WordSpan("ab", 0, 2), WordSpan("cd", 2, 4)]
+        path = [(0, 0), (1, 1), (2, -1), (3, 2), (-1, 3)]
+        assert _word_segment_counts(path, spans) == {0: 2, 1: 1}
+
     def test_locked_window_skips_segment_tightening(self):
         # Từ có cửa sổ đã CẮT sub-token ("9am" → ref "am"): DTW attribution không đáng
         # tin (âm phần số bị rơi bị "hút" vào từ) → locked BỎ QUA siết theo seg_times,

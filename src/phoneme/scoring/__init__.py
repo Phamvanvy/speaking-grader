@@ -62,6 +62,7 @@ from .word_details import (
     _score_deletion,
     _severity_from_penalty,
     _word_at,
+    _word_segment_counts,
     _word_segment_times,
 )
 
@@ -423,8 +424,15 @@ def compute_phoneme_score(
     # percent discount"). Giao rỗng → giữ Whisper; từ chỉ 1 nguồn → dùng nguồn đó (xem
     # _merge_playback_windows). Scoring/telemetry vẫn dùng word_windows/seg_times như
     # cũ — merge này CHỈ cho playback.
+    # seg_counts + ref_lens: cho merge bypass sàn thời lượng khi attribution ĐỦ
+    # (từ ngắn — segment spike ~20ms không bao giờ đạt sàn, xem _word_segment_counts).
     playback_times = _merge_playback_windows(
-        seg_times, word_windows or {}, locked=word_windows_locked
+        seg_times, word_windows or {}, locked=word_windows_locked,
+        seg_counts=_word_segment_counts(path, reference_spans),
+        ref_lens={
+            k: s.end_idx - s.start_idx
+            for k, s in enumerate(reference_spans or [])
+        },
     )
     # Từ locked (cửa sổ cắt sub-token "9am"→"am"): cắt theo tỉ lệ ký tự chỉ XẤP XỈ
     # (ngập ngừng/kéo dài phần số → vẫn dính "nine"), DTW attribution thì nhiễm →

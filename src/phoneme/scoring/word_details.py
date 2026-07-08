@@ -242,6 +242,40 @@ def _word_segment_times(
     return {k: (v[0], v[1]) for k, v in acc.items()}
 
 
+def _word_segment_counts(
+    path: list[tuple[int, int]],
+    spans: list[WordSpan] | None,
+) -> dict[int, int]:
+    """Số segment DTW gán (cặp đường chéo) cho từng từ — song song _word_segment_times.
+
+    Thước đo attribution ĐỦ hay THIẾU: từ có `count >= số âm reference − 1` nghĩa là
+    hầu hết âm của từ đều có segment nhận → cửa sổ seg_times đáng tin kể cả khi NGẮN.
+    Từ ngắn (2–4 âm) có segment wav2vec là spike ~20ms nên min/max span thường < sàn
+    _MERGE_MIN_DUR — sàn thời lượng là proxy cho "gán thiếu" nhưng chặn oan các từ này
+    (case "through"/"will" 2026-07-08: cửa sổ Whisper lệch biên phát lẹm từ kề trong khi
+    seg_times đã bám đúng). Đếm trực tiếp thay proxy: _merge_playback_windows dùng để
+    bypass sàn trong đúng trường hợp attribution đo được là đủ.
+    Trả {span_index: count} — chỉ chứa từ có ≥1 cặp đường chéo (cùng filter seg_times).
+    """
+    if not spans or not path:
+        return {}
+    n = max((s.end_idx for s in spans), default=0)
+    if n <= 0:
+        return {}
+    ref_to_span = [-1] * n
+    for k, s in enumerate(spans):
+        for i in range(s.start_idx, min(s.end_idx, n)):
+            ref_to_span[i] = k
+    counts: dict[int, int] = {}
+    for pred_idx, ref_idx in path:
+        if ref_idx < 0 or ref_idx >= n or pred_idx < 0:
+            continue
+        k = ref_to_span[ref_idx]
+        if k >= 0:
+            counts[k] = counts.get(k, 0) + 1
+    return counts
+
+
 # Đệm phát lại (giây) — "rất nhỏ, 50–100ms mỗi phía": cửa sổ nguồn giờ là Whisper
 # WORD timestamp (ranh giới từ, không phải segment) nên chỉ cần đệm bù sai số biên
 # ±100–300ms của Whisper một phần; đệm to hơn sẽ nghe lẹm từ kế. CẢ HAI đều bị CLAMP
@@ -259,6 +293,8 @@ def _merge_playback_windows(
     seg_times: dict[int, tuple[float, float]],
     word_windows: dict[int, tuple[float, float]],
     locked: Collection[int] | None = None,
+    seg_counts: Mapping[int, int] | None = None,
+    ref_lens: Mapping[int, int] | None = None,
 ) -> dict[int, tuple[float, float]]:
     """Gộp cửa sổ phát lại: Whisper WORD window (ranh giới TỪ) SIẾT theo cửa sổ wav2vec
     segment (âm vị THỰC của từ) khi cả hai chồng nhau.
@@ -272,6 +308,13 @@ def _merge_playback_windows(
     seg.end)`. Chỉ siết khi giao đủ dài (`>= _MERGE_MIN_DUR`); giao rỗng/quá ngắn (mapping
     lệch / seg_times gán thiếu vì âm bị DTW "mượn" sang từ kế hoặc deletion giả) → GIỮ NGUYÊN
     Whisper — siết theo cửa sổ thiếu sẽ cắt mất tiếng thật, tệ nhất co về một mẩu sub-word.
+    NGOẠI LỆ của sàn (`seg_counts`/`ref_lens`, cùng key chỉ số từ): sàn thời lượng chỉ là
+    PROXY cho "gán thiếu" — từ NGẮN (2–4 âm, segment wav2vec là spike ~20ms) không bao giờ
+    đạt sàn dù attribution ĐỦ, cửa sổ Whisper lệch biên ±100–300ms của chúng phát lẹm từ
+    kế (case "through" phát "day through", "will" phát lẹm "start" 2026-07-08). Khi có số
+    liệu đếm trực tiếp: `count >= số âm reference − 1` (thiếu tối đa 1 âm — đúng mức
+    limitation "mất MỘT âm biên" đã chấp nhận bên dưới) → TIN intersection dù ngắn.
+    Thiếu số liệu (caller cũ) → chỉ dùng sàn như trước.
     Limitation còn lại: mất MỘT âm biên khi seg thiếu đúng âm đó vẫn có thể xảy ra (đệm
     _WORD_PLAY_TRAIL bù một phần) — chấp nhận, không chặn được rẻ hơn.
     Từ chỉ có MỘT nguồn (Whisper-only: từ toàn deletion; seg-only: không map transcript) →
@@ -291,7 +334,12 @@ def _merge_playback_windows(
             out[k] = (ws, we)               # → chỉ dùng Whisper
             continue
         ns, ne = max(ws, seg[0]), min(we, seg[1])
-        out[k] = (ns, ne) if ne - ns >= _MERGE_MIN_DUR else (ws, we)  # giao rỗng/sliver → giữ Whisper
+        trust = ne - ns >= _MERGE_MIN_DUR
+        if not trust and ne > ns and seg_counts is not None and ref_lens is not None:
+            # Sliver nhưng attribution đo được là ĐỦ (thiếu ≤1 âm) → từ ngắn, tin seg.
+            n_ref = ref_lens.get(k, 0)
+            trust = n_ref > 0 and seg_counts.get(k, 0) >= n_ref - 1
+        out[k] = (ns, ne) if trust else (ws, we)  # giao rỗng/sliver gán thiếu → giữ Whisper
     return out
 
 

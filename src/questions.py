@@ -1,4 +1,8 @@
-"""Nạp ngân hàng câu hỏi từ data/questions/{exam}.json (toeic / ielts)."""
+"""Nạp ngân hàng câu hỏi từ data/questions/{exam}/{set_id}.json (toeic / ielts).
+
+Mỗi kỳ thi có NHIỀU bộ đề (set) để người dùng chọn trước khi thi (vd
+"TOEIC Speaking Practice Test 1/2/3"), thay vì chỉ 1 bộ câu hỏi cố định.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ from pathlib import Path
 from .rubrics.base import Exam
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "questions"
+DEFAULT_SET = "set1"
 
 
 @dataclass(frozen=True)
@@ -24,19 +29,36 @@ class Question:
     provided_info: str | None = None
 
 
-def _data_file(exam: str) -> Path:
-    return _DATA_DIR / f"{exam}.json"
+def _exam_dir(exam: str) -> Path:
+    return _DATA_DIR / exam
 
 
-def _load_all(exam: str = Exam.TOEIC.value) -> dict[str, Question]:
-    path = _data_file(exam)
+def _set_file(exam: str, set_id: str) -> Path:
+    return _exam_dir(exam) / f"{set_id}.json"
+
+
+def list_sets(exam: str) -> list[dict]:
+    """Danh sách bộ đề có sẵn cho 1 kỳ thi: [{"id", "title"}, ...] sắp theo id."""
+    d = _exam_dir(exam)
+    if not d.is_dir():
+        raise FileNotFoundError(f"Không tìm thấy kỳ thi '{exam}': {d}")
+    sets = []
+    for path in sorted(d.glob("*.json")):
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        sets.append({"id": path.stem, "title": raw.get("title") or path.stem})
+    return sets
+
+
+def _load_set(exam: str, set_id: str = DEFAULT_SET) -> tuple[str, dict[str, Question]]:
+    """Nạp 1 bộ đề → (title, {question_id: Question})."""
+    path = _set_file(exam, set_id)
     if not path.exists():
         raise FileNotFoundError(
-            f"Không tìm thấy ngân hàng câu hỏi cho kỳ thi '{exam}': {path}"
+            f"Không tìm thấy bộ đề '{set_id}' cho kỳ thi '{exam}': {path}"
         )
     raw = json.loads(path.read_text(encoding="utf-8"))
     questions: dict[str, Question] = {}
-    for item in raw:
+    for item in raw.get("questions", []):
         q = Question(
             id=item["id"],
             type=item["type"],
@@ -47,14 +69,21 @@ def _load_all(exam: str = Exam.TOEIC.value) -> dict[str, Question]:
             provided_info=item.get("provided_info"),
         )
         questions[q.id] = q
+    return raw.get("title") or set_id, questions
+
+
+def _load_all(exam: str = Exam.TOEIC.value, set_id: str = DEFAULT_SET) -> dict[str, Question]:
+    _, questions = _load_set(exam, set_id)
     return questions
 
 
-def get_question(question_id: str, exam: str = Exam.TOEIC.value) -> Question:
-    questions = _load_all(exam)
+def get_question(
+    question_id: str, exam: str = Exam.TOEIC.value, set_id: str = DEFAULT_SET
+) -> Question:
+    questions = _load_all(exam, set_id)
     if question_id not in questions:
         raise KeyError(
-            f"Không tìm thấy câu hỏi '{question_id}' trong kỳ thi '{exam}'. "
-            f"Có sẵn: {sorted(questions)}"
+            f"Không tìm thấy câu hỏi '{question_id}' trong bộ đề '{set_id}' của kỳ thi "
+            f"'{exam}'. Có sẵn: {sorted(questions)}"
         )
     return questions[question_id]

@@ -163,6 +163,49 @@ def test_deterministic():
     assert runs[0] == runs[1] == runs[2]
 
 
+# ── context citation forms (ipa._apply_context_forms) ────────────────────────
+# Pin theo VỊ TRÍ TRONG CÂU (case 2026-07-08: "will lead" hiển thị /led/,
+# "the" bị multiref swap ðə→ðiː trước phụ âm theo lỗi đọc của học viên).
+
+def test_context_the_strong_before_vowel_weak_otherwise():
+    ph, spans, _st, _ds = _reference("at the evening and the moment")
+    the_spans = [s for s in spans if s.word == "the"]
+    assert [ph[s.start_idx:s.end_idx] for s in the_spans] == [
+        ["ð", "iː"], ["ð", "ə"]]
+    assert all(s.source == "context" for s in the_spans)
+
+
+def test_context_verb_homograph_after_trigger():
+    for text, word, want in [
+        ("Mark will lead the team", "lead", ["l", "iː", "d"]),
+        ("I used to read books", "read", ["r", "iː", "d"]),
+    ]:
+        ph, spans, _st, _ds = _reference(text)
+        k = next(i for i, s in enumerate(spans) if s.word == word)
+        assert ph[spans[k].start_idx:spans[k].end_idx] == want
+        assert spans[k].source == "context"
+
+
+def test_context_verb_homograph_without_trigger_unchanged():
+    # Không có to/modal đứng trước → giữ ranker mặc định (multiref acoustic lo tiếp).
+    ph, spans, _st, _ds = _reference("I rarely read books")
+    k = next(i for i, s in enumerate(spans) if s.word == "read")
+    assert ph[spans[k].start_idx:spans[k].end_idx] == ["r", "e", "d"]
+    assert spans[k].source == "cmudict"
+
+
+def test_context_pinned_word_not_swapped_by_multiref():
+    # "the" trước phụ âm pin /ðə/ (source context); học viên đọc /ðiː/ — multiref
+    # phải BỎ QUA (ngữ cảnh chắc hơn acoustic), không swap ngược sang /ðiː/.
+    phonemes, spans, stress, disp = _reference("the moment")
+    segs = _segments(["ð", "iː", "m", "oʊ", "m", "ə", "n", "t"])
+    windows = {0: (segs[0].start, segs[1].end), 1: (segs[2].start, segs[-1].end)}
+    out_ph, out_spans, _os, _od = select_homograph_references(
+        phonemes, spans, stress, disp, segs, windows,
+    )
+    assert out_ph[out_spans[0].start_idx:out_spans[0].end_idx] == ["ð", "ə"]
+
+
 # ── compute_phoneme_score end-to-end ──────────────────────────────────────────
 
 def _score(text, segs, windows, enabled):
