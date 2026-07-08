@@ -32,7 +32,12 @@ from ..models import (
     WordSpan,
 )
 from ..reliability import SkipDecision
-from .alignment import _align_points, _apply_drift_cap, _dtw_align
+from .alignment import (
+    _align_points,
+    _apply_drift_cap,
+    _dtw_align,
+    _refine_boundary_bleed,
+)
 from .homograph import select_homograph_references
 from .constants import (
     MAX_ERRORS_RETURNED,
@@ -163,6 +168,7 @@ def compute_phoneme_score(
     drift_window_pad: float = DRIFT_WINDOW_PAD_SEC,
     posteriors: FramePosteriors | None = None,
     homograph_selection_enabled: bool = False,
+    boundary_refine_enabled: bool = False,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -237,6 +243,12 @@ def compute_phoneme_score(
             TRƯỚC khi DTW, thay vì entry ranking context-free (case "project"
             2026-07-05: luôn bị so với dạng động từ). Cần word_windows + spans.
             False (mặc định) = bit-for-bit như cũ. Xem scoring/homograph.py.
+        boundary_refine_enabled: boundary refinement — sửa bleed cục bộ quanh ranh
+            giới từ TRÊN DTW path (SAU _dtw_align, TRƯỚC _align_points): segment bị
+            gán nhầm sang từ kề (case "our eyes" → "eyes" /z z/) được re-pair về đúng
+            từ khi tổng scoring cost cục bộ giảm chặt + đích match thật. Cần
+            reference_spans; word_windows (nếu có) làm time-veto phụ. False (mặc
+            định) = bit-for-bit như cũ. Xem _refine_boundary_bleed (alignment.py).
 
     Precedence giữa các gate: mọi gate chỉ HẠ penalty, không nâng; post-pass chạy tuần
     tự connected_speech → coverage_gate (chỉ del) → drift_cap (chỉ sub); penalty_reason
@@ -282,6 +294,7 @@ def compute_phoneme_score(
         reference_phonemes, reference_spans, skips
     )
 
+    boundary_move_count = 0
     # "Said nothing" (không có phoneme nào nhận diện được) → 0% (path rỗng).
     if not predicted_phonemes:
         path: list[tuple[int, int]] = []
@@ -291,6 +304,33 @@ def compute_phoneme_score(
         empty_prediction = True
     else:
         path = _dtw_align(predicted_phonemes, reference_phonemes)
+        # Boundary refinement (flag OFF = no-op): sửa segment bị DTW gán nhầm
+        # sang từ kề TRƯỚC khi chấm — statuses/penalty do _align_points tính lại
+        # trên path đã sửa, slot bị bỏ trống rơi vào vòng bổ sung deletion dưới.
+        if boundary_refine_enabled and reference_spans:
+            path, boundary_moves = _refine_boundary_bleed(
+                path, predicted_phonemes, reference_phonemes, reference_spans,
+                ref_word, ref_is_onset, ref_is_coda, ref_stress, ref_reducible,
+                ref_skipped, ref_r_droppable, ref_g2p_uncertain,
+                accept_accent_variants=accept_accent_variants,
+                l1_enabled=l1_enabled,
+                predicted_times=predicted_times,
+                word_windows=word_windows,
+                word_windows_locked=word_windows_locked,
+                pad=drift_window_pad,
+            )
+            for mv in boundary_moves:
+                logger.info(
+                    "Boundary refine: %r->%r | moved pred[%d]=%s t=%s "
+                    "from ref[%d]=%s to ref[%d]=%s | displaced pred[%s] | "
+                    "cost %.2f->%.2f | window_ok=%s",
+                    mv["left_word"], mv["right_word"], mv["pred_idx"],
+                    mv["pred_ph"], mv["pred_time"], mv["from_ref"],
+                    mv["from_ph"], mv["to_ref"], mv["to_ph"],
+                    mv["displaced_pred_idx"], mv["cost_before"],
+                    mv["cost_after"], mv["window_ok"],
+                )
+            boundary_move_count = len(boundary_moves)
         result, insertion_count, raw_by_ref = _align_points(
             path, predicted_phonemes, predicted_conf, reference_phonemes,
             ref_word, ref_is_onset, ref_stress, ref_reducible, ref_skipped,
@@ -471,11 +511,11 @@ def compute_phoneme_score(
     logger.info(
         "Phoneme score: accuracy=%.2f | matches=%d | subs=%d | del=%d | ins=%d | "
         "skipped_words=%d | ref=%d | pred=%d | l1_adj=%d | low_conf_neut=%d | "
-        "recog_noise=%d | cov_collapse=%d | drift_capped=%d",
+        "recog_noise=%d | cov_collapse=%d | drift_capped=%d | boundary_moves=%d",
         accuracy, matches, substitutions, deletions, insertion_count,
         len(span_skip_reason), len(reference_phonemes), len(predicted_phonemes),
         l1_adjusted_count, low_conf_neutralized_count, recognizer_noise_count,
-        coverage_collapse_count, drift_capped_count,
+        coverage_collapse_count, drift_capped_count, boundary_move_count,
     )
 
     return PhonemeScore(

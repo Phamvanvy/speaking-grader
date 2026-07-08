@@ -6,7 +6,7 @@ cho mỗi reference index (qua phonemes_match / phoneme_similarity / confidence 
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Final
 
 from ..diagnostics import DRIFT_WINDOW_PAD_SEC, is_within_word_window
@@ -117,6 +117,242 @@ def _dtw_align(
 
     path.reverse()
     return path
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Boundary refinement (flag TOEIC_PHONEME_BOUNDARY_REFINE): sửa bleed cục bộ
+# quanh ranh giới từ SAU DTW, TRƯỚC _align_points — không đụng cost DTW.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Số ref slot / pred segment xét mỗi bên quanh ranh giới từ.
+_BOUNDARY_REFINE_SPAN: Final[int] = 2
+_BOUNDARY_REFINE_EPS: Final[float] = 1e-9
+
+
+def _refine_boundary_bleed(
+    path: list[tuple[int, int]],
+    predicted: list[str],
+    reference: list[str],
+    spans: list[WordSpan],
+    ref_word: list[str | None],
+    ref_is_onset: list[bool],
+    ref_is_coda: list[bool],
+    ref_stress: list[str | None],
+    ref_reducible: list[bool],
+    ref_skipped: list[bool],
+    ref_r_droppable: list[bool],
+    ref_g2p_uncertain: list[bool],
+    *,
+    accept_accent_variants: bool = False,
+    l1_enabled: bool = False,
+    predicted_times: list[tuple[float, float]] | None = None,
+    word_windows: Mapping[int, tuple[float, float]] | None = None,
+    word_windows_locked: Collection[int] | None = None,
+    pad: float = DRIFT_WINDOW_PAD_SEC,
+) -> tuple[list[tuple[int, int]], list[dict]]:
+    """Sửa mis-attribution biên từ trên DTW path (case "our eyes" 2026-07-05/08).
+
+    Bleed: pred `aʊ aɪ z z` vs ref our=`aʊ r` eyes=`aɪ z` → DTW gán pred aɪ vào
+    slot /r/ của "our" (coda-r acceptance làm cặp này "ok") → "eyes" hiển thị
+    /z z/ + sub aɪ→z oan. QUAN TRỌNG: path bleed và path đúng HOÀ cost DTW thô
+    (sim(aɪ,r)=0, sim(z,aɪ)=0 → 1+1 = del(1)+match(0)+ins(1) = 2.0); bleed thắng
+    chỉ vì tie-break ưu tiên diagonal trong _dtw_align. Vì vậy tiêu chí accept ở
+    đây CỐ Ý dùng thang SCORING (insertion = 0, deletion droppable-/r/ accent =
+    0 qua _score_deletion) chứ KHÔNG phải thang _DTW_GAP_COST — đổi về cost DTW
+    thô sẽ tắt pass này âm thầm (pin bởi test flagship our/eyes).
+
+    Mỗi cặp từ kề xét ±_BOUNDARY_REFINE_SPAN slot/segment quanh biên, hai hướng
+    (trái ăn của phải, rồi mirror), tối đa 1 move/biên, pred đã move không move
+    lại (chống oscillation). Move = re-pair (p,r)→(p,r') tại chỗ; cặp cũ của
+    đích thành insertion; slot nguồn rơi khỏi path → vòng bổ sung deletion của
+    compute_phoneme_score chấm bằng _score_deletion (statuses/penalty do
+    _align_points tính lại trên path đã sửa — một nguồn chân lý duy nhất).
+
+    Guards (theo thứ tự): đích phải phonemes_match THẬT với segment (chặn false
+    positive mạnh nhất); không bao giờ đè cặp cost-0 ("ok"); mọi slot giữa nguồn
+    và đích phải đang unpaired (multi-segment bleed ngoài scope); time-veto phụ —
+    từ đích có cửa sổ Whisper đáng tin (không locked) thì segment phải nằm trong
+    (không có window → cost tự quyết, degrade cho engine thiếu Whisper); accept
+    khi tổng scoring cost cục bộ giảm CHẶT. Giới hạn đã biết: pair cost ở đây
+    không nhân confidence/noise-gate như _align_points (không có sẵn tại path
+    level) — bench 0-regression là backstop.
+
+    Trả (path mới, list move đã áp để caller log). Không move → trả path gốc.
+    """
+    if not path or not spans or len(spans) < 2:
+        return path, []
+
+    n_ref = len(reference)
+    # Trong NW path mỗi ref index xuất hiện ĐÚNG 1 lần (diagonal hoặc deletion),
+    # mỗi pred index đúng 1 lần (diagonal hoặc insertion).
+    diag: dict[int, int] = {}
+    pos_of_ref: dict[int, int] = {}
+    for idx, (p, r) in enumerate(path):
+        if r >= 0:
+            pos_of_ref[r] = idx
+            if p >= 0:
+                diag[r] = p
+
+    def pair_cost(pred_idx: int, ref_idx: int) -> float:
+        # Mirror thang chấp nhận của _align_points: match/coda-r/nasal-linking → 0.
+        pred_ph = predicted[pred_idx]
+        ref_ph = reference[ref_idx]
+        word = ref_word[ref_idx]
+        if phonemes_match(
+            ref_ph, pred_ph, word=word, reducible=ref_reducible[ref_idx]
+        ):
+            return 0.0
+        if (
+            accept_accent_variants
+            and ref_r_droppable[ref_idx]
+            and (is_vowel(pred_ph) or normalize_ipa(pred_ph) == "w")
+        ):
+            return 0.0
+        if (
+            ref_is_coda[ref_idx]
+            and (word or "").lower() in FUNCTION_WORDS
+            and is_nasal_coda_linking(ref_ph, pred_ph)
+            and _links_into_vowel(reference, ref_word, ref_idx, word)
+        ):
+            return 0.0
+        return 1.0 - phoneme_similarity(pred_ph, ref_ph)
+
+    def deletion_cost(ref_idx: int) -> float:
+        _, pen, _ = _score_deletion(
+            reference[ref_idx],
+            is_onset=ref_is_onset[ref_idx], is_coda=ref_is_coda[ref_idx],
+            stress=ref_stress[ref_idx], l1_enabled=l1_enabled,
+            accept_accent_variants=accept_accent_variants,
+            g2p_uncertain=ref_g2p_uncertain[ref_idx],
+            r_droppable=ref_r_droppable[ref_idx],
+        )
+        return pen
+
+    entries: list[tuple[int, int] | None] = list(path)
+    moves: list[dict] = []
+    frozen: set[int] = set()
+    locked = frozenset(word_windows_locked or ())
+
+    for k in range(len(spans) - 1):
+        left, right = spans[k], spans[k + 1]
+        l_lo, l_hi = left.start_idx, min(left.end_idx, n_ref)
+        r_lo, r_hi = right.start_idx, min(right.end_idx, n_ref)
+        if l_lo >= l_hi or r_lo >= r_hi:
+            continue
+        if any(ref_skipped[i] for i in range(l_lo, l_hi)) or any(
+            ref_skipped[i] for i in range(r_lo, r_hi)
+        ):
+            continue
+        # Pred index "biên": pred đầu tiên gán vào từ phải; fallback pred cuối
+        # của từ trái + 1; cả hai từ đều trống → không có gì để xét.
+        boundary_pred: int | None = None
+        for i in range(r_lo, r_hi):
+            if i in diag:
+                boundary_pred = diag[i]
+                break
+        if boundary_pred is None:
+            left_preds = [diag[i] for i in range(l_lo, l_hi) if i in diag]
+            if not left_preds:
+                continue
+            boundary_pred = max(left_preds) + 1
+
+        # Hướng A: từ TRÁI ăn segment của từ phải (our/eyes) — nguồn ở slot cuối
+        # từ trái (gần biên trước), đích ở slot đầu từ phải. Hướng B: mirror.
+        directions = (
+            (range(l_hi - 1, max(l_hi - _BOUNDARY_REFINE_SPAN, l_lo) - 1, -1),
+             range(r_lo, min(r_lo + _BOUNDARY_REFINE_SPAN, r_hi)),
+             k + 1),
+            (range(r_lo, min(r_lo + _BOUNDARY_REFINE_SPAN, r_hi)),
+             range(l_hi - 1, max(l_hi - _BOUNDARY_REFINE_SPAN, l_lo) - 1, -1),
+             k),
+        )
+        applied = False
+        for sources, dests, dest_span in directions:
+            if applied:
+                break
+            for r in sources:
+                if applied:
+                    break
+                p = diag.get(r)
+                if (
+                    p is None or p in frozen
+                    or abs(p - boundary_pred) > _BOUNDARY_REFINE_SPAN
+                ):
+                    continue
+                src_cost = pair_cost(p, r)
+                for rp in dests:
+                    if rp == r:
+                        continue
+                    # Guard cứng: đích phải khớp THẬT với segment.
+                    if not phonemes_match(
+                        reference[rp], predicted[p],
+                        word=ref_word[rp], reducible=ref_reducible[rp],
+                    ):
+                        continue
+                    q = diag.get(rp)
+                    if q is not None and pair_cost(q, rp) <= 0.0:
+                        continue  # không bao giờ đè cặp "ok"
+                    lo, hi = (r, rp) if r < rp else (rp, r)
+                    if any(x in diag for x in range(lo + 1, hi)):
+                        continue  # multi-segment bleed ngoài scope
+                    # Time-veto phụ: từ đích có window đáng tin → segment phải
+                    # nằm trong; locked/thiếu window → cost tự quyết.
+                    window_ok: bool | None = None
+                    if (
+                        word_windows
+                        and predicted_times is not None
+                        and p < len(predicted_times)
+                        and dest_span not in locked
+                    ):
+                        win = word_windows.get(dest_span)
+                        if win is not None:
+                            ps, pe = predicted_times[p]
+                            window_ok = is_within_word_window(ps, pe, win, pad)
+                            if not window_ok:
+                                continue
+                    # Accept = giảm CHẶT tổng scoring cost cục bộ. after chỉ còn
+                    # deletion slot nguồn: cặp đích mới = 0 (match theo guard),
+                    # pred cũ của đích thành insertion = 0 (scoring không phạt).
+                    dest_before = (
+                        pair_cost(q, rp) if q is not None else deletion_cost(rp)
+                    )
+                    before = src_cost + dest_before
+                    after = deletion_cost(r)
+                    if after + _BOUNDARY_REFINE_EPS >= before:
+                        continue
+                    # Áp move: (p,r)→(p,rp) TẠI CHỖ (giữ nguyên thứ tự pred);
+                    # cặp cũ của đích thành insertion; entry deletion (-1,rp)
+                    # (đích đang unmatched) bị bỏ; slot r rơi khỏi path.
+                    entries[pos_of_ref[r]] = (p, rp)
+                    if q is not None:
+                        entries[pos_of_ref[rp]] = (q, -1)
+                    else:
+                        entries[pos_of_ref[rp]] = None
+                    pos_of_ref[rp] = pos_of_ref.pop(r)
+                    del diag[r]
+                    diag[rp] = p
+                    frozen.add(p)
+                    moves.append({
+                        "left_word": left.word, "right_word": right.word,
+                        "pred_idx": p, "pred_ph": predicted[p],
+                        "pred_time": (
+                            predicted_times[p]
+                            if predicted_times is not None
+                            and p < len(predicted_times) else None
+                        ),
+                        "from_ref": r, "from_ph": reference[r],
+                        "to_ref": rp, "to_ph": reference[rp],
+                        "displaced_pred_idx": q,
+                        "cost_before": round(before, 4),
+                        "cost_after": round(after, 4),
+                        "window_ok": window_ok,
+                    })
+                    applied = True
+                    break
+
+    if not moves:
+        return path, []
+    return [e for e in entries if e is not None], moves
 
 
 def _better_point(a: PhonemePoint, b: PhonemePoint) -> PhonemePoint:

@@ -168,12 +168,16 @@ def segment_comparison(full_segs: list[dict], slice_segs: list[dict],
 def run_scoring(config, segments, posteriors, reference_text: str,
                 skips: dict, word_windows: dict | None, word_probs: dict | None,
                 gates_on: bool, homograph_on: bool | None = None,
-                word_windows_locked: set | None = None) -> dict:
+                word_windows_locked: set | None = None,
+                boundary_refine_on: bool | None = None) -> dict:
     """Gọi compute_phoneme_score với đúng tham số analyzer truyền (accent default),
     capture diagnostics in-memory. Trả {score, diags}.
 
     homograph_on: multi-reference homograph selection — None (mặc định) theo
-    config.phoneme_homograph_multiref (env TOEIC_PHONEME_MULTIREF); bool để A/B ép."""
+    config.phoneme_homograph_multiref (env TOEIC_PHONEME_MULTIREF); bool để A/B ép.
+    boundary_refine_on: boundary refinement — None (mặc định) theo
+    config.phoneme_boundary_refine_enabled (env TOEIC_PHONEME_BOUNDARY_REFINE);
+    bool để A/B ép."""
     phonemes, spans, stress, disp = text_to_ipa_sequence_with_spans(reference_text)
     captured: list = []
     score = compute_phoneme_score(
@@ -205,6 +209,10 @@ def run_scoring(config, segments, posteriors, reference_text: str,
         homograph_selection_enabled=(
             config.phoneme_homograph_multiref if homograph_on is None
             else homograph_on
+        ),
+        boundary_refine_enabled=(
+            config.phoneme_boundary_refine_enabled if boundary_refine_on is None
+            else boundary_refine_on
         ),
     )
     return {"score": score, "diags": [asdict(d) for d in captured]}

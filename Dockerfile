@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # TOEIC Speaking Grader — image GPU (NVIDIA).
 FROM python:3.11-slim
 
@@ -15,8 +16,12 @@ ENV HF_HOME=/root/.cache/huggingface \
     XDG_CACHE_HOME=/root/.cache
 
 # Cài deps trước (tận dụng layer cache khi chỉ đổi source).
+# --mount=type=cache: pip cache sống độc lập với layer cache của image, nên dù
+# layer RUN này có bị Docker Desktop tự dọn (disk pressure) và phải chạy lại,
+# pip vẫn lấy wheel từ cache mount thay vì tải lại từ PyPI.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
 
 # Cho loader Linux tìm thấy libcublas.so.12 / libcudnn*.so.9 từ các wheel nvidia-*-cu12.
 ENV LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.11/site-packages/nvidia/cudnn/lib

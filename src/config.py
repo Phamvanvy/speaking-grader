@@ -166,6 +166,11 @@ class Config:
     phoneme_drift_cap_enabled: bool = False
     phoneme_drift_sub_cap: float = 0.2
     phoneme_drift_window_pad: float = 0.08
+    # Boundary refinement: segment bị DTW gán nhầm sang từ kề (bleed biên — case
+    # "our eyes" → "eyes" /z z/) được re-pair về đúng từ TRÊN path trước khi chấm
+    # → display + score + playback nhất quán (xem alignment._refine_boundary_bleed).
+    # Default OFF = bit-for-bit như cũ. Qua TOEIC_PHONEME_BOUNDARY_REFINE.
+    phoneme_boundary_refine_enabled: bool = False
     # Multi-reference homograph: từ đa-entry CMUdict có cửa sổ Whisper → chọn LẠI
     # entry khớp acoustic nhất trước DTW (fix "project" luôn bị so với dạng động từ
     # /prədʒekt/; blast radius: 6,068 từ material — xem scoring/homograph.py +
@@ -381,6 +386,9 @@ def load_config() -> Config:
         phoneme_drift_window_pad=float(
             os.getenv("TOEIC_PHONEME_DRIFT_WINDOW_PAD", "0.08")
         ),
+        phoneme_boundary_refine_enabled=(
+            os.getenv("TOEIC_PHONEME_BOUNDARY_REFINE", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         phoneme_homograph_multiref=(
             os.getenv("TOEIC_PHONEME_MULTIREF", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},
