@@ -1,0 +1,85 @@
+{
+  "title": "TOEIC Speaking Practice Test 2",
+  "questions": [
+    {
+      "id": "t2_q1_read_aloud",
+      "type": "read_aloud",
+      "prompt": "Read the text aloud.",
+      "reference_script": "Thank you for flying with Bluebird Airlines. We will begin boarding shortly, starting with passengers who need extra assistance, followed by first class and our loyalty members. Please have your boarding pass and photo identification ready.",
+      "expected_duration_sec": 45
+    },
+    {
+      "id": "t2_q2_read_aloud",
+      "type": "read_aloud",
+      "prompt": "Read the text aloud.",
+      "reference_script": "Welcome to Greenfield Public Library. Our quiet study rooms are located on the third floor and can be reserved online up to one week in advance. Please remember to return borrowed items by the due date to avoid late fees.",
+      "expected_duration_sec": 45
+    },
+    {
+      "id": "t2_q1_1_read_aloud",
+      "type": "read_aloud",
+      "prompt": "Read the text aloud.",
+      "reference_script": "Is your office still using paper files for everything? Switch to CloudCabinet, the document management system trusted by thousands of small businesses. With CloudCabinet, you can scan, organize, and search your files in seconds, and share them securely with your team from any device. Sign up today and get your first month free.",
+      "expected_duration_sec": 45
+    },
+    {
+      "id": "t2_q3_describe_picture",
+      "type": "describe_picture",
+      "prompt": "Describe the picture.",
+      "image_path": "data/image/toeic-speaking-sample-test-1.jpg",
+      "expected_duration_sec": 45
+    },
+    {
+      "id": "t2_q4_describe_picture",
+      "type": "describe_picture",
+      "prompt": "Describe the picture.",
+      "image_path": "data/image/toeic-speaking-sample-test-2.jpg",
+      "expected_duration_sec": 45
+    },
+    {
+      "id": "t2_q5_respond",
+      "type": "respond_questions",
+      "prompt": "Imagine that a research company is doing a survey about shopping habits. How often do you go shopping, and where do you usually shop?",
+      "expected_duration_sec": 15
+    },
+    {
+      "id": "t2_q6_respond",
+      "type": "respond_questions",
+      "prompt": "Do you prefer shopping in physical stores or shopping online? Why?",
+      "expected_duration_sec": 15
+    },
+    {
+      "id": "t2_q7_respond",
+      "type": "respond_questions",
+      "prompt": "Some people think that online shopping will eventually replace physical stores completely. Do you agree? Give reasons to support your answer.",
+      "expected_duration_sec": 30
+    },
+    {
+      "id": "t2_q8_respond_info",
+      "type": "respond_with_info",
+      "prompt": "Hi, I'm calling about the fitness class schedule. What time does the first class start on Monday, and what type of class is it?",
+      "provided_info": "Riverside Gym — Weekly Class Schedule\nMonday   6:30 AM  Morning Yoga (Studio 1, Instructor: Lena Park)\nMonday   6:00 PM  Spin Class (Studio 2, Instructor: Carlos Diaz)\nWednesday 6:30 AM  Morning Yoga (Studio 1, Instructor: Lena Park)\nWednesday 7:00 PM  Strength Training (Studio 2, Instructor: Carlos Diaz)\nFriday    6:00 PM  Spin Class (Studio 2, Instructor: Carlos Diaz)\nMonthly membership: $40 (first class free for new members)",
+      "expected_duration_sec": 15
+    },
+    {
+      "id": "t2_q9_respond_info",
+      "type": "respond_with_info",
+      "prompt": "I really like Carlos's classes. Which days and times does he teach, and what classes are they?",
+      "provided_info": "Riverside Gym — Weekly Class Schedule\nMonday   6:30 AM  Morning Yoga (Studio 1, Instructor: Lena Park)\nMonday   6:00 PM  Spin Class (Studio 2, Instructor: Carlos Diaz)\nWednesday 6:30 AM  Morning Yoga (Studio 1, Instructor: Lena Park)\nWednesday 7:00 PM  Strength Training (Studio 2, Instructor: Carlos Diaz)\nFriday    6:00 PM  Spin Class (Studio 2, Instructor: Carlos Diaz)\nMonthly membership: $40 (first class free for new members)",
+      "expected_duration_sec": 15
+    },
+    {
+      "id": "t2_q10_respond_info",
+      "type": "respond_with_info",
+      "prompt": "Could you give me an overview of the entire weekly schedule, including the days, times, classes, and instructors?",
+      "provided_info": "Riverside Gym — Weekly Class Schedule\nMonday   6:30 AM  Morning Yoga (Studio 1, Instructor: Lena Park)\nMonday   6:00 PM  Spin Class (Studio 2, Instructor: Carlos Diaz)\nWednesday 6:30 AM  Morning Yoga (Studio 1, Instructor: Lena Park)\nWednesday 7:00 PM  Strength Training (Studio 2, Instructor: Carlos Diaz)\nFriday    6:00 PM  Spin Class (Studio 2, Instructor: Carlos Diaz)\nMonthly membership: $40 (first class free for new members)",
+      "expected_duration_sec": 30
+    },
+    {
+      "id": "t2_q11_opinion_technology",
+      "type": "express_opinion",
+      "prompt": "Do you think technology has made communication between people better or worse? Give reasons and examples to support your opinion.",
+      "expected_duration_sec": 60
+    }
+  ]
+}

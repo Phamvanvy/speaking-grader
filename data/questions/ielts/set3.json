@@ -1,0 +1,43 @@
+{
+  "title": "IELTS Speaking Practice Test 3",
+  "questions": [
+    {
+      "id": "i3_p1_technology",
+      "type": "part1_interview",
+      "prompt": "Let's talk about technology. Do you use your phone or computer a lot? What do you mainly use it for?",
+      "expected_duration_sec": 40
+    },
+    {
+      "id": "i3_p1_weather",
+      "type": "part1_interview",
+      "prompt": "Now let's talk about the weather. What is the weather like in your country? What is your favorite season?",
+      "expected_duration_sec": 40
+    },
+    {
+      "id": "i3_p2_place_to_visit",
+      "type": "part2_long_turn",
+      "prompt": "Describe a place you would like to visit in the future. You will have to talk about the topic for one to two minutes.",
+      "provided_info": "Describe a place you would like to visit in the future.\nYou should say:\n- where this place is\n- how you know about this place\n- what you would do there\nand explain why you would like to visit this place.",
+      "expected_duration_sec": 120
+    },
+    {
+      "id": "i3_p2_important_decision",
+      "type": "part2_long_turn",
+      "prompt": "Describe an important decision you made. You will have to talk about the topic for one to two minutes.",
+      "provided_info": "Describe an important decision you made.\nYou should say:\n- what the decision was\n- when you made it\n- what other choices you had\nand explain why this decision was important to you.",
+      "expected_duration_sec": 120
+    },
+    {
+      "id": "i3_p3_technology_future",
+      "type": "part3_discussion",
+      "prompt": "We've been talking about technology. How do you think technology will change the way people communicate in the future? Are there any disadvantages of relying on technology?",
+      "expected_duration_sec": 60
+    },
+    {
+      "id": "i3_p3_decision_making",
+      "type": "part3_discussion",
+      "prompt": "Let's consider decision-making. Do you think it is better to make decisions quickly or to think about them for a long time? Do older and younger people make decisions differently?",
+      "expected_duration_sec": 60
+    }
+  ]
+}
