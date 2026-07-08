@@ -85,6 +85,7 @@ async function grade() {
     const formData = new FormData();
     if (isBatch) {
         files.forEach(f => formData.append('audios', f));
+        lastBatchFiles = files;   // index-aligned with API `results[].index` → "download audio" per item
     } else {
         formData.append('audio', files[0]);
         lastSingleFilename = files[0].name;

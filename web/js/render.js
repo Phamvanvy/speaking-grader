@@ -495,9 +495,14 @@ function showBatchResult(data) {
 
     const results = (data.results || []).slice().sort((a, b) => a.index - b.index);
     document.getElementById('batch-results-list').innerHTML = results.map(item => {
+        // "⬇" audio button — only when we still have the file in memory (set right
+        // before /grade-batch was sent; see lastBatchFiles in state.js).
+        const dlBtn = lastBatchFiles[item.index]
+            ? `<button type="button" class="btn btn-secondary" onclick="event.preventDefault();downloadBatchAudio(${item.index})" style="width:auto;padding:0.2rem 0.6rem;font-size:0.85rem;" title="Tải audio đã chấm">⬇</button>`
+            : '';
         if (item.error) {
             return `<div class="batch-result">
-                <div class="filename">📄 ${escapeHtml(item.audio_filename)}</div>
+                <div class="filename">📄 ${escapeHtml(item.audio_filename)} ${dlBtn}</div>
                 <div class="batch-error">❌ ${escapeHtml(item.error)}</div>
             </div>`;
         }
@@ -513,6 +518,7 @@ function showBatchResult(data) {
             <summary style="cursor:pointer;display:flex;align-items:center;gap:0.75rem;list-style:none;">
                 <span class="batch-score" style="margin:0;" title="${pronOnly ? 'Chỉ chấm phát âm' : ''}">${score}</span>
                 <span class="filename" style="margin:0;flex:1;">📄 ${escapeHtml(item.audio_filename)}</span>
+                ${dlBtn}
                 ${timeTag}
                 <span style="color:#888;font-size:0.85rem;">▼ details</span>
             </summary>

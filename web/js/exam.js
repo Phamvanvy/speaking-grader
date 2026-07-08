@@ -543,6 +543,23 @@ function examSession() {
 
         recordedCount() { return this.order.filter(q => q._recBlob).length; },
 
+        // Tên file khi tải xuống: đặt theo THỨ TỰ câu trong đề (01-, 02-…) để nghe lại
+        // theo đúng trình tự đã thi, giữ nguyên đuôi file gốc từ MediaRecorder/upload.
+        _recordingFilename(q) {
+            const ext = (q._recName || '').match(/\.[a-z0-9]+$/i)?.[0] || '.webm';
+            return `${String(q.sequence).padStart(2, '0')}-${q.type}${ext}`;
+        },
+        // Tải TẤT CẢ audio đã ghi, mỗi file tên theo thứ tự câu. Dùng downloadBlob
+        // (report.js) + giãn cách nhẹ để tránh trình duyệt chặn tải hàng loạt.
+        async downloadAllRecordings() {
+            const items = (this.order || []).filter(q => q._recBlob);
+            if (!items.length) { alert('Chưa có audio nào để tải.'); return; }
+            for (const q of items) {
+                downloadBlob(q._recBlob, this._recordingFilename(q));
+                await new Promise(r => setTimeout(r, 300));
+            }
+        },
+
         // ── BƯỚC 4: chấm cả đề ──
         // Chấm RỜI từng câu (mỗi câu 1 request /grade ngắn) thay vì gửi cả đề trong 1
         // request dài: tránh 502/timeout ở reverse proxy khi đề dài + model local chậm.
@@ -631,15 +648,20 @@ function examSession() {
         _renderQuestionResult(item) {
             const el = document.getElementById(`exam-q-${item.question_id}`);
             if (!el) return;
-            if (item.error) { el.innerHTML = `<p class="exam-error">${escapeHtml(item.error)}</p>`; return; }
-            const r = item.result || {};
             // Audio người học của ĐÚNG câu này → bật nút "nghe lại" từng từ (▶) như chấm
             // lẻ. Mỗi câu một Blob riêng nên truyền src theo câu (playbackSrc), không dùng
             // lastSingleFile toàn cục (sẽ phát nhầm audio câu khác).
             const q = (this.order || []).find(o => o.id === item.question_id);
             const src = (q && q._recUrl) ? q._recUrl : null;
+            const dlLink = (q && q._recUrl)
+                ? `<a class="btn btn-secondary" href="${escapeHtml(q._recUrl)}" download="${escapeHtml(this._recordingFilename(q))}" style="width:auto;display:inline-block;text-decoration:none;padding:0.35rem 0.9rem;margin-bottom:0.6rem;">⬇ Tải audio câu này</a>`
+                : '';
+            // Câu chấm lỗi vẫn giữ nút tải audio — chấm hỏng không có nghĩa bản ghi mất.
+            if (item.error) { el.innerHTML = dlLink + `<p class="exam-error">${escapeHtml(item.error)}</p>`; return; }
+            const r = item.result || {};
             el.innerHTML =
-                `<div class="result-section"><h4>📝 Transcript</h4><p>${escapeHtml(r.transcript || '')}</p></div>`
+                dlLink
+                + `<div class="result-section"><h4>📝 Transcript</h4><p>${escapeHtml(r.transcript || '')}</p></div>`
                 + `<div class="result-section"><h4>📈 Features</h4>${featureGridHtml(r.features || {})}</div>`
                 + `<div class="result-section"><h4>📋 Điểm</h4>${scoresBreakdownHtml(r.scores, r.exam, r.phoneme, { pronunciationOnly: !!r.pronunciation_only, notice: r.notice, playback: !!src, playbackSrc: src })}</div>`;
         },

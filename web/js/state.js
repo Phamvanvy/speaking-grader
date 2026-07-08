@@ -85,6 +85,11 @@ document.addEventListener('change', e => {
 // Holds the most recent /grade-batch response so "Print / PDF" can rebuild a report.
 let lastBatchData = null;
 
+// Files sent in the most recent batch, kept around (in-memory, index-aligned with
+// `results[].index` from the API) purely so the result panel can offer a download
+// link — no need to re-fetch from the server since the audio never left the browser.
+let lastBatchFiles = [];
+
 // Holds the most recent single /grade response (+ the file name it came from)
 // so "Export CSV" / "Print" can rebuild a report.
 let lastSingleData = null;

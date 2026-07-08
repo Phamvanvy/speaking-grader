@@ -78,6 +78,44 @@ function downloadBlob(blob, filename) {
     URL.revokeObjectURL(objectUrl);
 }
 
+// ── Audio download (single / batch) ────────────────────────────────────
+// The graded audio never leaves the browser as a standalone artifact — it's only
+// held in memory as the File/Blob that was uploaded (lastSingleFile / lastBatchFiles).
+// These just re-expose that Blob as a saved file, so users can keep a copy of what
+// they were graded on.
+function downloadSingleAudio() {
+    if (!lastSingleFile) {
+        alert('Không có audio để tải (file đã bị giải phóng, hãy chấm lại).');
+        return;
+    }
+    const filename = (lastSingleData && lastSingleData.audio_filename) || lastSingleFilename || 'recording';
+    downloadBlob(lastSingleFile, filename);
+}
+
+function downloadBatchAudio(index) {
+    const file = lastBatchFiles[index];
+    if (!file) {
+        alert('Không có audio để tải (file đã bị giải phóng, hãy chấm lại).');
+        return;
+    }
+    downloadBlob(file, `${String(index + 1).padStart(2, '0')}-${file.name || 'recording'}`);
+}
+
+// Tải TẤT CẢ audio của batch, mỗi file tên đặt theo THỨ TỰ (01-, 02-…). Trình duyệt
+// giới hạn nhiều lượt tải liên tiếp → giãn cách nhẹ giữa các lần click để tránh bị
+// chặn (Chrome/Edge có thể hỏi xin phép "Allow multiple downloads" ở lần đầu).
+async function downloadAllBatchAudio() {
+    const files = (lastBatchFiles || []).map((f, i) => f && { file: f, index: i }).filter(Boolean);
+    if (!files.length) {
+        alert('Không có audio để tải. Chấm một batch trước đã.');
+        return;
+    }
+    for (const { file, index } of files) {
+        downloadBlob(file, `${String(index + 1).padStart(2, '0')}-${file.name || 'recording'}`);
+        await new Promise(r => setTimeout(r, 300));
+    }
+}
+
 function exportSingleCsv() {
     if (!lastSingleData) {
         alert('No result to export. Grade a file first.');

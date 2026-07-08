@@ -178,6 +178,7 @@
                     <h2>📊 Results</h2>
                     <div class="actions">
                         <button class="btn btn-primary" onclick="exportSingleCsv()" style="width: auto; padding: 0.5rem 1rem;">⬇ Download CSV</button>
+                        <button class="btn btn-secondary" onclick="downloadSingleAudio()" style="width: auto; padding: 0.5rem 1rem;">⬇ Tải audio</button>
                         <button class="btn btn-secondary" onclick="printSingleReport()" style="width: auto; padding: 0.5rem 1rem;">🖨 Print / PDF</button>
                         <button class="btn btn-secondary" onclick="closeResult()" style="width: auto; padding: 0.5rem 1rem;">Close</button>
                     </div>
@@ -221,6 +222,7 @@
                 <div class="result-header">
                     <h2>📊 Batch Results</h2>
                     <div class="actions">
+                        <button class="btn btn-secondary" onclick="downloadAllBatchAudio()" style="width: auto; padding: 0.5rem 1rem;">⬇ Tải tất cả audio</button>
                         <button class="btn btn-primary" onclick="printBatchReport()" style="width: auto; padding: 0.5rem 1rem;">🖨 Print / PDF</button>
                         <button class="btn btn-secondary" onclick="closeBatchResult()" style="width: auto; padding: 0.5rem 1rem;">Close</button>
                     </div>
@@ -448,7 +450,10 @@
             <div class="card" x-show="step==='result'" x-cloak>
                 <div class="result-header">
                     <h2>📊 Kết quả cả đề</h2>
-                    <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="reset()">Thi đề khác</button>
+                    <div class="actions">
+                        <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="downloadAllRecordings()">⬇ Tải tất cả audio</button>
+                        <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="reset()">Thi đề khác</button>
+                    </div>
                 </div>
                 <div class="exam-overall">
                     <div class="label" x-text="(result && result.exam==='ielts') ? 'IELTS band (ước tính)' : 'Điểm TOEIC Speaking (ước tính)'"></div>
