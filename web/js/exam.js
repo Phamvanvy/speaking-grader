@@ -17,6 +17,7 @@ function switchMode(mode) {
     exam.classList.toggle('hidden', !isExam);
     tabC.classList.toggle('active', !isExam);
     tabE.classList.toggle('active', isExam);
+    if (window.AppRouter) window.AppRouter.onModeSwitch(mode);
 }
 
 function examApiBase() {
@@ -146,6 +147,17 @@ function examSpeak(text) {
 
 function examSession() {
     return {
+        // Alpine gọi tự động lúc component khởi tạo. Đăng ký instance ra global để
+        // router (vanilla, ngoài Alpine) đọc/ghi được state, rồi áp URL hiện tại vào
+        // (deep-link vào giữa 1 kỳ thi/bộ đề — xem web/js/router.js).
+        init() {
+            window.__exam = this;
+            if (window.AppRouter) window.AppRouter.applyExamFromPath(this);
+        },
+        _syncRoute(replace) {
+            if (window.AppRouter) window.AppRouter.onExamStateChange(this, replace);
+        },
+
         // ── state ──
         step: 'setup',            // setup | review | running | result
         exam: 'toeic',
@@ -237,6 +249,7 @@ function examSession() {
             } catch (e) {
                 this.builtinSets = [];   // không chặn luồng import thủ công nếu lỗi
             }
+            this._syncRoute();
         },
         async loadBuiltin() {
             this.error = ''; this.importing = true;
@@ -264,6 +277,7 @@ function examSession() {
                 _recBlob: null, _recName: null, _recUrl: null,
             }));
             this.step = 'review';
+            this._syncRoute();
         },
 
         // ── BƯỚC 2: review/sửa ──
@@ -301,6 +315,7 @@ function examSession() {
             this.order = [...this.questions].sort((a, b) => a.sequence - b.sequence);
             this.idx = 0; this.step = 'running';
             this._lastPart = null; this.error = '';
+            this._syncRoute();
             if (this.timed) {
                 examAudioCtx();                 // "mồi" AudioContext trong user gesture
                 await this.enterFullscreen();
@@ -313,14 +328,15 @@ function examSession() {
 
         // ── chế độ THỦ CÔNG (không bấm giờ) ──
         enterQuestion() { this.phase = 'manual'; },
-        nextManual() { if (this.recording) this.stopRec(); if (this.idx < this.order.length - 1) this.idx++; },
-        prevManual() { if (this.recording) this.stopRec(); if (this.idx > 0) this.idx--; },
+        nextManual() { if (this.recording) this.stopRec(); if (this.idx < this.order.length - 1) { this.idx++; this._syncRoute(true); } },
+        prevManual() { if (this.recording) this.stopRec(); if (this.idx > 0) { this.idx--; this._syncRoute(true); } },
 
         // ── chế độ TỰ ĐỘNG (mô phỏng phòng thi) ──
         async runAuto() {
             const token = ++this._runToken;
             for (this.idx = 0; this.idx < this.order.length; this.idx++) {
                 if (token !== this._runToken) return;
+                this._syncRoute(true);
                 const q = this.order[this.idx];
                 if (q.type !== this._lastPart) {
                     this._lastPart = q.type;
@@ -464,6 +480,7 @@ function examSession() {
                 i++;
             }
             this.idx = Math.min(i - 1, this.order.length - 1);
+            this._syncRoute(true);
         },
 
         _setupWaveform(stream) {
@@ -521,6 +538,7 @@ function examSession() {
             if (this.recording) this.stopRec();
             this.exitFullscreen();
             this.phase = 'idle'; this.step = 'review';
+            this._syncRoute();
         },
 
         recordedCount() { return this.order.filter(q => q._recBlob).length; },
@@ -546,6 +564,7 @@ function examSession() {
                 })),
             };
             this.step = 'result';
+            this._syncRoute();
             this.$nextTick(() => {
                 this.result.questions.forEach(it => {
                     const el = document.getElementById(`exam-q-${it.question_id}`);
@@ -647,6 +666,7 @@ function examSession() {
             this.step = 'setup'; this.questions = []; this.order = [];
             this.result = null; this.warnings = []; this.error = ''; this.title = '';
             this.phase = 'idle'; this._lastPart = null;
+            this._syncRoute();
         },
     };
 }

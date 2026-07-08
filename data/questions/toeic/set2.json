@@ -26,14 +26,14 @@
       "id": "t2_q3_describe_picture",
       "type": "describe_picture",
       "prompt": "Describe the picture.",
-      "image_path": "data/image/toeic-speaking-sample-test-1.jpg",
+      "image_path": "data/image/toeic-speaking-sample-test-3.jpg",
       "expected_duration_sec": 45
     },
     {
       "id": "t2_q4_describe_picture",
       "type": "describe_picture",
       "prompt": "Describe the picture.",
-      "image_path": "data/image/toeic-speaking-sample-test-2.jpg",
+      "image_path": "data/image/toeic-speaking-sample-test-4.jpg",
       "expected_duration_sec": 45
     },
     {

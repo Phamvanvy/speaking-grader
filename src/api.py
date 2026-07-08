@@ -39,7 +39,7 @@ from uuid import uuid4
 from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from .config import Config, load_config
 from .core import grade_response
@@ -788,12 +788,26 @@ def exam_overall(
     }
 
 
-# Mount frontend tĩnh ở "/" — PHẢI đặt sau mọi route API ở trên. Starlette so khớp
-# route theo thứ tự đăng ký, nên /grade, /health, /docs... (đăng ký trước) được ưu
-# tiên; StaticFiles chỉ bắt phần còn lại (GET / → index.html, /styles.css, /app.js).
-# html=True → "/" trả index.html. check_dir=False để app vẫn khởi động được nếu
-# thiếu web/ (vd chạy chỉ-API trong test); request tới "/" khi đó trả 404 gọn.
-if _WEB_DIR.is_dir():
-    app.mount("/", StaticFiles(directory=_WEB_DIR, html=True), name="web")
-else:  # pragma: no cover - chỉ xảy ra khi deploy thiếu thư mục web/
+# Phục vụ frontend tĩnh + fallback SPA ở "/" — PHẢI đăng ký SAU mọi route API ở
+# trên. Starlette so khớp route theo thứ tự đăng ký, nên /grade, /health, /docs...
+# (đăng ký trước) được ưu tiên; catch-all này chỉ bắt phần còn lại.
+#
+# Không dùng StaticFiles(html=True) nữa vì nó chỉ fallback "/" → index.html, còn
+# path "ảo" của client-side router (vd /exam/toeic/set2/q/3 — xem web/js/router.js)
+# sẽ bị 404 khi tải lại trang / mở link trực tiếp. Route này: khớp file tĩnh thật
+# (css/js/vendor/...) thì trả đúng file; path lạ thì trả index.html để JS tự dựng
+# lại đúng màn hình từ URL.
+_INDEX_HTML = _WEB_DIR / "index.html"
+
+if not _WEB_DIR.is_dir():  # pragma: no cover - chỉ xảy ra khi deploy thiếu thư mục web/
     logger.warning("Không thấy thư mục web/ (%s) — frontend tĩnh bị tắt.", _WEB_DIR)
+
+
+@app.get("/{full_path:path}")
+def web_spa(full_path: str) -> FileResponse:
+    candidate = (_WEB_DIR / full_path).resolve()
+    if full_path and candidate.is_file() and candidate.is_relative_to(_WEB_DIR.resolve()):
+        return FileResponse(candidate)
+    if not _INDEX_HTML.is_file():
+        raise HTTPException(status_code=404, detail="Frontend tĩnh (web/) không có sẵn.")
+    return FileResponse(_INDEX_HTML)
