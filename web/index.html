@@ -11,9 +11,11 @@
     <link rel="stylesheet" href="/css/theme-dark.css?v=accent-default-1">
     <link rel="stylesheet" href="/css/phoneme.css?v=accent-default-1">
     <link rel="stylesheet" href="/css/exam.css?v=exam-4">
+    <link rel="stylesheet" href="/css/history.css?v=history-1">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+    <a class="feedback-btn" href="https://www.facebook.com/myengbuddy/" target="_blank" rel="noopener" title="Góp ý, báo lỗi hoặc đề xuất cải tiến" aria-label="Góp ý, báo lỗi hoặc đề xuất cải tiến">💬</a>
     <div class="container">
         <h1>🎤 Speaking Grader</h1>
 
@@ -21,6 +23,7 @@
         <div class="mode-tabs">
             <button id="tab-classic" class="mode-tab active" onclick="switchMode('classic')">📝 Chấm bài lẻ / cả lớp</button>
             <button id="tab-exam" class="mode-tab" onclick="switchMode('exam')">📄 Thi cả đề (cá nhân)</button>
+            <button id="tab-history" class="mode-tab" onclick="switchMode('history')">🕘 Lịch sử</button>
         </div>
 
         <div id="mode-classic">
@@ -451,6 +454,8 @@
                 <div class="result-header">
                     <h2>📊 Kết quả cả đề</h2>
                     <div class="actions">
+                        <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="exportExamCsv()">⬇ Download CSV</button>
+                        <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="printExamReport()">🖨 Print / PDF</button>
                         <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="downloadAllRecordings()">⬇ Tải tất cả audio</button>
                         <button class="btn btn-secondary" style="width:auto;padding:0.5rem 1rem;" @click="reset()">Thi đề khác</button>
                     </div>
@@ -475,6 +480,31 @@
             </div>
 
         </div><!-- /#mode-exam -->
+
+        <!-- ── Tab Lịch sử: bài đã chấm (lưu server-side theo user_id ẩn danh) ── -->
+        <div id="mode-history" class="hidden">
+            <div class="card">
+                <div class="result-header">
+                    <h2>🕘 Lịch sử chấm bài</h2>
+                    <button class="btn btn-secondary btn-inline" onclick="loadHistoryList()">↻ Tải lại</button>
+                </div>
+                <label class="history-opt">
+                    <input type="checkbox" id="history-save-toggle" onchange="setHistorySaveEnabled(this.checked)">
+                    💾 Lưu bài chấm vào lịch sử (kèm ghi âm — lưu trên máy chủ, tách theo trình duyệt này)
+                </label>
+                <div id="history-list" class="history-list"></div>
+                <div id="history-pager" class="history-pager"></div>
+            </div>
+            <div class="result" id="history-detail-wrap">
+                <div class="card">
+                    <div class="result-header">
+                        <h2 id="history-detail-title">📊 Chi tiết</h2>
+                        <button class="btn btn-secondary btn-inline" onclick="closeHistoryDetail()">Đóng</button>
+                    </div>
+                    <div id="history-detail"></div>
+                </div>
+            </div>
+        </div><!-- /#mode-history -->
     </div>
 
     <!-- app.js đã tách theo nhóm chức năng. THỨ TỰ QUAN TRỌNG: state trước (chứa
@@ -488,9 +518,13 @@
     <script src="/js/grade.js?v=accent-default-1"></script>
     <script src="/js/suggest.js?v=suggest-1"></script>
     <script src="/js/report.js?v=accent-default-1"></script>
+    <!-- Tab Lịch sử: list/chi tiết/xoá bản ghi đã lưu server-side. Dùng builder của
+         render.js (featureGridHtml, scoresBreakdownHtml...) lúc RUNTIME nên chỉ cần
+         nạp sau render.js; đặt trước exam.js vì switchMode gọi loadHistoryList. -->
+    <script src="/js/history.js?v=history-1"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
-    <script src="/js/exam.js?v=exam-5"></script>
+    <script src="/js/exam.js?v=exam-6"></script>
     <!-- Router (URL path thật, History API) — nạp SAU exam.js (dùng switchMode +
          window.__exam) nhưng TRƯỚC Alpine (examSession.init() gọi router ngay khi
          Alpine dựng component). -->

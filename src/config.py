@@ -225,6 +225,18 @@ class Config:
     # credentials (cookie) nên allow_credentials tự tắt — API này không dùng
     # cookie nên không ảnh hưởng. Đặt qua CORS_ALLOW_ORIGINS.
     cors_allow_origins: str = "*"
+    # ── Lịch sử chấm bài (per-user, SQLite + audio trên đĩa) ─────────────
+    # Bật/tắt toàn bộ tính năng lưu lịch sử. Tắt → các endpoint /history trả 404
+    # và mọi request chấm bỏ qua việc lưu (kể cả khi client gửi user_id).
+    history_enabled: bool = True
+    # File SQLite (WAL) chứa metadata + result JSON. Docker mount ./data/history
+    # và override 2 path này để dữ liệu sống qua rebuild (xem docker-compose.yml).
+    history_db_path: str = "data/history.db"
+    # Thư mục chứa audio gốc của từng bản ghi: {record_id}/audio{suffix}.
+    history_audio_dir: str = "data/history_audio"
+    # Quota: giữ tối đa N bản ghi mới nhất mỗi user, bản cũ hơn bị xoá (kèm audio)
+    # sau mỗi lần lưu. 0 = không giới hạn.
+    history_max_records_per_user: int = 1000
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -423,4 +435,18 @@ def load_config() -> Config:
             os.getenv("TTS_CACHE_DIR", "outputs/tts_cache") or "outputs/tts_cache"
         ),
         cors_allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*") or "*",
+        history_enabled=(
+            os.getenv("TOEIC_HISTORY_ENABLED", "true") or "true"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        history_db_path=(
+            os.getenv("TOEIC_HISTORY_DB_PATH", "data/history.db")
+            or "data/history.db"
+        ),
+        history_audio_dir=(
+            os.getenv("TOEIC_HISTORY_AUDIO_DIR", "data/history_audio")
+            or "data/history_audio"
+        ),
+        history_max_records_per_user=int(
+            os.getenv("TOEIC_HISTORY_MAX_RECORDS", "1000") or "1000"
+        ),
     )

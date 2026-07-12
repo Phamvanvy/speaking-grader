@@ -6,17 +6,17 @@
 // (waveform realtime) → tự chuyển câu; fullscreen + khóa thao tác. Chế độ thường
 // (không bấm giờ) giữ kiểu tự ghi âm thủ công. Tái dùng renderer của render.js.
 
-// Đổi tab giữa 2 chế độ (vanilla — không phụ thuộc Alpine).
+// Đổi tab giữa 3 chế độ (vanilla — không phụ thuộc Alpine).
 function switchMode(mode) {
-    const classic = document.getElementById('mode-classic');
-    const exam = document.getElementById('mode-exam');
-    const tabC = document.getElementById('tab-classic');
-    const tabE = document.getElementById('tab-exam');
-    const isExam = mode === 'exam';
-    classic.classList.toggle('hidden', isExam);
-    exam.classList.toggle('hidden', !isExam);
-    tabC.classList.toggle('active', !isExam);
-    tabE.classList.toggle('active', isExam);
+    const panes = { classic: 'mode-classic', exam: 'mode-exam', history: 'mode-history' };
+    if (!panes[mode]) mode = 'classic';
+    for (const [m, id] of Object.entries(panes)) {
+        const pane = document.getElementById(id);
+        const tab = document.getElementById('tab-' + m);
+        if (pane) pane.classList.toggle('hidden', m !== mode);
+        if (tab) tab.classList.toggle('active', m === mode);
+    }
+    if (mode === 'history' && window.loadHistoryList) loadHistoryList();
     if (window.AppRouter) window.AppRouter.onModeSwitch(mode);
 }
 
@@ -592,6 +592,9 @@ function examSession() {
             const mode = document.getElementById('mode')?.value || 'practice';
             const fl = document.getElementById('feedback-lang')?.value;
             const accent = (typeof currentAccent !== 'undefined' ? currentAccent : 'default');
+            // Lịch sử: các câu chấm rời qua /grade được server GHÉP thành 1 phiên
+            // bằng session id chung; /exam/overall điền điểm tổng vào phiên đó.
+            this._historySessionId = historySaveEnabled() ? crypto.randomUUID() : null;
             try {
                 for (const q of withAudio) {
                     const item = this.result.questions.find(it => it.question_id === q.id);
@@ -610,6 +613,13 @@ function examSession() {
                         fd.append('accent', accent);
                         const imgBlob = examB64ToBlob(q.image_b64, q.image_media_type);
                         if (imgBlob) fd.append('image', imgBlob, `image${examImgExt(q.image_media_type)}`);
+                        if (this._historySessionId) {
+                            fd.append('user_id', getUserId());
+                            fd.append('history_session_id', this._historySessionId);
+                            if (this.title) fd.append('history_session_title', this.title);
+                            if (q.sequence != null) fd.append('history_seq', q.sequence);
+                            fd.append('history_question_id', q.id);
+                        }
                         const res = await fetch(`${examApiBase()}/grade`, { method: 'POST', body: fd });
                         const data = await examParseResponse(res);
                         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
@@ -633,6 +643,10 @@ function examSession() {
                 const fd = new FormData();
                 fd.append('exam', this.exam);
                 fd.append('scores', JSON.stringify(scores));
+                if (this._historySessionId) {
+                    fd.append('user_id', getUserId());
+                    fd.append('history_session_id', this._historySessionId);
+                }
                 const res = await fetch(`${examApiBase()}/exam/overall`, { method: 'POST', body: fd });
                 const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
@@ -679,6 +693,119 @@ function examSession() {
         },
         // Câu đã chấm xong (có điểm hoặc lỗi) → cho hiện mũi tên expand ở summary.
         questionDone(item) { return !!(item.error || (item.result && item.result.scores)); },
+
+        // ── Export kết quả cả đề (đồng bộ với chấm lẻ/batch ở report.js) ──
+        _examCsvRows() {
+            return (this.result.questions || []).map(it => resultRow({
+                index: it.sequence,
+                audio_filename: `Câu ${it.sequence} - ${this.typeLabel(it.type)}`,
+                result: it.result,
+                error: it.error,
+            }, this.exam));
+        },
+        exportExamCsv() {
+            if (!this.result || !this.result.questions.length) {
+                alert('Chưa có kết quả để export.');
+                return;
+            }
+            const cfg = examConfig(this.exam);
+            const blob = new Blob([buildCsv(this._examCsvRows())], { type: 'text/csv;charset=utf-8;' });
+            downloadBlob(blob, `${cfg.label.toLowerCase()}-exam-result-${fileStamp()}.csv`);
+        },
+        printExamReport() {
+            if (!this.result || !this.result.questions.length) {
+                alert('Chưa có kết quả để export.');
+                return;
+            }
+            const cfg = examConfig(this.exam);
+            const data = this.result;
+
+            const overviewRows = data.questions.map(item => {
+                const label = `Câu ${item.sequence} · ${this.typeLabel(item.type)}`;
+                if (item.error) {
+                    return `<tr><td class="col-idx">${item.sequence}</td>
+                        <td>${escapeHtml(label)}</td>
+                        <td class="col-score err">error</td>
+                        <td class="col-fb err">${escapeHtml(item.error)}</td></tr>`;
+                }
+                const r = item.result || {};
+                const pronOnly = !!r.pronunciation_only;
+                const score = pronOnly ? '🔊 pron.' : escapeHtml(r.scores?.[cfg.scoreField] ?? '--');
+                const fb = r.scores?.summary_feedback || (pronOnly ? r.notice : '') || '';
+                return `<tr><td class="col-idx">${item.sequence}</td>
+                    <td>${escapeHtml(label)}</td>
+                    <td class="col-score">${score}</td>
+                    <td class="col-fb">${escapeHtml(fb)}</td></tr>`;
+            }).join('');
+
+            const detailSections = data.questions.map(item => {
+                const head = `<div class="file-head">Câu ${item.sequence} · ${escapeHtml(this.typeLabel(item.type))}</div>`;
+                if (item.error) {
+                    return `<section class="file">${head}<p class="body err">❌ ${escapeHtml(item.error)}</p></section>`;
+                }
+                const r = item.result || {};
+                const s = r.scores || {};
+                const f = r.features || {};
+                const pronOnly = !!r.pronunciation_only;
+                const overall = s[cfg.scoreField];
+                const featuresHtml = featureTiles(f).map(t =>
+                    `<div class="tile"><div class="tval">${escapeHtml(t.value)}</div><div class="tname">${escapeHtml(t.name)}</div></div>`
+                ).join('');
+                const summaryRows = [
+                    ['Task Completion', s.task_completion],
+                    ['Content Relevance', s.content_relevance],
+                ].filter(([, v]) => v != null && v !== '')
+                 .map(([k, v]) => `<tr><td>${k}</td><td>${escapeHtml(v)}</td></tr>`).join('');
+                return `<section class="file">
+                    ${head}
+                    ${pronOnly
+                        ? `<div class="overall"><span class="lbl">⚠️ ${escapeHtml(r.notice || 'Chỉ chấm phát âm (chưa có đề bài).')}</span></div>`
+                        : `<div class="overall"><span class="big">${escapeHtml(overall ?? '--')}</span><span class="lbl">${escapeHtml(cfg.overallLabel)} (max ${cfg.overallMax})</span></div>`}
+                    ${summaryRows ? `<table>${summaryRows}</table>` : ''}
+                    <h2>Transcript</h2>
+                    <p class="body">${escapeHtml(r.transcript || 'No transcript available')}</p>
+                    <h2>Features</h2>
+                    <div class="tiles">${featuresHtml}</div>
+                    ${reportCriteriaHtml(s, cfg)}
+                    ${phonemeErrorsHtml(r.phoneme)}
+                    ${s.score_rationale ? `<h2>Score Rationale</h2><p class="body">${escapeHtml(s.score_rationale)}</p>` : ''}
+                    <h2>Feedback</h2>
+                    <p class="body">${escapeHtml(s.summary_feedback || (pronOnly ? r.notice : '') || 'No feedback available')}</p>
+                </section>`;
+            }).join('');
+
+            const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>${escapeHtml(cfg.label)} Exam Report${data.title ? ' — ' + escapeHtml(data.title) : ''}</title>
+<style>${reportStyles()}</style></head>
+<body>
+  <h1>${escapeHtml(cfg.label)} Exam Report</h1>
+  <div class="meta">${data.title ? escapeHtml(data.title) + ' · ' : ''}${data.graded || data.questions.length}/${data.count} câu đã chấm · Generated ${escapeHtml(new Date().toLocaleString())}</div>
+
+  <div class="overall">
+    <span class="big">${escapeHtml(data.overall ?? '--')}</span>
+    <span class="lbl">${escapeHtml(cfg.overallLabel)} (max ${data.overall_max})</span>
+  </div>
+
+  <h2>Overview</h2>
+  <table class="overview">
+    <thead><tr><th class="col-idx">#</th><th>Câu</th><th class="col-score">${escapeHtml(cfg.overallLabel)}</th><th class="col-fb">Feedback</th></tr></thead>
+    <tbody>${overviewRows}</tbody>
+  </table>
+
+  ${detailSections}
+
+  <script>window.onload = function () { window.print(); };<\/script>
+</body></html>`;
+
+            const win = window.open('', '_blank');
+            if (!win) {
+                alert('Popup blocked. Allow popups for this site to print the report.');
+                return;
+            }
+            win.document.write(html);
+            win.document.close();
+        },
 
         reset() {
             this._runToken++;

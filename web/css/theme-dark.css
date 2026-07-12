@@ -23,6 +23,37 @@
     transform: scale(1.08);
 }
 
+/* ── Feedback / help button ──────────────────────────────────────────── */
+.feedback-btn {
+    position: fixed;
+    top: 1rem;
+    right: 4.2rem;
+    width: 42px;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    font-size: 1.2rem;
+    line-height: 1;
+    z-index: 100;
+    text-decoration: none;
+    transition: background 0.2s, transform 0.15s;
+}
+
+.feedback-btn:hover {
+    transform: scale(1.08);
+}
+
+body.dark .feedback-btn {
+    background: #1e293b;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
 /* ── Dark mode ───────────────────────────────────────────────────────── */
 body.dark {
     background: #0f172a;

@@ -1,0 +1,102 @@
+/* ── Tab "Lịch sử" (web/js/history.js) ────────────────────────────────────
+   Tái dùng .card/.btn/.result/.exam-result-q sẵn có; file này chỉ thêm layout
+   riêng của list + badge. Dark theme override bằng body.dark ngay tại đây
+   (convention giống theme-dark.css) để không đụng file theme đang sửa dở. */
+
+.btn-inline {
+    width: auto;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.9rem;
+}
+
+.history-opt {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: #4b5563;
+    margin-bottom: 0.9rem;
+    cursor: pointer;
+}
+.history-opt input { accent-color: #4f46e5; }
+
+.history-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.history-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #fafafa;
+}
+
+.history-badge {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    white-space: nowrap;
+}
+.history-badge.single { background: #e0e7ff; color: #3730a3; }
+.history-badge.batch  { background: #dcfce7; color: #166534; }
+.history-badge.exam   { background: #fef3c7; color: #92400e; }
+
+.history-info { flex: 1 1 auto; min-width: 0; }
+.history-title {
+    font-weight: 600;
+    color: #111827;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.history-sub { font-size: 0.8rem; color: #6b7280; }
+
+.history-score {
+    flex: 0 0 auto;
+    font-weight: 700;
+    color: #4f46e5;
+    white-space: nowrap;
+}
+
+.history-actions { flex: 0 0 auto; display: flex; gap: 0.4rem; }
+.history-del:hover:not(:disabled) { background: #fecaca; color: #991b1b; }
+
+.history-pager {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    justify-content: center;
+    margin-top: 0.75rem;
+}
+.history-page { font-size: 0.85rem; color: #6b7280; }
+
+.history-empty { color: #6b7280; padding: 0.5rem 0; }
+
+.history-detail-meta {
+    font-size: 0.9rem;
+    color: #6b7280;
+    margin-bottom: 0.9rem;
+}
+
+/* Mobile: xếp dọc để không tràn ngang. */
+@media (max-width: 560px) {
+    .history-row { flex-wrap: wrap; }
+    .history-info { flex-basis: 100%; order: 3; }
+}
+
+/* ── Dark theme ── */
+body.dark .history-row { background: #1f2937; border-color: #374151; }
+body.dark .history-title { color: #f3f4f6; }
+body.dark .history-sub,
+body.dark .history-page,
+body.dark .history-empty,
+body.dark .history-detail-meta,
+body.dark .history-opt { color: #9ca3af; }
+body.dark .history-score { color: #a5b4fc; }
+body.dark .history-badge.single { background: #312e81; color: #c7d2fe; }
+body.dark .history-badge.batch  { background: #14532d; color: #bbf7d0; }
+body.dark .history-badge.exam   { background: #78350f; color: #fde68a; }
+body.dark .history-del:hover:not(:disabled) { background: #7f1d1d; color: #fecaca; }

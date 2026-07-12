@@ -41,6 +41,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from . import history
 from .config import Config, load_config
 from .core import grade_response
 from .exam_import import ExamImportError, extract_exam
@@ -94,6 +95,36 @@ app.add_middleware(
 
 # Trần số file trong 1 batch (chặn lạm dụng; 1 lớp thực tế ~40 em).
 _MAX_BATCH = 100
+
+# Dọn thư mục audio mồ côi (crash giữa ghi audio và insert DB) — best-effort,
+# không được làm hỏng startup.
+if _BASE_CONFIG.history_enabled:
+    try:
+        history.sweep_orphans(_BASE_CONFIG)
+    except Exception:  # noqa: BLE001
+        logger.exception("Lịch sử: sweep_orphans lỗi (bỏ qua).")
+
+
+def _history_save(fn, /, *args, **kwargs) -> None:
+    """Lưu lịch sử best-effort: lỗi chỉ log, KHÔNG BAO GIỜ hỏng response chấm."""
+    if not _BASE_CONFIG.history_enabled:
+        return
+    try:
+        fn(_BASE_CONFIG, *args, **kwargs)
+    except Exception:  # noqa: BLE001
+        logger.exception("Lưu lịch sử thất bại (bỏ qua — không ảnh hưởng kết quả chấm)")
+
+
+def _require_history_enabled() -> None:
+    if not _BASE_CONFIG.history_enabled:
+        raise HTTPException(status_code=404, detail="Lịch sử chấm bài đang tắt.")
+
+
+def _valid_user_id_or_400(user_id: str) -> str:
+    try:
+        return history.validate_user_id(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 # Frontend tĩnh: thư mục web/ (index.html + CSS + JS) ở repo root
 # (src/ là con của root). Mount ở "/" cùng origin với API → không cần CORS, và ô
@@ -305,6 +336,15 @@ async def grade(
     accent: str = Form(
         "default", description="Giọng tham chiếu phát âm: default | gb | us"
     ),
+    user_id: str | None = Form(
+        None, description="ID ẩn danh của user (bật lưu lịch sử khi có)"
+    ),
+    history_session_id: str | None = Form(
+        None, description="UUID phiên thi cả đề (SPA chấm từng câu qua /grade)"
+    ),
+    history_session_title: str | None = Form(None),
+    history_seq: int | None = Form(None),
+    history_question_id: str | None = Form(None),
 ) -> dict:
     """Chấm 1 bài nói. Trả về JSON {transcript, features, scores}."""
     has_image = image is not None
@@ -320,7 +360,7 @@ async def grade(
 
     config = _resolve_config(feedback_lang)
     try:
-        return await run_in_threadpool(
+        output = await run_in_threadpool(
             _grade_bytes,
             audio_bytes,
             suffix,
@@ -340,6 +380,37 @@ async def grade(
     except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
         logger.exception("Lỗi khi chấm")
         raise HTTPException(status_code=500, detail=f"Lỗi khi chấm: {e}") from e
+
+    # Lưu lịch sử (best-effort, sau khi payload sẵn sàng). Có history_session_id
+    # → đây là 1 câu của phiên thi cả đề (SPA chấm rời từng câu); không thì là
+    # bài chấm lẻ. Ghi audio MB-scale → chạy trong threadpool.
+    if user_id and history_session_id:
+        await run_in_threadpool(
+            _history_save,
+            history.add_exam_item,
+            session_id=history_session_id,
+            user_id=user_id,
+            exam=exam,
+            title=history_session_title,
+            mode=_normalize_mode(mode),
+            seq=history_seq,
+            question_id=history_question_id,
+            result=output,
+            audio_bytes=audio_bytes,
+            suffix=suffix,
+        )
+    elif user_id:
+        await run_in_threadpool(
+            _history_save,
+            history.save_single,
+            user_id=user_id,
+            filename=audio.filename,
+            mode=_normalize_mode(mode),
+            audio_bytes=audio_bytes,
+            suffix=suffix,
+            result=output,
+        )
+    return output
 
 
 @app.post("/grade-batch")
@@ -368,6 +439,9 @@ async def grade_batch(
     ),
     max_concurrency: int = Form(
         0, description="Số bài chấm song song; 0 = tự (1 cho local, 4 cho cloud)"
+    ),
+    user_id: str | None = Form(
+        None, description="ID ẩn danh của user (bật lưu lịch sử khi có)"
     ),
 ) -> dict:
     """Chấm nhiều audio cho CÙNG đề bài. Trả kết quả theo từng file.
@@ -458,7 +532,7 @@ async def grade_batch(
     )
     total_ms = int((perf_counter() - batch_started) * 1000)
     succeeded = sum(1 for r in results if "result" in r)
-    return {
+    response = {
         "exam": exam,
         "question_type": qt.key,
         "mode_requested": requested_mode,
@@ -471,6 +545,16 @@ async def grade_batch(
         "total_processing_time_ms": total_ms,
         "results": results,
     }
+    if user_id:
+        await run_in_threadpool(
+            _history_save,
+            history.save_batch,
+            user_id=user_id,
+            mode=requested_mode,
+            batch_response=response,
+            files=items,
+        )
+    return response
 
 
 @app.get("/tts")
@@ -597,6 +681,9 @@ async def exam_grade(
     feedback_lang: str | None = Form(None),
     mode: str = Form("practice", description="practice | mock_test"),
     accent: str = Form("default"),
+    user_id: str | None = Form(
+        None, description="ID ẩn danh của user (bật lưu lịch sử khi có)"
+    ),
 ) -> dict:
     """Chấm TRỌN một đề: mỗi câu chấm độc lập qua pipeline hiện có, rồi gộp overall.
 
@@ -680,7 +767,7 @@ async def exam_grade(
     overall = compute_exam_overall(
         exam, [r.get("result", {}).get("scores") for r in graded if "result" in r]
     )
-    return {
+    response = {
         "exam": exam,
         "title": paper_obj.title,
         "overall": overall,
@@ -690,6 +777,23 @@ async def exam_grade(
         "graded": sum(1 for r in graded if "result" in r),
         "questions": graded,
     }
+    if user_id:
+        # Đường /exam/grade (API client trực tiếp — SPA đi đường /grade từng câu).
+        # items: (qid, bytes, suffix, qt) — chỉ giữ câu có audio hợp lệ.
+        audio_by_qid = {
+            qid: (data, suffix)
+            for qid, data, suffix, _qt in items
+            if data and suffix
+        }
+        await run_in_threadpool(
+            _history_save,
+            history.save_exam_full,
+            user_id=user_id,
+            mode=requested_mode,
+            exam_response=response,
+            audio_by_qid=audio_by_qid,
+        )
+    return response
 
 
 _IMAGE_MEDIA_TYPES: dict[str, str] = {
@@ -760,6 +864,12 @@ def exam_overall(
     scores: str = Form(
         ..., description="JSON list các dict `scores` từng câu (null = câu lỗi/bỏ qua)"
     ),
+    user_id: str | None = Form(
+        None, description="ID ẩn danh của user (điền điểm tổng cho phiên lịch sử)"
+    ),
+    history_session_id: str | None = Form(
+        None, description="UUID phiên thi đã gửi kèm từng câu qua /grade"
+    ),
 ) -> dict:
     """Gộp điểm tổng cả đề từ danh sách điểm từng câu (client chấm từng câu qua /grade).
 
@@ -778,7 +888,7 @@ def exam_overall(
     overall = compute_exam_overall(exam, per_question)
     field = "estimated_ielts_band" if exam == "ielts" else "estimated_toeic_score"
     graded = sum(1 for s in per_question if s and s.get(field) is not None)
-    return {
+    response = {
         "exam": exam,
         "overall": overall,
         "overall_max": 9 if exam == "ielts" else 200,
@@ -786,6 +896,77 @@ def exam_overall(
         "count": len(per_question),
         "graded": graded,
     }
+    if user_id and history_session_id:
+        # Endpoint sync → Starlette đã chạy trong threadpool, gọi thẳng được.
+        _history_save(
+            history.finalize_exam_session,
+            session_id=history_session_id,
+            user_id=user_id,
+            overall=overall,
+            overall_max=response["overall_max"],
+            summary=response,
+        )
+    return response
+
+
+# ── Lịch sử chấm bài ─────────────────────────────────────────────────────
+# Đọc/xoá lịch sử của 1 user (uuid ẩn danh phía client). Ghi lịch sử nằm trong
+# chính /grade, /grade-batch, /exam/grade, /exam/overall ở trên.
+
+_HISTORY_AUDIO_MEDIA: dict[str, str] = {
+    ".webm": "audio/webm", ".ogg": "audio/ogg", ".mp3": "audio/mpeg",
+    ".wav": "audio/wav", ".m4a": "audio/mp4", ".aac": "audio/aac",
+    ".flac": "audio/flac", ".mp4": "video/mp4", ".mov": "video/quicktime",
+}
+
+
+# LƯU Ý path: KHÔNG dùng bare GET /history cho API — đó là path "ảo" của tab
+# Lịch sử trên SPA (router.js); F5 trên /history phải rơi xuống catch-all để trả
+# index.html. Vì vậy list nằm ở /history/list (đăng ký TRƯỚC /history/{record_id}
+# để chữ "list" không bị nuốt làm record_id).
+@app.get("/history/list")
+def history_list(user_id: str, limit: int = 20, offset: int = 0) -> dict:
+    """Danh sách bản ghi lịch sử của user (mới nhất trước, phân trang)."""
+    _require_history_enabled()
+    user_id = _valid_user_id_or_400(user_id)
+    try:
+        return history.list_records(_BASE_CONFIG, user_id, limit, offset)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi đọc lịch sử")
+        raise HTTPException(status_code=500, detail=f"Lỗi đọc lịch sử: {e}") from e
+
+
+@app.get("/history/{record_id}")
+def history_detail(record_id: str, user_id: str) -> dict:
+    """Chi tiết 1 bản ghi (kèm items). 404 nếu không tồn tại HOẶC sai user."""
+    _require_history_enabled()
+    user_id = _valid_user_id_or_400(user_id)
+    rec = history.get_record(_BASE_CONFIG, user_id, record_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="Không thấy bản ghi lịch sử.")
+    return rec
+
+
+@app.get("/history/{record_id}/audio")
+def history_audio(record_id: str, user_id: str, item_id: str | None = None) -> FileResponse:
+    """Audio đã lưu của bản ghi (single: không cần item_id; exam/batch: bắt buộc)."""
+    _require_history_enabled()
+    user_id = _valid_user_id_or_400(user_id)
+    path = history.get_audio_path(_BASE_CONFIG, user_id, record_id, item_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Không thấy audio của bản ghi này.")
+    media = _HISTORY_AUDIO_MEDIA.get(path.suffix.lower(), "application/octet-stream")
+    return FileResponse(path, media_type=media)
+
+
+@app.delete("/history/{record_id}")
+def history_delete(record_id: str, user_id: str) -> dict:
+    """Xoá 1 bản ghi (cascade items) + toàn bộ audio của nó trên đĩa."""
+    _require_history_enabled()
+    user_id = _valid_user_id_or_400(user_id)
+    if not history.delete_record(_BASE_CONFIG, user_id, record_id):
+        raise HTTPException(status_code=404, detail="Không thấy bản ghi lịch sử.")
+    return {"deleted": True}
 
 
 # Phục vụ frontend tĩnh + fallback SPA ở "/" — PHẢI đăng ký SAU mọi route API ở

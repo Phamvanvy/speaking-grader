@@ -5,6 +5,33 @@
 
 const API_URL_KEY = 'toeic-grader-api-url';
 
+// ── Lịch sử chấm bài (server-side) ────────────────────────────────────
+// "User" = uuid ẩn danh sinh 1 lần cho trình duyệt này, gửi kèm mỗi request chấm
+// để server tách lịch sử theo máy/trình duyệt. KHÔNG phải auth — chỉ cách ly mềm.
+const USER_ID_KEY = 'speaking-grader-user-id';
+function getUserId() {
+    let id = localStorage.getItem(USER_ID_KEY);
+    if (!id) {
+        // Fallback uuid-shaped khi thiếu crypto.randomUUID (context không phải
+        // secure) — server validate [A-Za-z0-9_-]{1,64} nên format phải chuẩn.
+        id = (crypto.randomUUID) ? crypto.randomUUID()
+            : ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+                (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+        localStorage.setItem(USER_ID_KEY, id);
+    }
+    return id;
+}
+
+// Opt-out privacy: tắt → không gửi user_id → server không lưu gì (audio là dữ
+// liệu nhạy cảm). Default BẬT. Checkbox nằm ở đầu tab Lịch sử.
+const HISTORY_OPT_KEY = 'speaking-grader-save-history';
+function historySaveEnabled() {
+    return localStorage.getItem(HISTORY_OPT_KEY) !== 'false';
+}
+function setHistorySaveEnabled(on) {
+    localStorage.setItem(HISTORY_OPT_KEY, on ? 'true' : 'false');
+}
+
 // ── Exam config ───────────────────────────────────────────────────────
 // Mọi khác biệt theo kỳ thi gom về một chỗ (tránh if/else rải rác). Dùng SỐ
 // (overallMax/criterionMax) thay vì chuỗi '/200' để dễ thêm TOEFL/VSTEP sau này.

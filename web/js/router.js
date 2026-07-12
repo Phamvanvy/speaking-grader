@@ -44,10 +44,11 @@ const AppRouter = {
         this._suppress = false;
     },
 
-    // Gọi từ switchMode() (vanilla, exam.js) mỗi khi đổi tab chấm lẻ ↔ thi cả đề.
+    // Gọi từ switchMode() (vanilla, exam.js) mỗi khi đổi tab chấm lẻ / thi cả đề / lịch sử.
     onModeSwitch(mode) {
         if (this._suppress) return;
         if (mode === 'classic') this.navigate('/');
+        else if (mode === 'history') this.navigate('/history');
         else if (window.__exam) this.navigate(this.buildExamPath(window.__exam));
         else this.navigate('/exam');
     },
@@ -62,9 +63,10 @@ const AppRouter = {
 
     // Hiện/ẩn đúng tab ngay khi trang tải — KHÔNG phụ thuộc Alpine đã init hay chưa.
     applyModeFromPath() {
-        const isExam = location.pathname.replace(/^\/+/, '').startsWith('exam');
+        const first = location.pathname.replace(/^\/+/, '').split('/')[0];
+        const mode = first === 'exam' ? 'exam' : (first === 'history' ? 'history' : 'classic');
         this._suppress = true;
-        switchMode(isExam ? 'exam' : 'classic');
+        switchMode(mode);
         this._suppress = false;
     },
 

@@ -39,6 +39,10 @@ function appendCommonFields(formData) {
     if (isVisible('image-group') && imageFile) formData.append('image', imageFile);
 
     formData.append('no_ai', document.getElementById('no-ai').checked);
+
+    // Lưu lịch sử server-side (tab "Lịch sử"): chỉ gửi user_id khi user chưa
+    // opt-out — không có user_id thì server không lưu gì.
+    if (historySaveEnabled()) formData.append('user_id', getUserId());
 }
 
 // True nếu dạng câu đang chọn đã có "đề" (mirror QuestionType.has_task_context

@@ -19,6 +19,10 @@ services:
       # Voice Piper cho /tts (nghe phát âm đúng). Đặt file .onnx (+ .onnx.json cùng tên)
       # vào ./voices trên host rồi trỏ TTS_VOICE_US/GB tới chúng. Thiếu → /tts 503.
       - ./voices:/app/voices:ro
+      # Lịch sử chấm bài (SQLite WAL + audio) — persist qua rebuild. Mount subtree
+      # riêng, KHÔNG mount cả ./data (sẽ che data/questions, data/image đã COPY
+      # trong image). 2 path TOEIC_HISTORY_* ở environment trỏ vào đây.
+      - ./data/history:/app/data/history
 
     # Cho phép container gọi service trên host (llama.cpp) qua host.docker.internal.
     extra_hosts:
@@ -37,6 +41,10 @@ services:
       TTS_VOICE_US: "${TTS_VOICE_US:-/app/voices/en_US-lessac-medium.onnx}"
       TTS_VOICE_GB: "${TTS_VOICE_GB:-/app/voices/en_GB-alan-medium.onnx}"
       TTS_CACHE_DIR: "/root/.cache/tts"
+      # Lịch sử chấm bài: DB + audio đặt trong subtree ./data/history (bind mount
+      # ở volumes) để sống qua docker compose down/up --build.
+      TOEIC_HISTORY_DB_PATH: "data/history/history.db"
+      TOEIC_HISTORY_AUDIO_DIR: "data/history/audio"
       # NVIDIA_VISIBLE_DEVICES: "1" # Mở ra nếu muốn ép container chỉ nhìn thấy GPU số 2
 
     # Healthcheck dùng endpoint /health có sẵn của app.
