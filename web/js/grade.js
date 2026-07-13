@@ -62,7 +62,7 @@ function hasTaskContext() {
 
 // Grade — routes to /grade (1 file) or /grade-batch (≥2 files).
 async function grade() {
-    const url = document.getElementById('api-url').value.replace(/\/$/, '');
+    const url = apiBase();
     const files = Array.from(fileInput.files);
 
     if (files.length === 0) {

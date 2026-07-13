@@ -521,28 +521,28 @@
     <!-- app.js đã tách theo nhóm chức năng. THỨ TỰ QUAN TRỌNG: state trước (chứa
          const/state dùng chung); render trước recording & form (escapeHtml được
          gọi ở top-level khi 2 file này nạp). -->
-    <script src="/js/state.js?v=accent-default-1"></script>
+    <script src="/js/state.js?v=apibase-1"></script>
     <script src="/js/render.js?v=practice-1"></script>
-    <script src="/js/playback.js?v=accent-default-2"></script>
+    <script src="/js/playback.js?v=apibase-1"></script>
     <script src="/js/recording.js?v=accent-default-1"></script>
-    <script src="/js/form.js?v=accent-default-1"></script>
-    <script src="/js/grade.js?v=accent-default-1"></script>
-    <script src="/js/suggest.js?v=suggest-1"></script>
-    <script src="/js/report.js?v=accent-default-1"></script>
+    <script src="/js/form.js?v=apibase-1"></script>
+    <script src="/js/grade.js?v=apibase-1"></script>
+    <script src="/js/suggest.js?v=apibase-1"></script>
+    <script src="/js/report.js?v=apibase-1"></script>
     <!-- Tab Lịch sử: list/chi tiết/xoá bản ghi đã lưu server-side. Dùng builder của
          render.js (featureGridHtml, scoresBreakdownHtml...) lúc RUNTIME nên chỉ cần
          nạp sau render.js; đặt trước exam.js vì switchMode gọi loadHistoryList. -->
-    <script src="/js/history.js?v=history-1"></script>
+    <script src="/js/history.js?v=history-2"></script>
     <!-- Luyện từ (popup ELSA-style) + Từ đã lưu: tips (data tĩnh) → saved (API /words,
          định nghĩa window.SavedWords cho practice/render dùng) → practice (modal).
          Sau render.js (dùng escapeHtml/toBritishWord runtime), trước exam.js
          (switchMode gọi loadSavedWords). -->
     <script src="/js/phoneme-tips.js?v=practice-1"></script>
-    <script src="/js/saved.js?v=practice-1"></script>
-    <script src="/js/practice.js?v=practice-1"></script>
+    <script src="/js/saved.js?v=practice-2"></script>
+    <script src="/js/practice.js?v=practice-2"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
-    <script src="/js/exam.js?v=exam-6"></script>
+    <script src="/js/exam.js?v=exam-7"></script>
     <!-- Router (URL path thật, History API) — nạp SAU exam.js (dùng switchMode +
          window.__exam) nhưng TRƯỚC Alpine (examSession.init() gọi router ngay khi
          Alpine dựng component). -->

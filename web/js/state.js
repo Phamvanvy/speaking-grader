@@ -5,6 +5,14 @@
 
 const API_URL_KEY = 'toeic-grader-api-url';
 
+// Base URL của API cho mọi fetch — ô "API Base URL" nếu user điền, không thì
+// origin hiện tại (frontend mount cùng origin với API). Dùng chung toàn bộ
+// web/js — đừng tự đọc #api-url ở file khác.
+function apiBase() {
+    const el = document.getElementById('api-url');
+    return ((el && el.value) || window.location.origin || '').replace(/\/$/, '');
+}
+
 // ── Lịch sử chấm bài (server-side) ────────────────────────────────────
 // "User" = uuid ẩn danh sinh 1 lần cho trình duyệt này, gửi kèm mỗi request chấm
 // để server tách lịch sử theo máy/trình duyệt. KHÔNG phải auth — chỉ cách ly mềm.

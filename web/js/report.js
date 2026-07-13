@@ -36,19 +36,26 @@ function downloadBatchAudio(index) {
     downloadBlob(file, `${String(index + 1).padStart(2, '0')}-${file.name || 'recording'}`);
 }
 
-// Tải TẤT CẢ audio của batch, mỗi file tên đặt theo THỨ TỰ (01-, 02-…). Trình duyệt
-// giới hạn nhiều lượt tải liên tiếp → giãn cách nhẹ giữa các lần click để tránh bị
-// chặn (Chrome/Edge có thể hỏi xin phép "Allow multiple downloads" ở lần đầu).
-async function downloadAllBatchAudio() {
-    const files = (lastBatchFiles || []).map((f, i) => f && { file: f, index: i }).filter(Boolean);
-    if (!files.length) {
+// Tải nhiều file liên tiếp: trình duyệt giới hạn nhiều lượt tải sát nhau → giãn
+// cách nhẹ giữa các lần click để tránh bị chặn (Chrome/Edge có thể hỏi xin phép
+// "Allow multiple downloads" ở lần đầu). `entries` = [{blob, filename}].
+async function downloadBlobsSequentially(entries) {
+    for (const { blob, filename } of entries) {
+        downloadBlob(blob, filename);
+        await new Promise(r => setTimeout(r, 300));
+    }
+}
+
+// Tải TẤT CẢ audio của batch, mỗi file tên đặt theo THỨ TỰ (01-, 02-…).
+function downloadAllBatchAudio() {
+    const entries = (lastBatchFiles || [])
+        .map((f, i) => f && { blob: f, filename: `${String(i + 1).padStart(2, '0')}-${f.name || 'recording'}` })
+        .filter(Boolean);
+    if (!entries.length) {
         alert('Không có audio để tải. Chấm một batch trước đã.');
         return;
     }
-    for (const { file, index } of files) {
-        downloadBlob(file, `${String(index + 1).padStart(2, '0')}-${file.name || 'recording'}`);
-        await new Promise(r => setTimeout(r, 300));
-    }
+    return downloadBlobsSequentially(entries);
 }
 
 // ── Printable report (single result → Print / Save as PDF) ────────────

@@ -142,7 +142,7 @@ applyTheme(currentTheme());
 
 // ── Health check ──────────────────────────────────────────────────────
 async function checkHealth() {
-    const url = document.getElementById('api-url').value.replace(/\/$/, '');
+    const url = apiBase();
     const statusDiv = document.getElementById('health-status');
 
     statusDiv.innerHTML = '<div class="status-bar info"><div class="spinner"></div><span>Checking...</span></div>';

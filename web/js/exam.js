@@ -21,11 +21,6 @@ function switchMode(mode) {
     if (window.AppRouter) window.AppRouter.onModeSwitch(mode);
 }
 
-function examApiBase() {
-    const el = document.getElementById('api-url');
-    return (el && el.value || window.location.origin || '').replace(/\/$/, '');
-}
-
 // Parse response an toàn: server quá tải / timeout có thể trả HTML (vd "<!DOCTYPE")
 // thay vì JSON → JSON.parse vỡ với "Unexpected token '<'". Đọc text trước rồi mới
 // thử parse, lỗi thì ném thông báo dễ hiểu (kèm mã HTTP).
@@ -227,7 +222,7 @@ function examSession() {
                 const fd = new FormData();
                 fd.append('file', file);
                 fd.append('exam', this.exam);
-                const res = await fetch(`${examApiBase()}/exam/import`, { method: 'POST', body: fd });
+                const res = await fetch(`${apiBase()}/exam/import`, { method: 'POST', body: fd });
                 const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                 this._loadPaper(data);
@@ -240,7 +235,7 @@ function examSession() {
         // Nạp danh sách bộ đề mẫu có sẵn cho kỳ thi đang chọn (gọi lại khi đổi kỳ thi).
         async loadBuiltinSets() {
             try {
-                const res = await fetch(`${examApiBase()}/exam/builtin/${this.exam}/sets`);
+                const res = await fetch(`${apiBase()}/exam/builtin/${this.exam}/sets`);
                 const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                 this.builtinSets = data.sets || [];
@@ -255,7 +250,7 @@ function examSession() {
         async loadBuiltin() {
             this.error = ''; this.importing = true;
             try {
-                const res = await fetch(`${examApiBase()}/exam/builtin/${this.exam}?set_id=${encodeURIComponent(this.builtinSetId)}`);
+                const res = await fetch(`${apiBase()}/exam/builtin/${this.exam}?set_id=${encodeURIComponent(this.builtinSetId)}`);
                 const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                 this._loadPaper(data);
@@ -550,15 +545,14 @@ function examSession() {
             const ext = (q._recName || '').match(/\.[a-z0-9]+$/i)?.[0] || '.webm';
             return `${String(q.sequence).padStart(2, '0')}-${q.type}${ext}`;
         },
-        // Tải TẤT CẢ audio đã ghi, mỗi file tên theo thứ tự câu. Dùng downloadBlob
-        // (report.js) + giãn cách nhẹ để tránh trình duyệt chặn tải hàng loạt.
-        async downloadAllRecordings() {
+        // Tải TẤT CẢ audio đã ghi, mỗi file tên theo thứ tự câu (giãn cách chống
+        // chặn tải hàng loạt nằm trong downloadBlobsSequentially của report.js).
+        downloadAllRecordings() {
             const items = (this.order || []).filter(q => q._recBlob);
             if (!items.length) { alert('Chưa có audio nào để tải.'); return; }
-            for (const q of items) {
-                downloadBlob(q._recBlob, this._recordingFilename(q));
-                await new Promise(r => setTimeout(r, 300));
-            }
+            return downloadBlobsSequentially(items.map(q => ({
+                blob: q._recBlob, filename: this._recordingFilename(q),
+            })));
         },
 
         // ── BƯỚC 4: chấm cả đề ──
@@ -621,7 +615,7 @@ function examSession() {
                             if (q.sequence != null) fd.append('history_seq', q.sequence);
                             fd.append('history_question_id', q.id);
                         }
-                        const res = await fetch(`${examApiBase()}/grade`, { method: 'POST', body: fd });
+                        const res = await fetch(`${apiBase()}/grade`, { method: 'POST', body: fd });
                         const data = await examParseResponse(res);
                         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                         item.result = data;
@@ -648,7 +642,7 @@ function examSession() {
                     fd.append('user_id', getUserId());
                     fd.append('history_session_id', this._historySessionId);
                 }
-                const res = await fetch(`${examApiBase()}/exam/overall`, { method: 'POST', body: fd });
+                const res = await fetch(`${apiBase()}/exam/overall`, { method: 'POST', body: fd });
                 const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                 this.result.overall = data.overall;

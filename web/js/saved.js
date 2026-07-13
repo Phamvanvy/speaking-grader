@@ -8,11 +8,6 @@ const SavedWords = {
     _cache: new Map(),   // word (lowercase) → entry từ server
     _loaded: false,
 
-    _base() {
-        const el = document.getElementById('api-url');
-        return (el && el.value || window.location.origin || '').replace(/\/$/, '');
-    },
-
     _key(word) { return (word || '').trim().toLowerCase(); },
 
     has(word) { return this._cache.has(this._key(word)); },
@@ -20,7 +15,7 @@ const SavedWords = {
     list() { return [...this._cache.values()]; },
 
     async refresh() {
-        const res = await fetch(`${this._base()}/words?user_id=${encodeURIComponent(getUserId())}`);
+        const res = await fetch(`${apiBase()}/words?user_id=${encodeURIComponent(getUserId())}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         this._cache = new Map((data.words || []).map(w => [this._key(w.word), w]));
@@ -37,7 +32,7 @@ const SavedWords = {
         if (entry.phonemes) fd.append('phonemes', JSON.stringify(entry.phonemes));
         if (entry.accuracy != null) fd.append('accuracy', entry.accuracy);
         if (entry.last_score != null) fd.append('last_score', entry.last_score);
-        const res = await fetch(`${this._base()}/words`, { method: 'POST', body: fd });
+        const res = await fetch(`${apiBase()}/words`, { method: 'POST', body: fd });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const saved = await res.json();
         this._cache.set(this._key(saved.word), saved);
@@ -46,7 +41,7 @@ const SavedWords = {
 
     async remove(word) {
         const res = await fetch(
-            `${this._base()}/words/${encodeURIComponent(this._key(word))}?user_id=${encodeURIComponent(getUserId())}`,
+            `${apiBase()}/words/${encodeURIComponent(this._key(word))}?user_id=${encodeURIComponent(getUserId())}`,
             { method: 'DELETE' },
         );
         if (!res.ok && res.status !== 404) throw new Error(`HTTP ${res.status}`);

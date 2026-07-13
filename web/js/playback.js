@@ -76,8 +76,7 @@ let ttsAudio = null;
 
 function playWordTts(word) {
     if (!word) return;
-    const base = document.getElementById('api-url').value.replace(/\/$/, '');
-    const url = `${base}/tts?text=${encodeURIComponent(word)}&accent=${encodeURIComponent(currentAccent)}`;
+    const url = `${apiBase()}/tts?text=${encodeURIComponent(word)}&accent=${encodeURIComponent(currentAccent)}`;
     if (!ttsAudio) ttsAudio = new Audio();
     ttsAudio.pause();
     ttsAudio.src = url;

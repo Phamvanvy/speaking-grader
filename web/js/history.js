@@ -11,11 +11,6 @@
 const HISTORY_PAGE_SIZE = 20;
 let historyOffset = 0;
 
-function historyApiBase() {
-    const el = document.getElementById('api-url');
-    return (el && el.value || window.location.origin || '').replace(/\/$/, '');
-}
-
 const HISTORY_KIND_LABEL = {
     single: { label: 'Chấm lẻ', cls: 'single' },
     batch: { label: 'Cả lớp', cls: 'batch' },
@@ -42,11 +37,16 @@ async function loadHistoryList(offset = 0) {
     listEl.innerHTML = '<p class="history-empty">⏳ Đang tải…</p>';
     pagerEl.innerHTML = '';
     try {
-        const url = `${historyApiBase()}/history/list?user_id=${encodeURIComponent(getUserId())}`
+        const url = `${apiBase()}/history/list?user_id=${encodeURIComponent(getUserId())}`
             + `&limit=${HISTORY_PAGE_SIZE}&offset=${offset}`;
         const res = await fetch(url);
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+        // Trang hiện tại rỗng nhưng vẫn còn bản ghi (vd vừa xoá bản ghi cuối của
+        // trang cuối) → lùi một trang thay vì hiện "chưa có bài chấm nào".
+        if (!data.records.length && offset > 0) {
+            return loadHistoryList(Math.max(0, offset - HISTORY_PAGE_SIZE));
+        }
         renderHistoryList(data);
     } catch (e) {
         listEl.innerHTML = `<p class="history-empty">⚠️ Không tải được lịch sử: ${escapeHtml(e.message)}</p>`;
@@ -57,9 +57,9 @@ function renderHistoryList(data) {
     const listEl = document.getElementById('history-list');
     const pagerEl = document.getElementById('history-pager');
     if (!data.records.length) {
+        // Chỉ tới đây khi total = 0 (trang rỗng giữa chừng đã được lùi ở loadHistoryList).
         listEl.innerHTML = '<p class="history-empty">Chưa có bài chấm nào được lưu.'
-            + (data.offset > 0 ? '' : ' Chấm một bài ở tab "Chấm bài lẻ" hoặc "Thi cả đề" rồi quay lại đây.')
-            + '</p>';
+            + ' Chấm một bài ở tab "Chấm bài lẻ" hoặc "Thi cả đề" rồi quay lại đây.</p>';
         return;
     }
     listEl.innerHTML = data.records.map(rec => {
@@ -103,7 +103,7 @@ function renderHistoryList(data) {
 async function deleteHistoryRecord(id) {
     if (!confirm('Xoá bản ghi này khỏi lịch sử (kèm audio đã lưu)?')) return;
     try {
-        const url = `${historyApiBase()}/history/${encodeURIComponent(id)}?user_id=${encodeURIComponent(getUserId())}`;
+        const url = `${apiBase()}/history/${encodeURIComponent(id)}?user_id=${encodeURIComponent(getUserId())}`;
         const res = await fetch(url, { method: 'DELETE' });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
@@ -129,7 +129,7 @@ async function openHistoryDetail(id) {
     wrap.classList.add('visible');
     el.innerHTML = '<p class="history-empty">⏳ Đang tải…</p>';
     try {
-        const url = `${historyApiBase()}/history/${encodeURIComponent(id)}?user_id=${encodeURIComponent(getUserId())}`;
+        const url = `${apiBase()}/history/${encodeURIComponent(id)}?user_id=${encodeURIComponent(getUserId())}`;
         const res = await fetch(url);
         const rec = await res.json();
         if (!res.ok) throw new Error(rec.detail || `HTTP ${res.status}`);
@@ -141,7 +141,7 @@ async function openHistoryDetail(id) {
 }
 
 function historyAudioUrl(recordId, itemId) {
-    let url = `${historyApiBase()}/history/${encodeURIComponent(recordId)}/audio`
+    let url = `${apiBase()}/history/${encodeURIComponent(recordId)}/audio`
         + `?user_id=${encodeURIComponent(getUserId())}`;
     if (itemId) url += `&item_id=${encodeURIComponent(itemId)}`;
     return url;

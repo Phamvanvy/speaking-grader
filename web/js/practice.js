@@ -22,11 +22,6 @@ const practiceState = {
 // Cache word-info trong phiên (server cũng cache SQLite — đây chỉ đỡ round-trip).
 const wordInfoCache = new Map();
 
-function practiceApiBase() {
-    const el = document.getElementById('api-url');
-    return (el && el.value || window.location.origin || '').replace(/\/$/, '');
-}
-
 // ── Modal skeleton (dựng 1 lần) ─────────────────────────────────────────
 function ensurePracticeModal() {
     let overlay = document.getElementById('practice-modal');
@@ -70,8 +65,7 @@ function ensurePracticeModal() {
 function practicePct(phonemes) {
     const scored = (phonemes || []).filter(p => p.status !== 'skipped');
     if (!scored.length) return null;
-    const pass = scored.filter(p =>
-        p.status === 'ok' || p.severity === 'low' || p.status === 'skipped').length;
+    const pass = scored.filter(p => p.status === 'ok' || p.severity === 'low').length;
     return Math.round(100 * pass / scored.length);
 }
 
@@ -163,7 +157,7 @@ async function loadPracticeWordInfo(word) {
     if (wordInfoCache.has(key)) { box.innerHTML = wordInfoCache.get(key); return; }
     box.innerHTML = '<span class="practice-info__loading">Đang tải định nghĩa…</span>';
     try {
-        const res = await fetch(`${practiceApiBase()}/word-info?word=${encodeURIComponent(key)}`);
+        const res = await fetch(`${apiBase()}/word-info?word=${encodeURIComponent(key)}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const info = await res.json();
         const html = `
@@ -281,7 +275,7 @@ async function gradePracticeAttempt(blob, mime) {
         fd.append('mode', 'mock_test');   // ép bật phoneme analysis
         fd.append('no_ai', 'true');       // 1 từ không cần LLM chấm — chỉ cần phoneme
         fd.append('accent', currentAccent);
-        const res = await fetch(`${practiceApiBase()}/grade`, { method: 'POST', body: fd });
+        const res = await fetch(`${apiBase()}/grade`, { method: 'POST', body: fd });
         if (!res.ok) {
             const raw = await res.text();
             let detail = `HTTP ${res.status}`;

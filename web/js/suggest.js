@@ -50,7 +50,7 @@ function updateSuggestUI() {
 let _lastSampleText = '';
 
 function suggestSample() {
-    const url = document.getElementById('api-url').value.replace(/\/$/, '');
+    const url = apiBase();
     const questionType = questionTypeSelect.value;
     if (!questionType) {
         alert('Hãy chọn một dạng câu cụ thể trước khi gợi ý bài mẫu.');
