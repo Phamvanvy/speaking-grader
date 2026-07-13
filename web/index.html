@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="/css/phoneme.css?v=accent-default-1">
     <link rel="stylesheet" href="/css/exam.css?v=exam-4">
     <link rel="stylesheet" href="/css/history.css?v=history-1">
-    <link rel="stylesheet" href="/css/practice.css?v=practice-1">
+    <link rel="stylesheet" href="/css/practice.css?v=practice-2">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
@@ -515,6 +515,16 @@
                 </div>
                 <div class="saved-list" id="saved-list"></div>
             </div>
+            <!-- Gợi ý luyện âm: âm yếu tính từ lịch sử chấm + từ đã lưu (API
+                 /words/suggestions) — từ đã lưu/phát âm ok tự giảm gợi ý. -->
+            <div class="card">
+                <div class="result-header">
+                    <h2>💡 Gợi ý luyện âm</h2>
+                    <button class="btn btn-secondary btn-inline" onclick="loadWordSuggestions(true)">↻ Gợi ý mới</button>
+                </div>
+                <div class="suggest-weak" id="suggest-weak"></div>
+                <div class="saved-list" id="suggest-list"></div>
+            </div>
         </div><!-- /#mode-saved -->
     </div>
 
@@ -538,8 +548,8 @@
          Sau render.js (dùng escapeHtml/toBritishWord runtime), trước exam.js
          (switchMode gọi loadSavedWords). -->
     <script src="/js/phoneme-tips.js?v=practice-1"></script>
-    <script src="/js/saved.js?v=practice-2"></script>
-    <script src="/js/practice.js?v=practice-2"></script>
+    <script src="/js/saved.js?v=practice-3"></script>
+    <script src="/js/practice.js?v=practice-3"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
     <script src="/js/exam.js?v=exam-7"></script>

@@ -156,6 +156,12 @@ button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px 
 .saved-row__score { font-weight: 700; color: #16a34a; white-space: nowrap; }
 .saved-empty { color: #9ca3af; font-style: italic; padding: 0.8rem 0; }
 
+/* ── Gợi ý luyện âm (card dưới danh sách từ đã lưu) ── */
+.suggest-weak { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.6rem; }
+.suggest-note { flex-basis: 100%; color: #6b7280; font-size: 0.85rem; margin-bottom: 0.2rem; }
+.suggest-row__target { font-size: 0.78rem; font-weight: 600; padding: 0.12rem 0.4rem; margin-right: 0.25rem; }
+.suggest-row__reason { font-style: italic; white-space: normal; }
+
 /* ── Dark mode ── */
 body.dark .practice-modal { background: #1f2937; }
 body.dark .practice-head__word { color: #4ade80; }
@@ -183,3 +189,4 @@ body.dark .practice-replay { background: #273449; border-color: #374151; color: 
 body.dark .practice-replay:hover { background: #1e3a8a33; }
 body.dark .saved-row { border-bottom-color: #273449; }
 body.dark td .practice-open:hover { color: #a5b4fc; }
+body.dark .suggest-note { color: #9ca3af; }

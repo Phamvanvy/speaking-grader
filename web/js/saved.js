@@ -89,8 +89,72 @@ async function loadSavedWords() {
     } catch (err) {
         box.innerHTML = `<div class="saved-empty">Lỗi tải danh sách: ${escapeHtml(String(err.message || err))}</div>`;
     }
+    // Gợi ý luyện âm nạp kèm mỗi lần mở tab — chỉ fetch 1 lần/phiên (nút ↻ ép mới).
+    loadWordSuggestions(false);
 }
 window.loadSavedWords = loadSavedWords;
+
+// ── Gợi ý luyện âm (API /words/suggestions) ─────────────────────────────
+let suggestLoaded = false;
+
+function suggestWeakChipHtml(w) {
+    const info = typeof phonemeTip === 'function' ? phonemeTip(w.symbol) : null;
+    const pct = w.error_rate != null ? ` · sai ${Math.round(w.error_rate * 100)}%` : '';
+    const sym = `/${escapeHtml(w.symbol)}/${pct}`;
+    const title = info ? escapeHtml(info.tip) : '';
+    // Có từ ví dụ → chip kiêm nút nghe (delegated .tts-play của playback.js).
+    return info && info.example
+        ? `<button type="button" class="practice-chip bad tts-play" data-word="${escapeHtml(info.example)}" title="${title} — nghe trong từ “${escapeHtml(info.example)}”">${sym}</button>`
+        : `<span class="practice-chip bad" title="${title}">${sym}</span>`;
+}
+
+function suggestRowHtml(s) {
+    // data-practice cùng format savedRowHtml — popup render ok với phonemes rỗng,
+    // chấm điểm sẽ điền chip; ☆ trong popup cho phép lưu từ.
+    const payload = escapeHtml(JSON.stringify({
+        word: s.word, ipa: s.ipa || null, accuracy: null, phonemes: [],
+    }));
+    const targets = (s.target_phonemes || [])
+        .map(p => `<span class="practice-chip bad suggest-row__target">/${escapeHtml(p)}/</span>`)
+        .join('');
+    const reason = s.reason
+        ? `<span class="suggest-row__reason">${escapeHtml(s.reason)}</span>` : '';
+    return `<div class="saved-row">
+        <span class="saved-row__word">${escapeHtml(s.word)}</span>
+        <span class="saved-row__ipa">${s.ipa ? `/${escapeHtml(s.ipa)}/` : ''}</span>
+        <button type="button" class="tts-play" data-word="${escapeHtml(s.word)}" title="Nghe phát âm chuẩn">🔊</button>
+        <span class="saved-row__meta">${targets}${reason}</span>
+        <button type="button" class="btn btn-secondary btn-inline practice-open" data-practice="${payload}">🎙️ Luyện tập</button>
+    </div>`;
+}
+
+async function loadWordSuggestions(force) {
+    const weakBox = document.getElementById('suggest-weak');
+    const listBox = document.getElementById('suggest-list');
+    if (!weakBox || !listBox) return;
+    if (suggestLoaded && !force) return;
+    weakBox.innerHTML = '';
+    listBox.innerHTML = `<div class="saved-empty">Đang tải gợi ý…
+        (lần đầu có thể mất vài giây — AI chọn từ cho từng âm)</div>`;
+    try {
+        const res = await fetch(`${apiBase()}/words/suggestions?user_id=${encodeURIComponent(getUserId())}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        suggestLoaded = true;
+        const note = data.source === 'fallback'
+            ? `<div class="suggest-note">Chưa đủ dữ liệu chấm điểm — gợi ý theo các âm
+               người Việt thường gặp khó. Chấm thêm bài để gợi ý bám sát bạn hơn.</div>`
+            : `<div class="suggest-note">Các âm bạn hay sai (tính từ lịch sử chấm) —
+               bấm chip để nghe âm mẫu:</div>`;
+        weakBox.innerHTML = note + (data.weak_phonemes || []).map(suggestWeakChipHtml).join(' ');
+        listBox.innerHTML = (data.suggestions || []).length
+            ? data.suggestions.map(suggestRowHtml).join('')
+            : '<div class="saved-empty">Chưa có gợi ý — thử lại sau.</div>';
+    } catch (err) {
+        listBox.innerHTML = `<div class="saved-empty">Không tải được gợi ý: ${escapeHtml(String(err.message || err))}</div>`;
+    }
+}
+window.loadWordSuggestions = loadWordSuggestions;
 
 // Xoá từ trong tab (delegated — list dựng lại mỗi lần load).
 document.addEventListener('click', e => {

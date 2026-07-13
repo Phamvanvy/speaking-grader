@@ -41,7 +41,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from . import history, words
+from . import history, word_suggest, words
 from .config import Config, load_config
 from .core import grade_response
 from .exam_import import ExamImportError, extract_exam
@@ -979,6 +979,26 @@ def _valid_word_or_400(word: str) -> str:
         return words.validate_word(word)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# LƯU Ý path: /words/suggestions phải đăng ký TRƯỚC mọi route GET /words/{...}
+# tương lai để chữ "suggestions" không bị nuốt làm path param (cùng lý do
+# /history/list ở trên). Hiện /words/{word} chỉ có DELETE nên chưa đụng nhau.
+@app.get("/words/suggestions")
+async def words_suggestions(user_id: str, lang: str | None = None, limit: int = 12) -> dict:
+    """Gợi ý từ mới để luyện âm yếu (tab Từ đã lưu) — hồ sơ âm tính từ history
+    + saved words; danh sách từ do LLM chọn per-phoneme, cache SQLite."""
+    user_id = _valid_user_id_or_400(user_id)
+    config = _resolve_config(lang)
+    lang_key = (config.feedback_lang or "vi").strip().lower()
+    try:
+        return await run_in_threadpool(
+            word_suggest.get_suggestions, _BASE_CONFIG, config, user_id,
+            limit=max(1, min(int(limit), 30)), lang=lang_key,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi sinh gợi ý từ luyện tập")
+        raise HTTPException(status_code=500, detail=f"Lỗi gợi ý từ: {e}") from e
 
 
 @app.get("/words")

@@ -5,11 +5,20 @@ cách ly mềm theo user_id); mỗi hàm mở connection MỚI, WAL + busy_timeo
 transaction ngắn qua `with conn:`; schema versioning bằng PRAGMA user_version.
 DB file RIÊNG (data/words.db) để không đụng versioning của history.db.
 
-2 bảng:
+5 bảng:
 - saved_words: từ user bookmark từ bảng lỗi phát âm (kèm IPA + snapshot phonemes
   + điểm), PK (user_id, word) — lưu lại từ đã có thì update điểm/thời điểm.
 - word_info_cache: định nghĩa EN + ví dụ + nghĩa tiếng Việt do LLM sinh, key
   (word, lang) — mỗi từ chỉ tốn 1 call LLM, các lần sau đọc cache.
+- phoneme_stats: thống kê per-user per-phoneme (ok/sub/del có trọng số) tổng hợp
+  TĂNG DẦN từ history result_json — hồ sơ "âm yếu" cho gợi ý từ luyện tập
+  (src/phoneme_profile.py). Cột đếm là REAL vì evidence được weight theo tuổi.
+- phoneme_profile_state: con trỏ quét history per-user, composite
+  (last_scan_at, last_scan_id) — tie-break theo id để record cùng giây không bị
+  bỏ sót (nhất quán với retention tie-break của history.py).
+- suggestion_cache: danh sách từ luyện tập do LLM chọn cho 1 phoneme, key
+  (phoneme, lang), USER-AGNOSTIC (cá nhân hoá làm sau khi đọc cache). TTL +
+  cache_version do src/word_suggest.py quyết định khi đọc.
 """
 
 from __future__ import annotations
@@ -25,7 +34,7 @@ from .history import validate_user_id  # noqa: F401 - re-export cho api.py
 
 logger = logging.getLogger("toeic.words")
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 # Giữ tối đa N từ mỗi user (xoá từ lưu cũ nhất khi vượt) — chống phình vô hạn.
 MAX_WORDS_PER_USER = 500
@@ -53,6 +62,35 @@ CREATE TABLE IF NOT EXISTS word_info_cache (
   meaning       TEXT,
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   PRIMARY KEY (word, lang)
+);
+
+CREATE TABLE IF NOT EXISTS phoneme_stats (
+  user_id      TEXT NOT NULL,
+  symbol       TEXT NOT NULL,
+  attempts     REAL NOT NULL DEFAULT 0,
+  ok           REAL NOT NULL DEFAULT 0,
+  sub          REAL NOT NULL DEFAULT 0,
+  del          REAL NOT NULL DEFAULT 0,
+  err_weighted REAL NOT NULL DEFAULT 0,
+  heard_json   TEXT,
+  updated_at   TEXT,
+  PRIMARY KEY (user_id, symbol)
+);
+
+CREATE TABLE IF NOT EXISTS phoneme_profile_state (
+  user_id      TEXT PRIMARY KEY,
+  last_scan_at TEXT NOT NULL DEFAULT '',
+  last_scan_id TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS suggestion_cache (
+  phoneme       TEXT NOT NULL,
+  lang          TEXT NOT NULL,
+  cache_version INTEGER NOT NULL DEFAULT 1,
+  words_json    TEXT NOT NULL,
+  model         TEXT,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (phoneme, lang)
 );
 """
 
@@ -215,6 +253,161 @@ def put_word_info(
                   meaning       = excluded.meaning
                 """,
                 (word, lang, definition_en, example_en, meaning),
+            )
+    finally:
+        conn.close()
+
+
+# ── Phoneme stats (hồ sơ âm yếu — src/phoneme_profile.py ghi/đọc) ─────────
+
+
+def get_phoneme_stats(cfg: Config, user_id: str) -> dict[str, dict]:
+    """Toàn bộ thống kê phoneme của user: {symbol: {attempts, ok, sub, del,
+    err_weighted, heard: {phone: weight}}}."""
+    conn = _connect(cfg)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM phoneme_stats WHERE user_id = ?", (user_id,)
+        ).fetchall()
+        stats: dict[str, dict] = {}
+        for r in rows:
+            entry = dict(r)
+            raw = entry.pop("heard_json", None)
+            try:
+                entry["heard"] = json.loads(raw) if raw else {}
+            except (TypeError, ValueError):
+                entry["heard"] = {}
+            stats[entry["symbol"]] = entry
+        return stats
+    finally:
+        conn.close()
+
+
+def get_profile_cursor(cfg: Config, user_id: str) -> tuple[str, str]:
+    """Con trỏ quét history (last_scan_at, last_scan_id); ('', '') nếu chưa quét."""
+    conn = _connect(cfg)
+    try:
+        row = conn.execute(
+            "SELECT last_scan_at, last_scan_id FROM phoneme_profile_state WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return (row["last_scan_at"], row["last_scan_id"]) if row else ("", "")
+    finally:
+        conn.close()
+
+
+def apply_phoneme_tallies(
+    cfg: Config, user_id: str, tallies: dict[str, dict], new_cursor: tuple[str, str]
+) -> bool:
+    """Cộng dồn tallies vào phoneme_stats + tiến con trỏ quét, trong 1 transaction.
+
+    Guard chống double-count khi 2 request đồng thời cùng quét 1 đoạn history:
+    đọc LẠI con trỏ trong transaction — nếu đã >= new_cursor thì request kia đã
+    apply xong đoạn này → bỏ qua. Trả True nếu có ghi.
+    """
+    conn = _connect(cfg)
+    try:
+        with conn:
+            row = conn.execute(
+                "SELECT last_scan_at, last_scan_id FROM phoneme_profile_state WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            current = (row["last_scan_at"], row["last_scan_id"]) if row else ("", "")
+            if current >= new_cursor:
+                return False
+            now = "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+            for symbol, t in tallies.items():
+                old = conn.execute(
+                    "SELECT heard_json FROM phoneme_stats WHERE user_id = ? AND symbol = ?",
+                    (user_id, symbol),
+                ).fetchone()
+                heard: dict[str, float] = {}
+                if old and old["heard_json"]:
+                    try:
+                        heard = json.loads(old["heard_json"])
+                    except (TypeError, ValueError):
+                        heard = {}
+                for phone, w in (t.get("heard") or {}).items():
+                    heard[phone] = heard.get(phone, 0) + w
+                conn.execute(
+                    f"""
+                    INSERT INTO phoneme_stats
+                      (user_id, symbol, attempts, ok, sub, del, err_weighted, heard_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, {now})
+                    ON CONFLICT(user_id, symbol) DO UPDATE SET
+                      attempts     = attempts + excluded.attempts,
+                      ok           = ok + excluded.ok,
+                      sub          = sub + excluded.sub,
+                      del          = del + excluded.del,
+                      err_weighted = err_weighted + excluded.err_weighted,
+                      heard_json   = excluded.heard_json,
+                      updated_at   = excluded.updated_at
+                    """,
+                    (
+                        user_id, symbol,
+                        t.get("attempts", 0), t.get("ok", 0), t.get("sub", 0),
+                        t.get("del", 0), t.get("err_weighted", 0),
+                        json.dumps(heard, ensure_ascii=False) if heard else None,
+                    ),
+                )
+            conn.execute(
+                """
+                INSERT INTO phoneme_profile_state (user_id, last_scan_at, last_scan_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  last_scan_at = excluded.last_scan_at,
+                  last_scan_id = excluded.last_scan_id
+                """,
+                (user_id, new_cursor[0], new_cursor[1]),
+            )
+        return True
+    finally:
+        conn.close()
+
+
+# ── Suggestion cache (từ luyện tập do LLM chọn per-phoneme) ───────────────
+
+
+def get_suggestion_cache(cfg: Config, phoneme: str, lang: str) -> dict | None:
+    """Entry cache thô {words, model, cache_version, created_at} hoặc None.
+    Validity (TTL, version) do caller (src/word_suggest.py) quyết định."""
+    conn = _connect(cfg)
+    try:
+        row = conn.execute(
+            "SELECT * FROM suggestion_cache WHERE phoneme = ? AND lang = ?",
+            (phoneme, lang),
+        ).fetchone()
+        if not row:
+            return None
+        entry = dict(row)
+        try:
+            entry["words"] = json.loads(entry.pop("words_json"))
+        except (TypeError, ValueError):
+            return None
+        return entry
+    finally:
+        conn.close()
+
+
+def put_suggestion_cache(
+    cfg: Config, phoneme: str, lang: str, words_list: list[dict],
+    model: str | None, cache_version: int,
+) -> None:
+    conn = _connect(cfg)
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO suggestion_cache (phoneme, lang, cache_version, words_json, model, created_at)
+                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                ON CONFLICT(phoneme, lang) DO UPDATE SET
+                  cache_version = excluded.cache_version,
+                  words_json    = excluded.words_json,
+                  model         = excluded.model,
+                  created_at    = excluded.created_at
+                """,
+                (phoneme, lang, cache_version,
+                 json.dumps(words_list, ensure_ascii=False), model),
             )
     finally:
         conn.close()

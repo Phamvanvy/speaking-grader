@@ -297,9 +297,11 @@ async function gradePracticeAttempt(blob, mime) {
         renderPracticeBody();
         status.className = pct >= 80 ? 'practice-status good' : 'practice-status';
         status.textContent = pct >= 80 ? `Tuyệt vời — ${pct}%! 🎉` : `Được ${pct}% — nghe mẫu 🔊 rồi thử lại nhé.`;
-        // Từ đã lưu → cập nhật điểm luyện gần nhất trên server (im lặng, lỗi bỏ qua).
+        // Từ đã lưu → cập nhật điểm luyện gần nhất + snapshot phonemes mới trên
+        // server (im lặng, lỗi bỏ qua) — snapshot mới giúp hồ sơ âm yếu
+        // (/words/suggestions) phản ánh tiến bộ của user.
         if (window.SavedWords && SavedWords.has(d.word)) {
-            SavedWords.add({ word: d.word, last_score: pct / 100 }).catch(() => {});
+            SavedWords.add({ word: d.word, last_score: pct / 100, phonemes: w.phonemes }).catch(() => {});
         }
     } catch (err) {
         status.className = 'practice-status err';

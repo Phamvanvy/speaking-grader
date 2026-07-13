@@ -560,6 +560,52 @@ def get_record(cfg: Config, user_id: str, record_id: str) -> dict | None:
     return rec
 
 
+def list_results_since(
+    cfg: Config, user_id: str, since_at: str, since_id: str, limit: int = 300
+) -> tuple[list[dict], tuple[str, str]]:
+    """Result dicts (đã parse) của records + items mới hơn con trỏ, cho quét
+    tăng dần của hồ sơ phoneme (src/phoneme_profile.py). CHỈ ĐỌC.
+
+    Con trỏ composite (created_at, id): tie-break theo id nên record cùng giây
+    không bị bỏ sót (id là uuid — cả 2 bảng đều so sánh lexicographic ổn định).
+    Records và items được UNION vào 1 dòng thời gian chung; `limit` chặn 1 lượt
+    quét để backfill lần đầu account lớn không phình RAM (stats hội tụ qua các
+    request sau). Trả (results, cursor_mới); cursor không đổi nếu hết dữ liệu.
+    """
+    user_id = validate_user_id(user_id)
+    limit = max(1, min(int(limit), 1000))
+    after = "(created_at > ? OR (created_at = ? AND id > ?))"
+    conn = _connect(cfg)
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT created_at, id, result_json FROM history_records
+              WHERE user_id = ? AND result_json IS NOT NULL AND {after}
+            UNION ALL
+            SELECT i.created_at, i.id, i.result_json FROM history_items i
+              JOIN history_records r ON r.id = i.record_id
+              WHERE r.user_id = ? AND i.result_json IS NOT NULL
+                AND (i.created_at > ? OR (i.created_at = ? AND i.id > ?))
+            ORDER BY created_at ASC, id ASC LIMIT ?
+            """,
+            (user_id, since_at, since_at, since_id,
+             user_id, since_at, since_at, since_id, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    results: list[dict] = []
+    cursor = (since_at, since_id)
+    for row in rows:
+        cursor = (row["created_at"], row["id"])
+        try:
+            parsed = json.loads(row["result_json"])
+        except (TypeError, ValueError):
+            continue  # blob hỏng — bỏ qua, không chặn quét
+        if isinstance(parsed, dict):
+            results.append({"created_at": row["created_at"], "result": parsed})
+    return results, cursor
+
+
 def get_audio_path(
     cfg: Config, user_id: str, record_id: str, item_id: str | None = None
 ) -> Path | None:

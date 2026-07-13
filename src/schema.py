@@ -123,6 +123,35 @@ class WordInfo(BaseModel):
     )
 
 
+class PhonemePracticeWord(BaseModel):
+    """1 từ luyện tập cho 1 phoneme — do LLM chọn từ danh sách CANDIDATES."""
+
+    word: str = Field(
+        description="Từ được chọn (lowercase, PHẢI nằm trong danh sách CANDIDATES)."
+    )
+    reason: str = Field(
+        description=(
+            "Vì sao từ này tốt để luyện âm đó — TIẾNG VIỆT, ≤12 từ (vd vị trí "
+            "âm đầu/giữa/cuối từ, cặp tối thiểu)."
+        )
+    )
+
+
+class PhonemePracticeList(BaseModel):
+    """Danh sách từ luyện tập tốt nhất cho 1 phoneme (gợi ý tab Từ đã lưu).
+
+    Do LLM chọn 1 lần rồi cache SQLite theo (phoneme, lang) — xem src/words.py
+    (suggestion_cache) + src/word_suggest.py.
+    """
+
+    phoneme: str = Field(
+        description="IPA phoneme được luyện (echo lại, không kèm dấu / /)."
+    )
+    words: list[PhonemePracticeWord] = Field(
+        description="10 từ luyện tập tốt nhất, chọn TỪ CANDIDATES, không lặp biến thể."
+    )
+
+
 class SpeakingResult(BaseModel):
     question_type: str
     # task_completion là tiêu chí hạng nhất: trả lời đúng/đủ yêu cầu hay không.
