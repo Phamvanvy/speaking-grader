@@ -18,71 +18,117 @@ td .practice-open:hover { text-decoration: underline; color: #4338ca; }
 .practice-overlay {
     position: fixed; inset: 0; z-index: 1000;
     background: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(2px);
     display: flex; align-items: center; justify-content: center;
     padding: 1rem;
 }
 .practice-overlay.hidden { display: none; }
 .practice-modal {
-    background: #fff; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-    width: min(560px, 100%); max-height: 90vh; overflow-y: auto;
-    padding: 1.25rem 1.4rem;
+    background: #fff; border-radius: 20px; box-shadow: 0 24px 70px rgba(0,0,0,0.35);
+    width: min(540px, 100%); max-height: 90vh; overflow-y: auto;
+    padding: 1.4rem 1.5rem 1.2rem;
 }
 
-/* Header: từ + % + bookmark + đóng */
-.practice-head { display: flex; align-items: center; gap: 0.6rem; }
-.practice-head__word { font-size: 1.7rem; font-weight: 700; color: #16a34a; margin: 0; }
+/* Header: từ + bookmark + % + đóng */
+.practice-head { display: flex; align-items: center; gap: 0.5rem; }
+.practice-head__word { font-size: 1.75rem; font-weight: 800; color: #15803d; margin: 0; letter-spacing: -0.01em; }
 .practice-head__spacer { flex: 1; }
 .practice-ring {
     --pct: 0; --ring-color: #16a34a;
-    width: 58px; height: 58px; border-radius: 50%;
+    width: 56px; height: 56px; border-radius: 50%;
     background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), #e5e7eb 0);
     display: flex; align-items: center; justify-content: center; flex: none;
 }
 .practice-ring__inner {
-    width: 44px; height: 44px; border-radius: 50%; background: #fff;
+    width: 43px; height: 43px; border-radius: 50%; background: #fff;
     display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 0.85rem; color: #111827;
+    font-weight: 700; font-size: 0.82rem; color: #111827;
 }
 .practice-close, .practice-bookmark {
     border: none; background: none; cursor: pointer; font-size: 1.25rem;
-    color: #6b7280; padding: 0.2rem;
+    color: #9ca3af; padding: 0.2rem; border-radius: 8px; line-height: 1;
 }
 .practice-bookmark.saved { color: #f59e0b; }
-.practice-close:hover { color: #111827; }
+.practice-close:hover, .practice-bookmark:hover { color: #111827; background: #f3f4f6; }
 
-.practice-ipa { color: #374151; font-size: 1.05rem; margin: 0.35rem 0 0.1rem; }
-.practice-ipa .tts-play { margin-left: 0.3rem; }
+/* IPA + nút nghe mẫu */
+.practice-ipa {
+    display: flex; align-items: center; gap: 0.35rem;
+    color: #6b7280; font-size: 1.05rem; margin: 0.2rem 0 0;
+}
+.practice-ipa .tts-play {
+    border: 1px solid #e5e7eb; background: #f9fafb; cursor: pointer;
+    border-radius: 999px; padding: 0.15rem 0.5rem; font-size: 0.95rem;
+}
+.practice-ipa .tts-play:hover { background: #eef2ff; border-color: #c7d2fe; }
 
 /* Định nghĩa + ví dụ (LLM, lazy) */
-.practice-info { border-top: 1px solid #e5e7eb; margin-top: 0.6rem; padding-top: 0.6rem; font-size: 0.9rem; }
+.practice-info {
+    background: #f8fafc; border: 1px solid #eef2f7; border-radius: 12px;
+    margin-top: 0.7rem; padding: 0.6rem 0.75rem; font-size: 0.9rem; color: #374151;
+}
+.practice-info:empty { display: none; }
 .practice-info__label { font-weight: 700; color: #111827; margin-top: 0.35rem; }
 .practice-info__meaning { color: #374151; }
 .practice-info__loading { color: #9ca3af; font-style: italic; }
 
-/* Bảng phoneme: Âm thanh | Bạn đã nói */
-.practice-table { width: 100%; border-collapse: collapse; margin-top: 0.7rem; font-size: 0.95rem; }
-.practice-table th {
-    text-align: left; font-weight: 700; color: #111827;
-    border-bottom: 1px solid #e5e7eb; padding: 0.35rem 0.4rem;
+/* ── Dải chip phoneme: xanh đúng / cam sai / xám chưa chấm ── */
+.practice-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.9rem; }
+.practice-chip {
+    display: inline-flex; align-items: center;
+    padding: 0.3rem 0.55rem; border-radius: 10px;
+    font-size: 1.02rem; font-weight: 600; line-height: 1.2;
+    border: 1px solid transparent; font-family: inherit;
 }
-.practice-table td { border-bottom: 1px solid #f1f5f9; padding: 0.45rem 0.4rem; vertical-align: top; }
-.practice-table__sym { font-size: 1.05rem; white-space: nowrap; }
-.practice-ok { color: #16a34a; font-weight: 700; }
-.practice-bad { color: #ea580c; font-weight: 700; font-size: 1.05rem; }
-.practice-tip { color: #374151; font-size: 0.85rem; margin-top: 0.25rem; line-height: 1.45; }
-.practice-skipnote { color: #9ca3af; font-size: 0.85rem; }
+.practice-chip.ok   { background: #ecfdf5; color: #067647; border-color: #bbf7d0; }
+.practice-chip.bad  { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
+.practice-chip.skip { background: #f9fafb; color: #9ca3af; border: 1px dashed #d1d5db; }
+button.practice-chip { cursor: pointer; }
+button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
 
-/* Khu luyện tập: mic + trạng thái */
-.practice-rec { margin-top: 1rem; text-align: center; }
-.practice-rec__hint { color: #6b7280; font-size: 0.9rem; margin-bottom: 0.4rem; }
-.practice-mic {
-    width: 64px; height: 64px; border-radius: 16px; border: none; cursor: pointer;
-    background: #2563eb; color: #fff; font-size: 1.6rem;
-    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+/* Thẻ chi tiết CHỈ cho âm sai */
+.practice-fix-list__title {
+    margin-top: 1rem; font-weight: 700; font-size: 0.85rem;
+    color: #9a3412; text-transform: uppercase; letter-spacing: 0.04em;
 }
-.practice-mic:hover { background: #1d4ed8; }
-.practice-mic.recording { background: #dc2626; animation: practice-pulse 1.2s infinite; }
-.practice-mic:disabled { background: #9ca3af; cursor: wait; box-shadow: none; }
+.practice-fix {
+    background: #fffbf5; border: 1px solid #fed7aa; border-left: 4px solid #fb923c;
+    border-radius: 10px; padding: 0.55rem 0.7rem; margin-top: 0.5rem;
+}
+.practice-fix__row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.practice-fix__target { font-weight: 700; font-size: 1.12rem; color: #111827; }
+.practice-fix__label { color: #9ca3af; font-size: 0.8rem; }
+.practice-fix__heard { font-weight: 700; font-size: 1.05rem; color: #dc2626; }
+.practice-fix__play {
+    margin-left: auto; cursor: pointer; font-size: 0.8rem; color: #374151;
+    border: 1px solid #e5e7eb; background: #fff; border-radius: 999px; padding: 0.15rem 0.55rem;
+}
+.practice-fix__play:hover { background: #eef2ff; border-color: #c7d2fe; }
+.practice-tip { color: #57534e; font-size: 0.85rem; margin-top: 0.3rem; line-height: 1.45; }
+
+/* Tất cả đúng 🎉 */
+.practice-allok {
+    margin-top: 1rem; padding: 0.6rem 0.8rem; text-align: center;
+    background: #ecfdf5; border: 1px solid #bbf7d0; border-radius: 12px;
+    color: #067647; font-weight: 600;
+}
+.practice-skipnote { color: #9ca3af; font-size: 0.82rem; margin-top: 0.45rem; }
+
+/* Khu luyện tập: mic + trạng thái + nghe lại */
+.practice-rec {
+    margin-top: 1.1rem; padding-top: 0.9rem; text-align: center;
+    border-top: 1px solid #f1f5f9;
+}
+.practice-rec__hint { color: #6b7280; font-size: 0.9rem; margin-bottom: 0.45rem; }
+.practice-mic {
+    width: 64px; height: 64px; border-radius: 50%; border: none; cursor: pointer;
+    background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; font-size: 1.6rem;
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.4);
+    transition: transform 0.1s ease;
+}
+.practice-mic:hover { transform: scale(1.06); }
+.practice-mic.recording { background: linear-gradient(135deg, #ef4444, #dc2626); animation: practice-pulse 1.2s infinite; }
+.practice-mic:disabled { background: #9ca3af; cursor: wait; box-shadow: none; transform: none; }
 @keyframes practice-pulse {
     0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }
     70% { box-shadow: 0 0 0 14px rgba(220, 38, 38, 0); }
@@ -91,6 +137,12 @@ td .practice-open:hover { text-decoration: underline; color: #4338ca; }
 .practice-status { margin-top: 0.5rem; font-size: 0.9rem; color: #374151; min-height: 1.2em; }
 .practice-status.err { color: #dc2626; }
 .practice-status.good { color: #16a34a; font-weight: 600; }
+.practice-replay {
+    margin-top: 0.55rem; cursor: pointer; font-size: 0.85rem; color: #374151;
+    border: 1px solid #e5e7eb; background: #f9fafb; border-radius: 999px; padding: 0.3rem 0.8rem;
+}
+.practice-replay:hover { background: #eef2ff; border-color: #c7d2fe; }
+.practice-replay.hidden { display: none; }
 
 /* ── Tab "Từ đã lưu" ── */
 .saved-list { margin-top: 0.6rem; }
@@ -109,13 +161,25 @@ body.dark .practice-modal { background: #1f2937; }
 body.dark .practice-head__word { color: #4ade80; }
 body.dark .practice-ring { background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), #374151 0); }
 body.dark .practice-ring__inner { background: #1f2937; color: #f9fafb; }
-body.dark .practice-ipa { color: #d1d5db; }
-body.dark .practice-info { border-top-color: #374151; }
+body.dark .practice-close:hover, body.dark .practice-bookmark:hover { color: #f9fafb; background: #374151; }
+body.dark .practice-ipa { color: #9ca3af; }
+body.dark .practice-ipa .tts-play { background: #273449; border-color: #374151; color: #d1d5db; }
+body.dark .practice-info { background: #111827; border-color: #273449; color: #d1d5db; }
 body.dark .practice-info__label { color: #f9fafb; }
 body.dark .practice-info__meaning { color: #d1d5db; }
-body.dark .practice-table th { color: #f9fafb; border-bottom-color: #374151; }
-body.dark .practice-table td { border-bottom-color: #273449; }
+body.dark .practice-chip.ok   { background: #052e1b; color: #4ade80; border-color: #14532d; }
+body.dark .practice-chip.bad  { background: #3b1d09; color: #fb923c; border-color: #7c2d12; }
+body.dark .practice-chip.skip { background: #111827; color: #6b7280; border-color: #374151; }
+body.dark .practice-fix-list__title { color: #fdba74; }
+body.dark .practice-fix { background: #2a2016; border-color: #7c2d12; border-left-color: #ea580c; }
+body.dark .practice-fix__target { color: #f9fafb; }
+body.dark .practice-fix__heard { color: #f87171; }
+body.dark .practice-fix__play { background: #273449; border-color: #374151; color: #d1d5db; }
 body.dark .practice-tip { color: #d1d5db; }
+body.dark .practice-allok { background: #052e1b; border-color: #14532d; color: #4ade80; }
+body.dark .practice-rec { border-top-color: #273449; }
 body.dark .practice-status { color: #d1d5db; }
+body.dark .practice-replay { background: #273449; border-color: #374151; color: #d1d5db; }
+body.dark .practice-replay:hover { background: #1e3a8a33; }
 body.dark .saved-row { border-bottom-color: #273449; }
 body.dark td .practice-open:hover { color: #a5b4fc; }

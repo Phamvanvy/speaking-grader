@@ -1,71 +1,6 @@
 'use strict';
 
-// CSV export (single) + báo cáo in (single & batch → Print / Save as PDF).
-
-// ── CSV export (single result) ────────────────────────────────────────
-// One row per audio file. Suitable for opening in Excel.
-const CSV_COLUMNS = [
-    'index', 'filename', 'status', 'exam',
-    'estimated_toeic_score', 'estimated_ielts_band',
-    'task_completion', 'content_relevance', 'wpm', 'words',
-    'duration_sec', 'asr_confidence', 'coverage', 'word_accuracy',
-    'transcript', 'summary_feedback', 'error',
-];
-
-function csvCell(value) {
-    const s = String(value ?? '');
-    // Quote if it contains comma, quote, or newline; double-up inner quotes.
-    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-}
-
-// Turn one batch item (or a single-result pseudo-item) into a CSV row object.
-function resultRow(item, fallbackExam) {
-    if (item.error) {
-        return {
-            index: item.index,
-            filename: item.audio_filename,
-            status: 'error',
-            error: item.error,
-        };
-    }
-    const r = item.result || {};
-    const f = r.features || {};
-    const s = r.scores || {};
-    const acc = f.accuracy_metrics;
-    return {
-        index: item.index,
-        filename: item.audio_filename,
-        status: 'ok',
-        exam: r.exam ?? fallbackExam ?? '',
-        estimated_toeic_score: s.estimated_toeic_score ?? '',
-        estimated_ielts_band: s.estimated_ielts_band ?? '',
-        task_completion: s.task_completion ?? '',
-        content_relevance: s.content_relevance ?? '',
-        wpm: f.speech_rate_wpm != null ? Math.round(f.speech_rate_wpm) : '',
-        words: f.word_count ?? '',
-        duration_sec: f.audio_duration_sec != null ? f.audio_duration_sec.toFixed(1) : '',
-        asr_confidence: f.avg_word_probability != null ? f.avg_word_probability.toFixed(4) : '',
-        coverage: acc ? acc.coverage : '',
-        word_accuracy: acc && acc.wer != null ? (1 - acc.wer).toFixed(4) : '',
-        transcript: r.transcript ?? '',
-        summary_feedback: s.summary_feedback ?? '',
-        error: '',
-    };
-}
-
-function buildCsv(rows) {
-    const lines = [CSV_COLUMNS.join(',')];
-    for (const row of rows) {
-        lines.push(CSV_COLUMNS.map(c => csvCell(row[c])).join(','));
-    }
-    // Prefix BOM so Excel reads UTF-8 (Vietnamese feedback) correctly.
-    return '﻿' + lines.join('\r\n');
-}
-
-// yyyy-mm-dd-hh-mm-ss, safe for filenames.
-function fileStamp() {
-    return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-}
+// Báo cáo in (single & batch → Print / Save as PDF) + tải audio đã chấm.
 
 function downloadBlob(blob, filename) {
     const objectUrl = URL.createObjectURL(blob);
@@ -114,23 +49,6 @@ async function downloadAllBatchAudio() {
         downloadBlob(file, `${String(index + 1).padStart(2, '0')}-${file.name || 'recording'}`);
         await new Promise(r => setTimeout(r, 300));
     }
-}
-
-function exportSingleCsv() {
-    if (!lastSingleData) {
-        alert('No result to export. Grade a file first.');
-        return;
-    }
-    const cfg = examConfig(lastSingleData.exam);
-    // Wrap the single result in the same shape resultRow() expects for a batch item.
-    const item = {
-        index: 1,
-        audio_filename: lastSingleData.audio_filename || lastSingleFilename || 'recording',
-        result: lastSingleData,
-    };
-    const row = resultRow(item, lastSingleData.exam);
-    const blob = new Blob([buildCsv([row])], { type: 'text/csv;charset=utf-8;' });
-    downloadBlob(blob, `${cfg.label.toLowerCase()}-result-${fileStamp()}.csv`);
 }
 
 // ── Printable report (single result → Print / Save as PDF) ────────────
@@ -274,7 +192,7 @@ function printSingleReport() {
 
 // ── Printable report (batch results → Print / Save as PDF) ────────────
 // An overview table (one row per file) followed by a full per-file report,
-// each file on its own page. Replaces the old CSV export.
+// each file on its own page.
 function printBatchReport() {
     if (!lastBatchData || !Array.isArray(lastBatchData.results) || lastBatchData.results.length === 0) {
         alert('No batch results to export. Grade a batch first.');

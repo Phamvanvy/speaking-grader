@@ -695,24 +695,7 @@ function examSession() {
         // Câu đã chấm xong (có điểm hoặc lỗi) → cho hiện mũi tên expand ở summary.
         questionDone(item) { return !!(item.error || (item.result && item.result.scores)); },
 
-        // ── Export kết quả cả đề (đồng bộ với chấm lẻ/batch ở report.js) ──
-        _examCsvRows() {
-            return (this.result.questions || []).map(it => resultRow({
-                index: it.sequence,
-                audio_filename: `Câu ${it.sequence} - ${this.typeLabel(it.type)}`,
-                result: it.result,
-                error: it.error,
-            }, this.exam));
-        },
-        exportExamCsv() {
-            if (!this.result || !this.result.questions.length) {
-                alert('Chưa có kết quả để export.');
-                return;
-            }
-            const cfg = examConfig(this.exam);
-            const blob = new Blob([buildCsv(this._examCsvRows())], { type: 'text/csv;charset=utf-8;' });
-            downloadBlob(blob, `${cfg.label.toLowerCase()}-exam-result-${fileStamp()}.csv`);
-        },
+        // ── Export kết quả cả đề (Print / PDF, đồng bộ với chấm lẻ/batch ở report.js) ──
         printExamReport() {
             if (!this.result || !this.result.questions.length) {
                 alert('Chưa có kết quả để export.');

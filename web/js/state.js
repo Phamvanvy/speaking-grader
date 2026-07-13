@@ -118,7 +118,7 @@ let lastBatchData = null;
 let lastBatchFiles = [];
 
 // Holds the most recent single /grade response (+ the file name it came from)
-// so "Export CSV" / "Print" can rebuild a report.
+// so "Print / PDF" can rebuild a report.
 let lastSingleData = null;
 let lastSingleFilename = '';
 

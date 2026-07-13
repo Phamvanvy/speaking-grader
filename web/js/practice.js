@@ -15,6 +15,8 @@ const practiceState = {
     chunks: [],
     recording: false,
     grading: false,
+    playUrl: null,       // object URL của lần ghi âm gần nhất → nút "Nghe lại bạn vừa nói"
+    playAudio: null,     // Audio element tái dùng (tránh chồng tiếng khi bấm liên tiếp)
 };
 
 // Cache word-info trong phiên (server cũng cache SQLite — đây chỉ đỡ round-trip).
@@ -48,6 +50,7 @@ function ensurePracticeModal() {
                 <div class="practice-rec__hint">Chạm để nói — chấm lại riêng từ này</div>
                 <button type="button" class="practice-mic" id="practice-mic" title="Ghi âm luyện tập">🎙️</button>
                 <div class="practice-status" id="practice-status"></div>
+                <button type="button" class="practice-replay hidden" id="practice-replay">▶ Nghe lại bạn vừa nói</button>
             </div>
         </div>`;
     document.body.appendChild(overlay);
@@ -58,6 +61,7 @@ function ensurePracticeModal() {
     overlay.querySelector('#practice-close').addEventListener('click', closePracticePopup);
     overlay.querySelector('#practice-mic').addEventListener('click', togglePracticeRecording);
     overlay.querySelector('#practice-bookmark').addEventListener('click', togglePracticeBookmark);
+    overlay.querySelector('#practice-replay').addEventListener('click', playPracticeReplay);
     return overlay;
 }
 
@@ -81,38 +85,60 @@ function practiceRingUpdate(pct) {
     label.textContent = `${pct}%`;
 }
 
-// ── Render bảng phoneme (Âm thanh | Bạn đã nói) ─────────────────────────
+// ── Render phoneme: dải chip màu + thẻ chi tiết CHỈ cho âm sai ──────────
+// (thay bảng "Âm thanh | Bạn đã nói" cũ — từ đọc đúng hết không còn ra 13 hàng
+// "Chính xác" lặp lại; âm đúng = chip xanh, sai = chip cam + thẻ tip, xám = chưa chấm).
+function practiceIsBad(p) {
+    return p.status !== 'skipped' && !(p.status === 'ok' || p.severity === 'low');
+}
+
 function practicePhonemesHtml(phonemes) {
     // GB chỉ đổi HIỂN THỊ (data-practice giữ symbol gốc US) — tái dùng transform
     // của render.js qua object từ giả.
     const disp = (currentAccent === 'gb' && typeof toBritishWord === 'function')
         ? toBritishWord({ phonemes }).phonemes : phonemes;
-    const rows = (disp || []).filter(p => !p._hidden).map(p => {
+    const shown = (disp || []).filter(p => !p._hidden);
+    if (!shown.length) return '';
+
+    // Chip có từ ví dụ → kiêm luôn nút nghe (delegated .tts-play của playback.js).
+    const chips = shown.map(p => {
+        const cls = p.status === 'skipped' ? 'skip' : practiceIsBad(p) ? 'bad' : 'ok';
         const info = phonemeTip(p.symbol);
-        const tts = info && info.example
-            ? `<button type="button" class="tts-play" data-word="${escapeHtml(info.example)}" title="Nghe âm này trong từ “${escapeHtml(info.example)}”">🔊</button>`
-            : '';
-        let saidHtml;
-        if (p.status === 'skipped') {
-            saidHtml = '<span class="practice-skipnote">chưa chấm được âm này</span>';
-        } else if (p.status === 'ok' || p.severity === 'low') {
-            saidHtml = '<span class="practice-ok">Chính xác</span>';
-        } else {
-            const heard = p.status === 'del' ? '∅ (thiếu âm)' : `/${p.heard ?? '?'}/`;
+        const sym = `/${escapeHtml(p.symbol)}/`;
+        return info && info.example
+            ? `<button type="button" class="practice-chip ${cls} tts-play" data-word="${escapeHtml(info.example)}" title="Nghe âm này trong từ “${escapeHtml(info.example)}”">${sym}</button>`
+            : `<span class="practice-chip ${cls}">${sym}</span>`;
+    }).join('');
+
+    const bad = shown.filter(practiceIsBad);
+    const skipped = shown.filter(p => p.status === 'skipped').length;
+    let detail = '';
+    if (bad.length) {
+        const cards = bad.map(p => {
+            const info = phonemeTip(p.symbol);
+            const tts = info && info.example
+                ? `<button type="button" class="tts-play practice-fix__play" data-word="${escapeHtml(info.example)}" title="Nghe âm này trong từ “${escapeHtml(info.example)}”">🔊 ${escapeHtml(info.example)}</button>`
+                : '';
+            const heard = p.status === 'del' ? '∅ thiếu âm' : `/${p.heard ?? '?'}/`;
             const tip = info ? info.tip
                 : 'Nghe mẫu và bắt chước khẩu hình — chú ý vị trí lưỡi và môi.';
-            saidHtml = `<span class="practice-bad">${escapeHtml(heard)}</span>
-                <div class="practice-tip">${escapeHtml(tip)}</div>`;
-        }
-        return `<tr>
-            <td class="practice-table__sym">/${escapeHtml(p.symbol)}/ ${tts}</td>
-            <td>${saidHtml}</td>
-        </tr>`;
-    }).join('');
-    return `<table class="practice-table">
-        <thead><tr><th>Âm thanh</th><th>Bạn đã nói</th></tr></thead>
-        <tbody>${rows}</tbody>
-    </table>`;
+            return `<div class="practice-fix">
+                <div class="practice-fix__row">
+                    <span class="practice-fix__target">/${escapeHtml(p.symbol)}/</span>
+                    <span class="practice-fix__label">bạn nói</span>
+                    <span class="practice-fix__heard">${escapeHtml(heard)}</span>
+                    ${tts}
+                </div>
+                <div class="practice-tip">${escapeHtml(tip)}</div>
+            </div>`;
+        }).join('');
+        detail = `<div class="practice-fix-list__title">Cần cải thiện</div>${cards}`;
+    } else {
+        detail = '<div class="practice-allok">🎉 Tất cả các âm đều chính xác!</div>';
+    }
+    const skipNote = skipped > 0
+        ? '<div class="practice-skipnote">Âm màu xám chưa chấm được ở lần nói này — bấm mic thử lại.</div>' : '';
+    return `<div class="practice-chips">${chips}</div>${detail}${skipNote}`;
 }
 
 function renderPracticeBody() {
@@ -154,11 +180,31 @@ async function loadPracticeWordInfo(word) {
     }
 }
 
+// ── Nghe lại đoạn user vừa ghi âm ───────────────────────────────────────
+// Blob ghi âm chỉ nằm ở client — giữ object URL để user tự nghe lại mình nói,
+// so với mẫu 🔊. Reset khi mở từ khác / đóng popup (recording cũ không còn nghĩa).
+function setPracticeReplay(blob) {
+    if (practiceState.playAudio) { try { practiceState.playAudio.pause(); } catch (e) { /* chưa play */ } }
+    if (practiceState.playUrl) URL.revokeObjectURL(practiceState.playUrl);
+    practiceState.playUrl = blob ? URL.createObjectURL(blob) : null;
+    practiceState.playAudio = null;
+    const btn = document.getElementById('practice-replay');
+    if (btn) btn.classList.toggle('hidden', !practiceState.playUrl);
+}
+
+function playPracticeReplay() {
+    if (!practiceState.playUrl) return;
+    if (!practiceState.playAudio) practiceState.playAudio = new Audio(practiceState.playUrl);
+    practiceState.playAudio.currentTime = 0;
+    practiceState.playAudio.play().catch(() => { /* autoplay policy — user sẽ bấm lại */ });
+}
+
 // ── Mở / đóng ───────────────────────────────────────────────────────────
 function openPracticePopup(data) {
     if (!data || !data.word) return;
     const overlay = ensurePracticeModal();
     practiceState.data = data;
+    setPracticeReplay(null);
     renderPracticeBody();
     overlay.classList.remove('hidden');
     loadPracticeWordInfo(data.word);
@@ -168,6 +214,7 @@ function closePracticePopup() {
     const overlay = document.getElementById('practice-modal');
     if (overlay) overlay.classList.add('hidden');
     stopPracticeStream();
+    setPracticeReplay(null);
     practiceState.data = null;
 }
 
@@ -206,6 +253,8 @@ async function togglePracticeRecording() {
         const mime = practiceState.recorder.mimeType || 'audio/webm';
         const blob = new Blob(practiceState.chunks, { type: mime });
         stopPracticeStream();
+        // Cho nghe lại NGAY cả khi chấm lỗi/chưa nghe rõ — user vẫn muốn tự nghe mình nói gì.
+        setPracticeReplay(blob);
         gradePracticeAttempt(blob, mime);
     });
     practiceState.recorder.start();
