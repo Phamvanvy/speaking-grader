@@ -20,7 +20,7 @@ from pathlib import Path
 
 from . import phoneme_profile, words
 from .config import Config
-from .phoneme.ipa import word_to_ipa
+from .phoneme.ipa import word_to_ipa, word_ipa_display
 from .phoneme.ipa.g2p import _get_cmudict
 from .phoneme.ipa.phoneme_set import _WORD_IPA_OVERRIDES, normalize_ipa
 from .schema import PhonemePracticeList
@@ -85,7 +85,10 @@ def _build_index(
         if not 2 <= len(symbols) <= 7:
             continue
         syms = frozenset(normalize_ipa(s) for s in symbols)
-        by_word[word] = (rank, "".join(symbols), syms)
+        # Chuỗi IPA hiển thị KÈM trọng âm (onset) → gợi ý/từ đã lưu trùng nhấn âm
+        # với Pronunciation detail. Trọng âm chỉ hiển thị, không đụng `syms` (dùng
+        # để match âm yếu — vẫn từ symbols đã normalize, không dấu nhấn).
+        by_word[word] = (rank, word_ipa_display(word), syms)
         for s in syms:
             by_symbol.setdefault(s, []).append((rank, word))
     return by_symbol, by_word

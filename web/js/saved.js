@@ -65,9 +65,13 @@ function savedRowHtml(w) {
         word: w.word, ipa: w.ipa || null, accuracy: w.accuracy,
         phonemes: w.phonemes || [],
     }));
+    // IPA kèm trọng âm: dựng từ phonemes đã lưu (trùng Pronunciation detail); từ lưu
+    // từ payload cũ (không phonemes) → fallback chuỗi w.ipa (nay backend cũng kèm nhấn).
+    const ipaStr = (typeof ipaStressString === 'function' && (w.phonemes || []).length)
+        ? ipaStressString(w.phonemes) : (w.ipa || '');
     return `<div class="saved-row">
         <span class="saved-row__word">${escapeHtml(w.word)}</span>
-        <span class="saved-row__ipa">${w.ipa ? `/${escapeHtml(w.ipa)}/` : ''}</span>
+        <span class="saved-row__ipa">${ipaStr ? `/${escapeHtml(ipaStr)}/` : ''}</span>
         <button type="button" class="tts-play" data-word="${escapeHtml(w.word)}" title="Nghe phát âm chuẩn">🔊</button>
         <span class="saved-row__score" title="Điểm luyện gần nhất">${pctText}</span>
         <span class="saved-row__meta">${when}</span>

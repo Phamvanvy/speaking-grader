@@ -332,6 +332,42 @@ def text_to_ipa_sequence_with_spans(
     return phonemes, spans, stress, display_stress
 
 
+def format_ipa_with_stress(
+    symbols: list[str], display_stress: list[StressType | None]
+) -> str:
+    """Ghép `symbols` thành chuỗi IPA hiển thị KÈM dấu nhấn (KHÔNG bọc /…/).
+
+    "upcoming" (symbols=[ʌ,p,k,ʌ,m,ɪ,ŋ], display_stress=[primary,None,secondary,…])
+    → "ˈʌpˌkʌmɪŋ". Dấu nhấn đọc từ `display_stress` (đã dời về ĐẦU âm tiết qua
+    place_stress_at_onset) nên trùng với cách Pronunciation detail dựng IPA trên
+    frontend (render.js đọc cùng field display_stress). `display_stress` song song
+    1-1 với `symbols`; phần thiếu coi như không nhấn.
+    """
+    out: list[str] = []
+    for i, sym in enumerate(symbols):
+        st = display_stress[i] if i < len(display_stress) else None
+        if st == "primary":
+            out.append("ˈ")   # ˈ
+        elif st == "secondary":
+            out.append("ˌ")   # ˌ
+        out.append(sym)
+    return "".join(out)
+
+
+def word_ipa_display(word: str) -> str:
+    """Chuỗi IPA hiển thị gọn của 1 từ, KÈM dấu nhấn dời-về-onset:
+    "upcoming" → "ˈʌpˌkʌmɪŋ" ("" nếu không tra được IPA).
+
+    Dùng cho các chỗ CHỈ có chuỗi `ipa` để hiển thị (gợi ý luyện từ, từ đã lưu)
+    và cần trùng trọng âm với Pronunciation detail. CHỈ để hiển thị — không đưa
+    vào DTW/chấm điểm (xem lưu ý ở word_to_ipa_with_stress_source).
+    """
+    symbols, stress = word_to_ipa_with_stress(word)
+    if not symbols:
+        return ""
+    return format_ipa_with_stress(symbols, place_stress_at_onset(symbols, stress))
+
+
 def text_to_ipa_sequence(text: str) -> list[str]:
     """Chuyển đoạn text thành danh sách phonemes tham chiếu.
 
@@ -365,6 +401,8 @@ __all__ = [
     "deletion_penalty",
     # g2p
     "place_stress_at_onset",
+    "format_ipa_with_stress",
+    "word_ipa_display",
     "word_to_ipa",
     "word_to_ipa_with_stress",
     "word_to_ipa_with_stress_source",

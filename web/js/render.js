@@ -63,6 +63,24 @@ function correctionsHtml(corrections) {
 const sevColor = s => (s === 'high' ? '#b91c1c' : s === 'medium' ? '#b45309' : '#6b7280');
 const sevLabel = s => (s === 'high' ? 'cao' : s === 'medium' ? 'trung bình' : s === 'low' ? 'thấp' : '');
 
+// ── Nhấn âm (stress) dùng chung ─────────────────────────────────────────
+// Nhấn âm HIỂN THỊ của 1 phoneme: ưu tiên display_stress (đã dời về đầu âm tiết →
+// /ˈledʒənd/); payload cũ không có field này thì fallback về stress (nằm trên nguyên
+// âm). Field có nhưng null nghĩa là "âm này không mang dấu" → KHÔNG fallback.
+function phonemeStress(p) {
+    return (p.display_stress !== undefined) ? p.display_stress : p.stress;
+}
+// Chuỗi IPA gọn "ˈʌpˌkʌmɪŋ" (KHÔNG bọc /…/) dựng từ phonemes + nhấn âm — nguồn CHUNG
+// để popup luyện từ (practice.js) & tab Từ đã lưu (saved.js) TRÙNG trọng âm với
+// Pronunciation detail (cùng đọc display_stress). Bỏ qua _hidden (coda /r/ Anh-Anh).
+function ipaStressString(phonemes) {
+    return (phonemes || []).filter(p => !p._hidden).map(p => {
+        const s = phonemeStress(p);
+        const mark = s === 'primary' ? 'ˈ' : s === 'secondary' ? 'ˌ' : '';
+        return mark + (p.symbol ?? '');
+    }).join('');
+}
+
 // ── British (RP) display transform ────────────────────────────────────
 // Reference IPA do g2p_en/CMUdict sinh ra là giọng MỸ. Khi accent = 'gb' ta áp vài
 // quy tắc gần đúng Mỹ→Anh CHỈ ĐỂ HIỂN THỊ (điểm số dùng dữ liệu gốc, không đổi).
@@ -149,9 +167,9 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     // field này thì fallback về p.stress (nằm trên nguyên âm). Backend đã suppress
     // nhấn cho từ đơn âm tiết.
     const stressMark = p => {
-        // Chỉ fallback khi field VẮNG (payload cũ). Nếu có field nhưng null nghĩa là
-        // "âm này không mang dấu" (dấu đã dời sang phụ âm onset) → KHÔNG fallback.
-        const s = (p.display_stress !== undefined) ? p.display_stress : p.stress;
+        // phonemeStress: ưu tiên display_stress, fallback stress khi field VẮNG (payload
+        // cũ); field có nhưng null = "âm này không mang dấu" → KHÔNG fallback.
+        const s = phonemeStress(p);
         return s === 'primary' ? '<span class="phoneme-stress">ˈ</span>'
              : s === 'secondary' ? '<span class="phoneme-stress">ˌ</span>'
              : '';

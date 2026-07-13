@@ -135,10 +135,20 @@ function practicePhonemesHtml(phonemes) {
     return `<div class="practice-chips">${chips}</div>${detail}${skipNote}`;
 }
 
+// IPA hiển thị của popup: dựng TỪ phonemes (kèm trọng âm display_stress, đã áp GB
+// như dải chip) để TRÙNG với Pronunciation detail. Không có phonemes (vd gợi ý luyện
+// từ chưa chấm) → fallback chuỗi d.ipa từ backend (nay cũng đã kèm nhấn âm).
+function practiceIpaString(d) {
+    const disp = (currentAccent === 'gb' && typeof toBritishWord === 'function')
+        ? toBritishWord({ phonemes: d.phonemes || [] }).phonemes : (d.phonemes || []);
+    return (typeof ipaStressString === 'function' ? ipaStressString(disp) : '') || (d.ipa || '');
+}
+
 function renderPracticeBody() {
     const d = practiceState.data;
     document.getElementById('practice-word').textContent = d.word;
-    const ipaDisp = d.ipa ? `/${d.ipa}/` : '';
+    const ipaStr = practiceIpaString(d);
+    const ipaDisp = ipaStr ? `/${ipaStr}/` : '';
     document.getElementById('practice-ipa').innerHTML = `${escapeHtml(ipaDisp)}
         <button type="button" class="tts-play" data-word="${escapeHtml(d.word)}" title="Nghe phát âm chuẩn">🔊</button>`;
     document.getElementById('practice-phonemes').innerHTML = practicePhonemesHtml(d.phonemes);
