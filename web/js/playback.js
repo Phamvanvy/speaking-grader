@@ -74,9 +74,14 @@ document.addEventListener('click', e => {
 // 1 thẻ <audio> ẩn dùng chung (tách khỏi wordAudio để hai nút không cắt nhau).
 let ttsAudio = null;
 
+// Phải khớp CACHE_VERSION ở src/tts.py. URL /tts được server cache 24h (max-age),
+// nên bump version chỉ ở đĩa server KHÔNG đủ — trình duyệt vẫn phát WAV cũ theo URL cũ.
+// Đưa version vào URL → đổi audio (vd fix mất /s/) là đổi cache-key trình duyệt luôn.
+const TTS_AUDIO_VERSION = 'v4';
+
 function playWordTts(word) {
     if (!word) return;
-    const url = `${apiBase()}/tts?text=${encodeURIComponent(word)}&accent=${encodeURIComponent(currentAccent)}`;
+    const url = `${apiBase()}/tts?text=${encodeURIComponent(word)}&accent=${encodeURIComponent(currentAccent)}&v=${TTS_AUDIO_VERSION}`;
     if (!ttsAudio) ttsAudio = new Audio();
     ttsAudio.pause();
     ttsAudio.src = url;

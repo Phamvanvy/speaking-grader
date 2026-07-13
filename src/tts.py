@@ -30,7 +30,11 @@ logger = logging.getLogger("toeic.tts")
 
 # Bump khi đổi voice mặc định, cách chuẩn hoá input, hoặc format output → cache cũ
 # tự bị bỏ qua (key đổi) mà không cần xoá thủ công.
-CACHE_VERSION = "v2"
+# v3: thêm noise_scale=0.0 (tất định hoàn toàn) → bỏ các WAV cache-v2 đã trúng draw
+# xấu làm phụ âm đầu (vd "store" → gần như mất /s/) bị đóng băng vĩnh viễn.
+# v4: đổi voice US lessac→amy (lessac nuốt hẳn /s/ đầu cụm s+stop; amy phát rõ) →
+# bỏ cache lessac cũ. Phải giữ khớp TTS_AUDIO_VERSION ở web/js/playback.js.
+CACHE_VERSION = "v4"
 
 # Trần độ dài text TTS (ký tự). Đây là mức từ/cụm ngắn, không phải câu — đủ rộng cho
 # cụm nhiều từ nhưng vẫn chặn lạm dụng. (Endpoint cũng validate; đây là lớp thứ hai.)
@@ -105,13 +109,20 @@ def _synthesize_wav_bytes(voice, text: str) -> bytes:
     predictor) của VITS. Mặc định có nhiễu → thỉnh thoảng gán trường độ ~0 cho
     phụ âm đầu từ (đo được: "starting"/"studying" im lặng 40-80ms đầu, "s" gần
     như biến mất), và vì synthesize() cache WAV xuống đĩa vĩnh viễn nên 1 lần
-    "trúng" draw xấu sẽ làm từ đó bị lỗi mãi cho mọi người dùng. Deterministic
-    (noise_w_scale=0) chặn worst-case xuống còn ~20-40ms, verify bằng lặp lại
-    nhiều lần trên starting/stopping/studying/student/stop/start.
+    "trúng" draw xấu sẽ làm từ đó bị lỗi mãi cho mọi người dùng.
+
+    noise_scale=0.0: tắt NỐT nhiễu âm học của bộ sinh (flow). Chỉ zero noise_w
+    chưa đủ tất định — noise_scale mặc định 0.667 vẫn randomize biên độ, nên phụ
+    âm xát đầu (/s/ trong cụm s+phụ âm: store/start/stop) vẫn dao động draw-to-draw
+    từ ~0.15 đến ~0.8 lần biên độ nguyên âm; bản yếu bị cache đóng băng → nghe mất
+    /s/ ("store" thành "tɔːr"). Zero cả hai → mỗi từ ra ĐÚNG một bản, /s/ luôn đủ
+    to (đo: store 0.74, start 0.97, stop 0.91 s/peak, ổn định mọi lần). Đánh đổi:
+    giọng đơn điệu hơn — chấp nhận được cho audio mẫu 1 từ (ưu tiên phụ âm rõ +
+    nhất quán). Verify bằng lặp lại nhiều lần trên store/start/stop/student.
     """
     from piper.config import SynthesisConfig
 
-    syn_config = SynthesisConfig(noise_w_scale=0.0)
+    syn_config = SynthesisConfig(noise_w_scale=0.0, noise_scale=0.0)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav_file:
         # Piper đổi API giữa các bản:
