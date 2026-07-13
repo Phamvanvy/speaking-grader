@@ -14,7 +14,7 @@ import logging
 
 from .config import Config, resolve_language_name
 from .rubrics.base import Exam, QuestionType
-from .schema import SampleAnswer
+from .schema import SampleAnswer, WordInfo
 from .scoring.backends import _generate_anthropic, _generate_local
 
 logger = logging.getLogger("toeic.suggest")
@@ -137,4 +137,38 @@ def suggest_answer(
     # Bảo đảm target_band luôn có giá trị có nghĩa kể cả khi model bỏ trống.
     if not (result.target_band or "").strip():
         result.target_band = target
+    return result
+
+
+def word_info(config: Config, word: str, lang: str) -> WordInfo:
+    """Sinh định nghĩa EN + ví dụ + nghĩa (lang) cho 1 từ — popup luyện phát âm.
+
+    Caller (endpoint /word-info) cache kết quả theo (word, lang) trong
+    src/words.py nên mỗi từ chỉ tốn 1 call LLM.
+    """
+    language_name = resolve_language_name(lang)
+    system_prompt = (
+        "You are an English learner's dictionary editor. For the given English "
+        "word, produce structured JSON with:\n"
+        "- `definition_en`: ONE short, learner-friendly English definition "
+        "(Oxford Learner's style) for the word's MOST COMMON sense.\n"
+        "- `example_en`: ONE natural English example sentence (≤20 words) using "
+        "that sense.\n"
+        f"- `meaning`: the word's meaning in {language_name}, dictionary-style "
+        "and concise, matching the same sense.\n"
+        "- `word`: echo the word in lowercase."
+    )
+    user_prompt = f"WORD: {word}\n\nNow produce the entry as structured JSON."
+
+    if config.is_local:
+        result = _generate_local(
+            config, system_prompt, user_prompt, WordInfo,
+            WordInfo.model_json_schema(), "WordInfo", None, None,
+        )
+    else:
+        result = _generate_anthropic(
+            config, system_prompt, user_prompt, WordInfo, None, None
+        )
+    assert isinstance(result, WordInfo)
+    result.word = word
     return result

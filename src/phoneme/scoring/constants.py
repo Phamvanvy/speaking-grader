@@ -76,3 +76,12 @@ PHONEME_COVERAGE_GATE_MIN_ASR_PROB: Final[float] = 0.60
 # lại alignment, chỉ cap severity dựa trên evidence diagnostics đã tính sẵn). Cùng cap
 # 0.2 với G2P_UNCERTAIN để nhất quán UI (Hidden recognizer noise).
 PHONEME_DRIFT_SUB_CAP: Final[float] = 0.2
+
+# S-cluster leniency: /p t k/ sau /s/ trong onset cùng từ (speak, stay, school) phát
+# âm ĐÚNG là stop KHÔNG bật hơi — về âm học gần voiced counterpart hơn dạng bật hơi,
+# wav2vec (train trên espeak citation form) hay gán nhầm: (a) voicing p→b/t→d/k→ɡ,
+# (b) CHỖ cấu âm sp→st (case "speak" → /stɪk/, t→p penalty 0.6 = "cao" oan).
+# (a) → "ok" (S_CLUSTER_VARIANT); (b) → cap 0.1 dưới cả G2P_UNCERTAIN_CAP: giữ visible
+# severity "low" (không loại trừ 100% lỗi steak-for-speak thật, Whisper word-match đã
+# guard intelligibility ở tầng trên). Default OFF qua Config.phoneme_s_cluster_enabled.
+PHONEME_S_CLUSTER_SUB_CAP: Final[float] = 0.1

@@ -105,6 +105,7 @@ class HybridPhonemeAnalyzer:
         deletion_evidence_enabled: bool = True,
         homograph_selection_enabled: bool = False,
         boundary_refine_enabled: bool = False,
+        s_cluster_enabled: bool = False,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         self._max_words = max_words
@@ -133,6 +134,10 @@ class HybridPhonemeAnalyzer:
         # Boundary refinement: sửa segment bị DTW gán nhầm sang từ kề trên path
         # trước khi chấm (xem scoring/alignment.py). Default OFF = bit-for-bit.
         self._boundary_refine_enabled = boundary_refine_enabled
+        # S-cluster leniency: /p t k/ sau /s/ đầu từ không bật hơi — recognizer hay
+        # gán nhầm voicing/chỗ cấu âm (xem scoring/alignment._is_s_cluster_stop).
+        # Default OFF = bit-for-bit như cũ.
+        self._s_cluster_enabled = s_cluster_enabled
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
@@ -296,6 +301,7 @@ class HybridPhonemeAnalyzer:
                 posteriors=posteriors,
                 homograph_selection_enabled=self._homograph_selection_enabled,
                 boundary_refine_enabled=self._boundary_refine_enabled,
+                s_cluster_enabled=self._s_cluster_enabled,
             )
 
         logger.info(

@@ -169,6 +169,7 @@ def compute_phoneme_score(
     posteriors: FramePosteriors | None = None,
     homograph_selection_enabled: bool = False,
     boundary_refine_enabled: bool = False,
+    s_cluster_enabled: bool = False,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -249,6 +250,11 @@ def compute_phoneme_score(
             từ khi tổng scoring cost cục bộ giảm chặt + đích match thật. Cần
             reference_spans; word_windows (nếu có) làm time-veto phụ. False (mặc
             định) = bit-for-bit như cũ. Xem _refine_boundary_bleed (alignment.py).
+        s_cluster_enabled: leniency cho /p t k/ sau /s/ đầu từ (unaspirated — speak,
+            stay, school): predicted là voiced cùng chỗ (p→b/t→d/k→ɡ) → "ok"
+            (S_CLUSTER_VARIANT); plosive khác chỗ (sp→st) → cap penalty về
+            PHONEME_S_CLUSTER_SUB_CAP, severity "low" (S_CLUSTER_UNASPIRATED).
+            False (mặc định) = bit-for-bit như cũ. Xem _is_s_cluster_stop (alignment.py).
 
     Precedence giữa các gate: mọi gate chỉ HẠ penalty, không nâng; post-pass chạy tuần
     tự connected_speech → coverage_gate (chỉ del) → drift_cap (chỉ sub); penalty_reason
@@ -342,6 +348,7 @@ def compute_phoneme_score(
             recognizer_noise_conf=recognizer_noise_conf,
             recognizer_noise_conf_vowel=recognizer_noise_conf_vowel,
             accept_accent_variants=accept_accent_variants,
+            s_cluster_enabled=s_cluster_enabled,
         )
         empty_prediction = False
 

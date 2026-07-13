@@ -41,7 +41,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from . import history
+from . import history, words
 from .config import Config, load_config
 from .core import grade_response
 from .exam_import import ExamImportError, extract_exam
@@ -50,7 +50,7 @@ from .logging_setup import setup_logging
 from .rubrics import EXAM_REGISTRIES
 from .rubrics.base import QuestionType
 from .scoring import compute_exam_overall
-from .suggest import default_target_band, suggest_answer
+from .suggest import default_target_band, suggest_answer, word_info as _gen_word_info
 from .tts import TtsUnavailable, synthesize as _tts_synthesize
 from .api_helpers import (
     _VIDEO_SUFFIXES,
@@ -967,6 +967,94 @@ def history_delete(record_id: str, user_id: str) -> dict:
     if not history.delete_record(_BASE_CONFIG, user_id, record_id):
         raise HTTPException(status_code=404, detail="Không thấy bản ghi lịch sử.")
     return {"deleted": True}
+
+
+# ── Từ đã lưu để luyện tập (bookmark) + định nghĩa từ (popup luyện phát âm) ──
+# Tab SPA của tính năng này là /saved (path "ảo", rơi xuống catch-all trả
+# index.html) — API nằm ở /words nên không đụng nhau.
+
+
+def _valid_word_or_400(word: str) -> str:
+    try:
+        return words.validate_word(word)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/words")
+def words_list(user_id: str) -> dict:
+    """Toàn bộ từ đã lưu của user (mới lưu trước)."""
+    user_id = _valid_user_id_or_400(user_id)
+    try:
+        return words.list_words(_BASE_CONFIG, user_id)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi đọc danh sách từ đã lưu")
+        raise HTTPException(status_code=500, detail=f"Lỗi đọc từ đã lưu: {e}") from e
+
+
+@app.post("/words")
+def words_upsert(
+    user_id: str = Form(...),
+    word: str = Form(...),
+    ipa: str | None = Form(None),
+    phonemes: str | None = Form(None, description="JSON array snapshot phonemes của từ"),
+    accuracy: float | None = Form(None),
+    last_score: float | None = Form(None),
+) -> dict:
+    """Lưu từ mới hoặc cập nhật từ đã có (upsert theo (user_id, word))."""
+    user_id = _valid_user_id_or_400(user_id)
+    w = _valid_word_or_400(word)
+    phonemes_obj = None
+    if phonemes:
+        try:
+            phonemes_obj = json.loads(phonemes)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="phonemes không phải JSON hợp lệ.") from e
+    try:
+        return words.upsert_word(
+            _BASE_CONFIG, user_id, w,
+            ipa=ipa, phonemes=phonemes_obj, accuracy=accuracy, last_score=last_score,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi lưu từ")
+        raise HTTPException(status_code=500, detail=f"Lỗi lưu từ: {e}") from e
+
+
+@app.delete("/words/{word}")
+def words_delete(word: str, user_id: str) -> dict:
+    """Bỏ lưu 1 từ."""
+    user_id = _valid_user_id_or_400(user_id)
+    w = _valid_word_or_400(word)
+    if not words.delete_word(_BASE_CONFIG, user_id, w):
+        raise HTTPException(status_code=404, detail="Từ này chưa được lưu.")
+    return {"deleted": True}
+
+
+@app.get("/word-info")
+async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
+    """Định nghĩa EN + ví dụ + nghĩa (feedback_lang) cho 1 từ — cache SQLite,
+    mỗi (word, lang) chỉ tốn 1 call LLM."""
+    w = _valid_word_or_400(word)
+    config = _resolve_config(lang)
+    lang_key = (config.feedback_lang or "vi").strip().lower()
+    cached = words.get_word_info(_BASE_CONFIG, w, lang_key)
+    if cached:
+        return {**cached, "cached": True}
+    try:
+        info = await run_in_threadpool(_gen_word_info, config, w, lang_key)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi sinh định nghĩa từ")
+        raise HTTPException(status_code=502, detail=f"Lỗi sinh định nghĩa: {e}") from e
+    try:
+        words.put_word_info(
+            _BASE_CONFIG, w, lang_key, info.definition_en, info.example_en, info.meaning
+        )
+    except Exception:  # noqa: BLE001 - cache hỏng không được chặn response
+        logger.exception("Lỗi ghi cache word_info (bỏ qua)")
+    return {
+        "word": w, "lang": lang_key, "definition_en": info.definition_en,
+        "example_en": info.example_en, "meaning": info.meaning, "cached": False,
+    }
 
 
 # Phục vụ frontend tĩnh + fallback SPA ở "/" — PHẢI đăng ký SAU mọi route API ở

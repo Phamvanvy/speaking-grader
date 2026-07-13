@@ -161,6 +161,7 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     const acceptedReasonTip = {
         accent_variant: 'Biến thể giọng được chấp nhận (coda /r/ non-rhotic) — không tính lỗi',
         connected_speech: 'Nuốt âm cuối khi nối từ (connected speech) — không tính lỗi',
+        s_cluster_variant: 'Âm /p t k/ sau /s/ đầu từ không bật hơi — recognizer nghe thành âm hữu thanh, không tính lỗi',
     };
     const symHtml = p => {
         const sig = isSignificant(p);
@@ -188,25 +189,47 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         return `<span class="phoneme-ipa">/${parts.join(' ')}/</span>`;
     };
 
-    // ── Per-word cards (all words) ──
-    const cardHtml = w => {
+    // Payload cho popup luyện từ (practice.js) — LUÔN từ dữ liệu GỐC (symbol Mỹ,
+    // chưa transform GB; popup tự áp toBritishWord khi hiển thị). Chỉ giữ field
+    // popup cần để attr không phình.
+    const practiceAttr = orig => ` data-practice="${escapeHtml(JSON.stringify({
+        word: orig.word, ipa: orig.ipa || null, accuracy: orig.accuracy,
+        skip_reason: orig.skip_reason || null,
+        phonemes: (orig.phonemes || []).map(p => ({
+            symbol: p.symbol, heard: p.heard, status: p.status, severity: p.severity,
+            stress: p.stress, display_stress: p.display_stress,
+            penalty_reason: p.penalty_reason,
+        })),
+    }))}"`;
+    // ☆/★ lưu từ để luyện tập — trạng thái ban đầu theo cache SavedWords (saved.js
+    // nạp lúc mở trang); click xử lý delegated ở practice.js.
+    const bookmarkBtn = orig => {
+        const saved = window.SavedWords && SavedWords.has(orig.word);
+        return `<button type="button" class="word-bookmark${saved ? ' saved' : ''}" data-word="${escapeHtml(orig.word)}"${practiceAttr(orig)} title="${saved ? 'Bỏ lưu từ này' : 'Lưu từ để luyện tập'}">${saved ? '★' : '☆'}</button>`;
+    };
+
+    // ── Per-word cards (all words) ── (click cả thẻ = mở popup luyện từ)
+    const cardHtml = (w, orig) => {
         const hasErr = (w.phonemes || []).some(p => !p._hidden && isSignificant(p));
-        return `<div class="phoneme-word${hasErr ? ' phoneme-word--err' : ''}">
+        return `<div class="phoneme-word${hasErr ? ' phoneme-word--err' : ''} practice-open"${practiceAttr(orig || w)} title="Bấm để luyện tập từ này">
             <span class="phoneme-word__text">${escapeHtml(w.word)}</span>
             ${ipaHtml(w)}
         </div>`;
     };
     const CAP = 12;
-    const head = dispWords.slice(0, CAP).map(cardHtml).join('');
+    const head = dispWords.slice(0, CAP).map((w, i) => cardHtml(w, words[i])).join('');
     const rest = dispWords.slice(CAP);
     const moreCards = rest.length
-        ? `<details style="margin-top:0.3rem;"><summary style="cursor:pointer;color:#4338ca;font-size:0.85rem;">hiện ${rest.length} từ nữa</summary><div class="phoneme-words">${rest.map(cardHtml).join('')}</div></details>`
+        ? `<details style="margin-top:0.3rem;"><summary style="cursor:pointer;color:#4338ca;font-size:0.85rem;">hiện ${rest.length} từ nữa</summary><div class="phoneme-words">${rest.map((w, i) => cardHtml(w, words[CAP + i])).join('')}</div></details>`
         : '';
 
     // ── Detail table (only words with a significant error: medium|high) ──
     const sevRank = { high: 2, medium: 1, low: 0 };
-    const errWords = dispWords.filter(w => (w.phonemes || []).some(p => !p._hidden && isSignificant(p)));
-    const tableRows = errWords.map(w => {
+    // Giữ cặp (bản hiển thị, bản gốc) — data-practice phải mang symbol gốc.
+    const errWords = dispWords
+        .map((w, i) => ({ w, orig: words[i] }))
+        .filter(({ w }) => (w.phonemes || []).some(p => !p._hidden && isSignificant(p)));
+    const tableRows = errWords.map(({ w, orig }) => {
         const bad = (w.phonemes || []).filter(p => !p._hidden && isSignificant(p));
         const pairs = bad.map(p => {
             const heard = p.status === 'del' ? '∅' : escapeHtml(p.heard ?? '');
@@ -215,7 +238,7 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         const worst = bad.reduce((acc, p) =>
             (sevRank[p.severity] ?? 0) > (sevRank[acc] ?? -1) ? p.severity : acc, 'low');
         return `<tr>
-            <td class="phoneme-table__word">${escapeHtml(w.word)}</td>
+            <td class="phoneme-table__word"><span class="practice-open"${practiceAttr(orig)} title="Bấm để luyện tập từ này">${escapeHtml(w.word)}</span> ${bookmarkBtn(orig)}</td>
             <td>${playBtn(w)}${heardHtml(w)}</td>
             <td>${ttsBtn(w)}${ipaHtml(w)}</td>
             <td>${pairs}</td>
@@ -285,7 +308,7 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     const body = `
         ${accentRow}
         ${sentenceAudioHtml}
-        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm · 🔊 = nghe phát âm chuẩn (máy đọc — tham khảo)</div>
+        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm · 🔊 = nghe phát âm chuẩn (máy đọc — tham khảo) · bấm vào TỪ để mở luyện tập · ☆ = lưu từ để luyện sau</div>
         <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ. Nuốt âm cuối khi nối từ (vd "tes(t) preparation") là nối âm bản xứ hợp lệ — không tính lỗi.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}</div>
         ${truncLine}
         <div class="phoneme-words">${head}</div>${moreCards}

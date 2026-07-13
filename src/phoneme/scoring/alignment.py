@@ -28,6 +28,7 @@ from .constants import (
     PHONEME_RECOGNIZER_NOISE_CONF,
     PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
     PHONEME_RECOGNIZER_NOISE_SIM,
+    PHONEME_S_CLUSTER_SUB_CAP,
 )
 from .word_details import _score_deletion, _severity_from_penalty
 
@@ -383,6 +384,35 @@ def _links_into_vowel(
     return is_vowel(reference[nxt])
 
 
+# S-cluster (xem PHONEME_S_CLUSTER_SUB_CAP): /p t k/ sau /s/ đầu từ là stop KHÔNG bật
+# hơi. Voiced counterpart cùng chỗ cấu âm (bậc 1 — "ok") + tập plosive cho bậc 2 (cap).
+_S_CLUSTER_VOICED: Final[dict[str, str]] = {"p": "b", "t": "d", "k": "ɡ"}
+_S_CLUSTER_PLOSIVES: Final[frozenset[str]] = frozenset({"p", "b", "t", "d", "k", "ɡ"})
+
+
+def _is_s_cluster_stop(
+    reference: list[str],
+    ref_word: list[str | None],
+    ref_is_onset: list[bool],
+    ref_idx: int,
+) -> bool:
+    """True nếu reference[ref_idx] là /p t k/ đứng NGAY SAU /s/ trong onset CÙNG TỪ.
+
+    ref_is_onset chỉ True cho cụm phụ âm đầu từ (tới trước nguyên âm đầu tiên) nên
+    bắt đúng /sp st sk/ khởi đầu (speak, stay, school, spring); coda (wasp, ask) và
+    ranh giới từ ("this pen") không lọt. Ràng buộc cùng từ giữ an toàn khi span thiếu.
+    """
+    if ref_idx <= 0:
+        return False
+    if normalize_ipa(reference[ref_idx]) not in _S_CLUSTER_VOICED:
+        return False
+    if not (ref_is_onset[ref_idx] and ref_is_onset[ref_idx - 1]):
+        return False
+    if ref_word[ref_idx] is None or ref_word[ref_idx] != ref_word[ref_idx - 1]:
+        return False
+    return normalize_ipa(reference[ref_idx - 1]) == "s"
+
+
 def _align_points(
     path: list[tuple[int, int]],
     predicted: list[str],
@@ -405,6 +435,7 @@ def _align_points(
     recognizer_noise_conf: float = PHONEME_RECOGNIZER_NOISE_CONF,
     recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
     accept_accent_variants: bool = False,
+    s_cluster_enabled: bool = False,
 ) -> tuple[dict[int, tuple[PhonemePoint, float | None]], int, dict[int, float]]:
     """Một lượt qua DTW path → (point+penalty mỗi ref index, số insertion, penalty gốc/ref).
 
@@ -486,6 +517,21 @@ def _align_points(
                     penalty_adjustment=0.0,
                 )
                 penalty = 0.0
+            elif (
+                s_cluster_enabled
+                and _is_s_cluster_stop(reference, ref_word, ref_is_onset, ref_idx)
+                and normalize_ipa(pred_ph)
+                == _S_CLUSTER_VOICED[normalize_ipa(ref_ph)]
+            ):
+                # S-cluster bậc 1: /p t k/ sau /s/ đầu từ không bật hơi — về âm học
+                # chính là voiced counterpart, recognizer gán p→b/t→d/k→ɡ là nhãn
+                # TRUNG THỰC của phát âm đúng → ok, không phải lỗi người đọc.
+                point = PhonemePoint(
+                    symbol=ref_ph, status="ok", stress=stress, display_stress=disp,
+                    penalty_reason=PenaltyReason.S_CLUSTER_VARIANT.value,
+                    penalty_adjustment=0.0,
+                )
+                penalty = 0.0
             else:
                 sim = phoneme_similarity(pred_ph, ref_ph)
                 conf_factor = min(1.0, conf / knee) if knee > 0 else 1.0
@@ -526,6 +572,21 @@ def _align_points(
                     penalty = PHONEME_G2P_UNCERTAIN_CAP
                     adjustment = penalty / base_sub if base_sub > 0 else 0.0
                     reason = PenaltyReason.G2P_UNCERTAIN.value
+                # Stage 5.5 s-cluster bậc 2: /p t k/ sau /s/ đầu từ bị nghe thành
+                # plosive KHÁC chỗ cấu âm (speak → /stɪk/, t→p) — noise gate không
+                # cứu được vì sim 0.4 ≥ floor "plausible". Chỉ HẠ (penalty > cap),
+                # giữ visible severity "low" vì không loại trừ 100% lỗi thật.
+                if (
+                    s_cluster_enabled
+                    and penalty > PHONEME_S_CLUSTER_SUB_CAP
+                    and normalize_ipa(pred_ph) in _S_CLUSTER_PLOSIVES
+                    and _is_s_cluster_stop(
+                        reference, ref_word, ref_is_onset, ref_idx
+                    )
+                ):
+                    penalty = PHONEME_S_CLUSTER_SUB_CAP
+                    adjustment = penalty / base_sub if base_sub > 0 else 0.0
+                    reason = PenaltyReason.S_CLUSTER_UNASPIRATED.value
                 point = PhonemePoint(
                     symbol=ref_ph, status="sub", heard=pred_ph,
                     severity=_severity_from_penalty(penalty), stress=stress,

@@ -96,6 +96,33 @@ class SampleAnswer(BaseModel):
     )
 
 
+class WordInfo(BaseModel):
+    """Định nghĩa + ví dụ cho 1 từ (popup luyện phát âm, kiểu ELSA).
+
+    Do LLM sinh 1 lần rồi cache SQLite theo (word, lang) — xem src/words.py.
+    """
+
+    word: str = Field(description="Từ được tra (echo lại, lowercase).")
+    definition_en: str = Field(
+        description=(
+            "Định nghĩa TIẾNG ANH ngắn gọn (1 câu, learner-friendly, kiểu từ điển "
+            "Oxford Learner's), theo nghĩa THÔNG DỤNG nhất của từ."
+        )
+    )
+    example_en: str = Field(
+        description=(
+            "MỘT câu ví dụ tiếng Anh tự nhiên, ngắn (≤20 từ), dùng đúng nghĩa đã "
+            "định nghĩa ở trên."
+        )
+    )
+    meaning: str = Field(
+        description=(
+            "Nghĩa của từ bằng ngôn ngữ đích (feedback_lang, vd tiếng Việt) — "
+            "ngắn gọn kiểu từ điển (vd 'tính phí; sạc điện'), khớp nghĩa đã chọn."
+        )
+    )
+
+
 class SpeakingResult(BaseModel):
     question_type: str
     # task_completion là tiêu chí hạng nhất: trả lời đúng/đủ yêu cầu hay không.

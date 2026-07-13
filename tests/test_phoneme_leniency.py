@@ -652,3 +652,83 @@ class TestDriftCap:
         # Drift cap CHỈ đụng sub: các âm ok (ɪ, n) không bị đổi khi flag bật.
         score = self._score((5.0, 5.2), drift_cap_enabled=True)
         assert [p.status for p in score.words[0].phonemes] == ["sub", "ok", "ok"]
+
+
+# ── S-cluster leniency: /p t k/ sau /s/ đầu từ (speak, stay, school) ──────────
+
+class TestSClusterLeniency:
+    """Case "speak" 2026-07-13: /spiːk/ nghe thành /stɪk/ → t→p penalty 0.6 = "cao" oan.
+
+    /p t k/ sau /s/ trong onset là stop KHÔNG bật hơi — wav2vec hay gán nhầm voicing
+    (p→b: nhãn trung thực → ok) hoặc chỗ cấu âm (p→t: cap về low). Flag default OFF.
+    """
+
+    REF = ["s", "p", "iː", "k"]
+    SPANS = [WordSpan("speak", 0, 4)]
+
+    def test_place_confusion_capped_low(self):
+        # Case bug: /p/ không bật hơi nghe thành /t/ — cap 0.1 → "low", không tô đỏ.
+        score = compute_phoneme_score(
+            _segs(["s", "t", "iː", "k"], conf=0.95), self.REF, self.SPANS,
+            s_cluster_enabled=True,
+        )
+        point = score.words[0].phonemes[1]
+        assert point.status == "sub"
+        assert point.severity == "low"
+        assert point.penalty_reason == PenaltyReason.S_CLUSTER_UNASPIRATED.value
+
+    def test_voiced_counterpart_ok(self):
+        # p→b: unaspirated [p] về âm học chính là [b] → ok, accuracy trọn vẹn.
+        score = compute_phoneme_score(
+            _segs(["s", "b", "iː", "k"], conf=0.95), self.REF, self.SPANS,
+            s_cluster_enabled=True,
+        )
+        point = score.words[0].phonemes[1]
+        assert point.status == "ok"
+        assert point.penalty_reason == PenaltyReason.S_CLUSTER_VARIANT.value
+        assert score.overall_accuracy == 1.0
+
+    def test_flag_off_keeps_old_behavior(self):
+        # Default OFF = bit-for-bit như cũ: t→p vẫn penalty 0.6 → "high".
+        score = compute_phoneme_score(
+            _segs(["s", "t", "iː", "k"], conf=0.95), self.REF, self.SPANS,
+        )
+        point = score.words[0].phonemes[1]
+        assert point.status == "sub"
+        assert point.severity == "high"
+        assert point.penalty_reason != PenaltyReason.S_CLUSTER_UNASPIRATED.value
+
+    def test_non_s_cluster_stop_unchanged(self):
+        # Learner guard: "take"→"pake" (t đầu từ KHÔNG sau /s/) vẫn là lỗi thật.
+        ref = ["t", "eɪ", "k"]
+        spans = [WordSpan("take", 0, 3)]
+        score = compute_phoneme_score(
+            _segs(["p", "eɪ", "k"], conf=0.95), ref, spans,
+            s_cluster_enabled=True,
+        )
+        point = score.words[0].phonemes[0]
+        assert point.status == "sub"
+        assert point.severity == "high"
+
+    def test_cross_word_s_not_cluster(self):
+        # "this pen": /s/ cuối "this" (coda) + /p/ đầu "pen" — khác từ → không áp rule.
+        ref = ["ð", "ɪ", "s", "p", "e", "n"]
+        spans = [WordSpan("this", 0, 3), WordSpan("pen", 3, 6)]
+        score = compute_phoneme_score(
+            _segs(["ð", "ɪ", "s", "t", "e", "n"], conf=0.95), ref, spans,
+            s_cluster_enabled=True,
+        )
+        point = score.words[1].phonemes[0]
+        assert point.status == "sub"
+        assert point.severity in ("medium", "high")
+
+    def test_non_plosive_prediction_not_capped(self):
+        # Learner guard: /p/ nghe thành /f/ (fricative) không phải confusion
+        # unaspirated → giữ lỗi đầy đủ.
+        score = compute_phoneme_score(
+            _segs(["s", "f", "iː", "k"], conf=0.95), self.REF, self.SPANS,
+            s_cluster_enabled=True,
+        )
+        point = score.words[0].phonemes[1]
+        assert point.status == "sub"
+        assert point.severity in ("medium", "high")

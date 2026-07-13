@@ -1,0 +1,121 @@
+/* Popup luyện từ (ELSA-style) + tab "Từ đã lưu".
+   Modal duy nhất #practice-modal do practice.js tự dựng và append vào <body>. */
+
+/* Từ/ô có thể mở popup luyện tập */
+.practice-open { cursor: pointer; }
+.phoneme-word.practice-open:hover { outline: 2px solid #4338ca55; }
+td .practice-open:hover { text-decoration: underline; color: #4338ca; }
+
+/* Nút bookmark ☆/★ trên bảng lỗi */
+.word-bookmark {
+    border: none; background: none; cursor: pointer;
+    font-size: 0.95rem; padding: 0 0.15rem; color: #9ca3af; vertical-align: middle;
+}
+.word-bookmark.saved { color: #f59e0b; }
+.word-bookmark:hover { transform: scale(1.2); }
+
+/* ── Overlay + hộp modal ── */
+.practice-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex; align-items: center; justify-content: center;
+    padding: 1rem;
+}
+.practice-overlay.hidden { display: none; }
+.practice-modal {
+    background: #fff; border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    width: min(560px, 100%); max-height: 90vh; overflow-y: auto;
+    padding: 1.25rem 1.4rem;
+}
+
+/* Header: từ + % + bookmark + đóng */
+.practice-head { display: flex; align-items: center; gap: 0.6rem; }
+.practice-head__word { font-size: 1.7rem; font-weight: 700; color: #16a34a; margin: 0; }
+.practice-head__spacer { flex: 1; }
+.practice-ring {
+    --pct: 0; --ring-color: #16a34a;
+    width: 58px; height: 58px; border-radius: 50%;
+    background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), #e5e7eb 0);
+    display: flex; align-items: center; justify-content: center; flex: none;
+}
+.practice-ring__inner {
+    width: 44px; height: 44px; border-radius: 50%; background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.85rem; color: #111827;
+}
+.practice-close, .practice-bookmark {
+    border: none; background: none; cursor: pointer; font-size: 1.25rem;
+    color: #6b7280; padding: 0.2rem;
+}
+.practice-bookmark.saved { color: #f59e0b; }
+.practice-close:hover { color: #111827; }
+
+.practice-ipa { color: #374151; font-size: 1.05rem; margin: 0.35rem 0 0.1rem; }
+.practice-ipa .tts-play { margin-left: 0.3rem; }
+
+/* Định nghĩa + ví dụ (LLM, lazy) */
+.practice-info { border-top: 1px solid #e5e7eb; margin-top: 0.6rem; padding-top: 0.6rem; font-size: 0.9rem; }
+.practice-info__label { font-weight: 700; color: #111827; margin-top: 0.35rem; }
+.practice-info__meaning { color: #374151; }
+.practice-info__loading { color: #9ca3af; font-style: italic; }
+
+/* Bảng phoneme: Âm thanh | Bạn đã nói */
+.practice-table { width: 100%; border-collapse: collapse; margin-top: 0.7rem; font-size: 0.95rem; }
+.practice-table th {
+    text-align: left; font-weight: 700; color: #111827;
+    border-bottom: 1px solid #e5e7eb; padding: 0.35rem 0.4rem;
+}
+.practice-table td { border-bottom: 1px solid #f1f5f9; padding: 0.45rem 0.4rem; vertical-align: top; }
+.practice-table__sym { font-size: 1.05rem; white-space: nowrap; }
+.practice-ok { color: #16a34a; font-weight: 700; }
+.practice-bad { color: #ea580c; font-weight: 700; font-size: 1.05rem; }
+.practice-tip { color: #374151; font-size: 0.85rem; margin-top: 0.25rem; line-height: 1.45; }
+.practice-skipnote { color: #9ca3af; font-size: 0.85rem; }
+
+/* Khu luyện tập: mic + trạng thái */
+.practice-rec { margin-top: 1rem; text-align: center; }
+.practice-rec__hint { color: #6b7280; font-size: 0.9rem; margin-bottom: 0.4rem; }
+.practice-mic {
+    width: 64px; height: 64px; border-radius: 16px; border: none; cursor: pointer;
+    background: #2563eb; color: #fff; font-size: 1.6rem;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.45);
+}
+.practice-mic:hover { background: #1d4ed8; }
+.practice-mic.recording { background: #dc2626; animation: practice-pulse 1.2s infinite; }
+.practice-mic:disabled { background: #9ca3af; cursor: wait; box-shadow: none; }
+@keyframes practice-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }
+    70% { box-shadow: 0 0 0 14px rgba(220, 38, 38, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+}
+.practice-status { margin-top: 0.5rem; font-size: 0.9rem; color: #374151; min-height: 1.2em; }
+.practice-status.err { color: #dc2626; }
+.practice-status.good { color: #16a34a; font-weight: 600; }
+
+/* ── Tab "Từ đã lưu" ── */
+.saved-list { margin-top: 0.6rem; }
+.saved-row {
+    display: flex; align-items: center; gap: 0.7rem;
+    border-bottom: 1px solid #f1f5f9; padding: 0.5rem 0.2rem;
+}
+.saved-row__word { font-weight: 700; min-width: 7rem; }
+.saved-row__ipa { color: #6b7280; }
+.saved-row__meta { color: #9ca3af; font-size: 0.82rem; margin-left: auto; white-space: nowrap; }
+.saved-row__score { font-weight: 700; color: #16a34a; white-space: nowrap; }
+.saved-empty { color: #9ca3af; font-style: italic; padding: 0.8rem 0; }
+
+/* ── Dark mode ── */
+body.dark .practice-modal { background: #1f2937; }
+body.dark .practice-head__word { color: #4ade80; }
+body.dark .practice-ring { background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), #374151 0); }
+body.dark .practice-ring__inner { background: #1f2937; color: #f9fafb; }
+body.dark .practice-ipa { color: #d1d5db; }
+body.dark .practice-info { border-top-color: #374151; }
+body.dark .practice-info__label { color: #f9fafb; }
+body.dark .practice-info__meaning { color: #d1d5db; }
+body.dark .practice-table th { color: #f9fafb; border-bottom-color: #374151; }
+body.dark .practice-table td { border-bottom-color: #273449; }
+body.dark .practice-tip { color: #d1d5db; }
+body.dark .practice-status { color: #d1d5db; }
+body.dark .saved-row { border-bottom-color: #273449; }
+body.dark td .practice-open:hover { color: #a5b4fc; }

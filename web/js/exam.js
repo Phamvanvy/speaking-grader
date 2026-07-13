@@ -8,7 +8,7 @@
 
 // Đổi tab giữa 3 chế độ (vanilla — không phụ thuộc Alpine).
 function switchMode(mode) {
-    const panes = { classic: 'mode-classic', exam: 'mode-exam', history: 'mode-history' };
+    const panes = { classic: 'mode-classic', exam: 'mode-exam', history: 'mode-history', saved: 'mode-saved' };
     if (!panes[mode]) mode = 'classic';
     for (const [m, id] of Object.entries(panes)) {
         const pane = document.getElementById(id);
@@ -17,6 +17,7 @@ function switchMode(mode) {
         if (tab) tab.classList.toggle('active', m === mode);
     }
     if (mode === 'history' && window.loadHistoryList) loadHistoryList();
+    if (mode === 'saved' && window.loadSavedWords) loadSavedWords();
     if (window.AppRouter) window.AppRouter.onModeSwitch(mode);
 }
 

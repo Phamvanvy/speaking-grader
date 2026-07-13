@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="/css/phoneme.css?v=accent-default-1">
     <link rel="stylesheet" href="/css/exam.css?v=exam-4">
     <link rel="stylesheet" href="/css/history.css?v=history-1">
+    <link rel="stylesheet" href="/css/practice.css?v=practice-1">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
@@ -24,6 +25,7 @@
             <button id="tab-classic" class="mode-tab active" onclick="switchMode('classic')">📝 Chấm bài lẻ / cả lớp</button>
             <button id="tab-exam" class="mode-tab" onclick="switchMode('exam')">📄 Thi cả đề (cá nhân)</button>
             <button id="tab-history" class="mode-tab" onclick="switchMode('history')">🕘 Lịch sử</button>
+            <button id="tab-saved" class="mode-tab" onclick="switchMode('saved')">📚 Từ đã lưu</button>
         </div>
 
         <div id="mode-classic">
@@ -505,13 +507,24 @@
                 </div>
             </div>
         </div><!-- /#mode-history -->
+
+        <!-- ── Tab Từ đã lưu: bookmark từ lỗi để luyện tập (server-side theo user_id) ── -->
+        <div id="mode-saved" class="hidden">
+            <div class="card">
+                <div class="result-header">
+                    <h2>📚 Từ đã lưu</h2>
+                    <button class="btn btn-secondary btn-inline" onclick="loadSavedWords()">↻ Tải lại</button>
+                </div>
+                <div class="saved-list" id="saved-list"></div>
+            </div>
+        </div><!-- /#mode-saved -->
     </div>
 
     <!-- app.js đã tách theo nhóm chức năng. THỨ TỰ QUAN TRỌNG: state trước (chứa
          const/state dùng chung); render trước recording & form (escapeHtml được
          gọi ở top-level khi 2 file này nạp). -->
     <script src="/js/state.js?v=accent-default-1"></script>
-    <script src="/js/render.js?v=accent-default-2"></script>
+    <script src="/js/render.js?v=practice-1"></script>
     <script src="/js/playback.js?v=accent-default-2"></script>
     <script src="/js/recording.js?v=accent-default-1"></script>
     <script src="/js/form.js?v=accent-default-1"></script>
@@ -522,6 +535,13 @@
          render.js (featureGridHtml, scoresBreakdownHtml...) lúc RUNTIME nên chỉ cần
          nạp sau render.js; đặt trước exam.js vì switchMode gọi loadHistoryList. -->
     <script src="/js/history.js?v=history-1"></script>
+    <!-- Luyện từ (popup ELSA-style) + Từ đã lưu: tips (data tĩnh) → saved (API /words,
+         định nghĩa window.SavedWords cho practice/render dùng) → practice (modal).
+         Sau render.js (dùng escapeHtml/toBritishWord runtime), trước exam.js
+         (switchMode gọi loadSavedWords). -->
+    <script src="/js/phoneme-tips.js?v=practice-1"></script>
+    <script src="/js/saved.js?v=practice-1"></script>
+    <script src="/js/practice.js?v=practice-1"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
     <script src="/js/exam.js?v=exam-6"></script>

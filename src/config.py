@@ -177,6 +177,12 @@ class Config:
     # scripts/analyze_homographs.py). Default OFF = bit-for-bit như cũ.
     # Qua TOEIC_PHONEME_MULTIREF.
     phoneme_homograph_multiref: bool = False
+    # S-cluster leniency: /p t k/ sau /s/ đầu từ (speak, stay, school) là âm KHÔNG bật
+    # hơi → wav2vec hay gán nhầm chỗ cấu âm (sp→st) hoặc voicing (p→b). 2 bậc: voiced
+    # cùng chỗ (p→b/t→d/k→ɡ) = "ok" (s_cluster_variant); plosive khác chỗ = cap penalty
+    # 0.1 → severity "low" (s_cluster_unaspirated). Default OFF = bit-for-bit như cũ.
+    # Qua TOEIC_PHONEME_S_CLUSTER.
+    phoneme_s_cluster_enabled: bool = False
     # Deletion-evidence probe (SHADOW): giữ frame posteriors wav2vec để đo bằng chứng
     # âm học cho mỗi âm bị thiếu (phân biệt "thiếu âm thật" vs "recognizer hallucinate
     # deletion"). CHỈ telemetry/log — KHÔNG BAO GIỜ đổi điểm → default ON an toàn.
@@ -237,6 +243,9 @@ class Config:
     # Quota: giữ tối đa N bản ghi mới nhất mỗi user, bản cũ hơn bị xoá (kèm audio)
     # sau mỗi lần lưu. 0 = không giới hạn.
     history_max_records_per_user: int = 1000
+    # Từ đã lưu để luyện tập (per-user) + cache định nghĩa LLM — DB file riêng
+    # (không đụng schema versioning của history.db). Xem src/words.py.
+    words_db_path: str = "data/words.db"
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -404,6 +413,9 @@ def load_config() -> Config:
         phoneme_homograph_multiref=(
             os.getenv("TOEIC_PHONEME_MULTIREF", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_s_cluster_enabled=(
+            os.getenv("TOEIC_PHONEME_S_CLUSTER", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         phoneme_deletion_evidence_enabled=(
             os.getenv("TOEIC_PHONEME_DELETION_EVIDENCE", "true") or "true"
         ).strip().lower() in {"1", "true", "yes", "on"},
@@ -448,5 +460,8 @@ def load_config() -> Config:
         ),
         history_max_records_per_user=int(
             os.getenv("TOEIC_HISTORY_MAX_RECORDS", "1000") or "1000"
+        ),
+        words_db_path=(
+            os.getenv("TOEIC_WORDS_DB_PATH", "data/words.db") or "data/words.db"
         ),
     )

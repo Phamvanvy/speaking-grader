@@ -49,6 +49,7 @@ const AppRouter = {
         if (this._suppress) return;
         if (mode === 'classic') this.navigate('/');
         else if (mode === 'history') this.navigate('/history');
+        else if (mode === 'saved') this.navigate('/saved');
         else if (window.__exam) this.navigate(this.buildExamPath(window.__exam));
         else this.navigate('/exam');
     },
@@ -64,7 +65,10 @@ const AppRouter = {
     // Hiện/ẩn đúng tab ngay khi trang tải — KHÔNG phụ thuộc Alpine đã init hay chưa.
     applyModeFromPath() {
         const first = location.pathname.replace(/^\/+/, '').split('/')[0];
-        const mode = first === 'exam' ? 'exam' : (first === 'history' ? 'history' : 'classic');
+        const mode = first === 'exam' ? 'exam'
+            : first === 'history' ? 'history'
+            : first === 'saved' ? 'saved'
+            : 'classic';
         this._suppress = true;
         switchMode(mode);
         this._suppress = false;

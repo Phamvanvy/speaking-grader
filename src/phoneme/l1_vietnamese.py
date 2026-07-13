@@ -33,6 +33,8 @@ class PenaltyReason(str, Enum):
     CONNECTED_SPEECH = "connected_speech"      # nuốt stop cuối từ khi nối từ (elision bản xứ) → không tính lỗi
     COVERAGE_COLLAPSE = "coverage_collapse"    # cả từ bị "del" + wav2vec im lặng trong window + Whisper tự tin → cap penalty
     DRIFT_SUSPECTED = "drift_suspected"        # sub có predicted segment NGOÀI window của từ (nghi DTW mượn âm từ kế) → cap
+    S_CLUSTER_VARIANT = "s_cluster_variant"    # /p t k/ sau /s/ đầu từ nghe thành voiced cùng chỗ (p→b) — unaspirated, không phải lỗi
+    S_CLUSTER_UNASPIRATED = "s_cluster_unaspirated"  # /p t k/ sau /s/ đầu từ nghe thành plosive khác chỗ (sp→st) → cap về low
 
 
 @dataclass(frozen=True)
