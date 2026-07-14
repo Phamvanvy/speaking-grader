@@ -214,6 +214,7 @@ def grade_response(
                 homograph_selection_enabled=config.phoneme_homograph_multiref,
                 boundary_refine_enabled=config.phoneme_boundary_refine_enabled,
                 s_cluster_enabled=config.phoneme_s_cluster_enabled,
+                collapse_gate_enabled=config.phoneme_collapse_gate_enabled,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về

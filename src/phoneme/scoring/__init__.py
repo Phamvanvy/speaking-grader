@@ -42,6 +42,7 @@ from .homograph import select_homograph_references
 from .constants import (
     MAX_ERRORS_RETURNED,
     MAX_WORDS_RETURNED,
+    PHONEME_COLLAPSE_GATE_MASS_FLOOR,
     PHONEME_CONFIDENCE_KNEE,
     PHONEME_COVERAGE_GATE_CAP,
     PHONEME_COVERAGE_GATE_MAX_LEN,
@@ -57,6 +58,7 @@ from .word_details import (
     _WORD_PLAY_LEAD,
     _WORD_PLAY_TRAIL,
     _apply_coverage_gate,
+    _apply_recognizer_collapse_gate,
     _attach_deletion_evidence,
     _build_word_details,
     _merge_playback_windows,
@@ -170,6 +172,8 @@ def compute_phoneme_score(
     homograph_selection_enabled: bool = False,
     boundary_refine_enabled: bool = False,
     s_cluster_enabled: bool = False,
+    collapse_gate_enabled: bool = False,
+    collapse_gate_mass_floor: float = PHONEME_COLLAPSE_GATE_MASS_FLOOR,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -255,6 +259,14 @@ def compute_phoneme_score(
             (S_CLUSTER_VARIANT); plosive khác chỗ (sp→st) → cap penalty về
             PHONEME_S_CLUSTER_SUB_CAP, severity "low" (S_CLUSTER_UNASPIRATED).
             False (mặc định) = bit-for-bit như cũ. Xem _is_s_cluster_stop (alignment.py).
+        collapse_gate_enabled: recognizer-collapse gate — cap del/sub bị wav2vec CTC
+            BLANK-collapse (âm THAM CHIẾU có max_mass ≥ collapse_gate_mass_floor NHƯNG
+            argmax là token silence trong Whisper window) về COVERAGE_COLLAPSE cap.
+            Mở rộng coverage gate cho collapse TỪNG PHẦN; cần posteriors + word_windows
+            + word_probs. False (mặc định) = bit-for-bit như cũ. Xem
+            _apply_recognizer_collapse_gate (word_details.py).
+        collapse_gate_mass_floor: ngưỡng max_mass posterior để coi âm "được nói" (xem
+            PHONEME_COLLAPSE_GATE_MASS_FLOOR).
 
     Precedence giữa các gate: mọi gate chỉ HẠ penalty, không nâng; post-pass chạy tuần
     tự connected_speech → coverage_gate (chỉ del) → drift_cap (chỉ sub); penalty_reason
@@ -397,6 +409,19 @@ def compute_phoneme_score(
             result, raw_by_ref, path, reference_phonemes, reference_spans,
             predicted_times, word_windows,
             pad=drift_window_pad, cap=drift_sub_cap,
+        )
+    # Recognizer-collapse gate: cap del/sub bị wav2vec CTC blank-collapse (âm CÓ mass
+    # posterior nhưng argmax=<pad>) — mở rộng coverage gate cho collapse từng phần. Chạy
+    # SAU coverage/drift (chỉ hạ penalty), cần posteriors + Whisper window/prob.
+    if (
+        collapse_gate_enabled and reference_spans and not empty_prediction
+        and posteriors is not None
+    ):
+        _apply_recognizer_collapse_gate(
+            result, raw_by_ref, reference_phonemes, reference_spans, ref_skipped,
+            ref_is_onset, word_windows, word_probs, posteriors,
+            cap=coverage_gate_cap, min_asr_prob=coverage_gate_min_asr_prob,
+            mass_floor=collapse_gate_mass_floor,
         )
 
     # Cửa sổ phát lại từng từ theo wav2vec segment — tính MỘT lần, dùng cho cả

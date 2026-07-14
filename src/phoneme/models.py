@@ -32,6 +32,10 @@ class EvidenceStats:
         argmax_token: token đang "thắng" (argmax) tại frame có mass cao nhất — cho
             biết wav2vec nghe ra âm gì ở chỗ lẽ ra có âm bị thiếu ("" nếu cửa sổ rỗng)
         argmax_prob: probability của argmax_token tại frame đó
+        argmax_is_silence: argmax_token là token BLANK/SILENCE của model (<pad>, |,
+            sil...) → wav2vec nhả "khoảng lặng" ở chỗ này. Kết hợp với max_mass cao =
+            chữ ký CTC blank-collapse (âm CÓ trong audio nhưng thua token blank), khác
+            với "nghe ra âm KHÁC" (argmax là một IPA) hay "âm vắng thật" (mass ~0).
     """
     max_mass: float
     top_k_mean: float
@@ -39,6 +43,7 @@ class EvidenceStats:
     n_frames: int
     argmax_token: str = ""
     argmax_prob: float = 0.0
+    argmax_is_silence: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +53,7 @@ class EvidenceStats:
             "n_frames": self.n_frames,
             "argmax_token": self.argmax_token,
             "argmax_prob": round(self.argmax_prob, 4),
+            "argmax_is_silence": self.argmax_is_silence,
         }
 
 

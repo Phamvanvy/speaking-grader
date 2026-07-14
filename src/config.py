@@ -183,6 +183,12 @@ class Config:
     # 0.1 → severity "low" (s_cluster_unaspirated). Default OFF = bit-for-bit như cũ.
     # Qua TOEIC_PHONEME_S_CLUSTER.
     phoneme_s_cluster_enabled: bool = False
+    # Recognizer-collapse gate: mở rộng coverage gate cho collapse TỪNG PHẦN — cap del/
+    # sub bị wav2vec CTC blank-collapse (âm THAM CHIẾU có mass posterior ≥ floor nhưng
+    # argmax=<pad> trong Whisper window) về COVERAGE_COLLAPSE. Cần deletion-evidence
+    # posteriors (ON) + word_windows/probs. Default OFF = bit-for-bit như cũ.
+    # Qua TOEIC_PHONEME_COLLAPSE_GATE_ENABLED. Xem scoring/word_details.py.
+    phoneme_collapse_gate_enabled: bool = False
     # Deletion-evidence probe (SHADOW): giữ frame posteriors wav2vec để đo bằng chứng
     # âm học cho mỗi âm bị thiếu (phân biệt "thiếu âm thật" vs "recognizer hallucinate
     # deletion"). CHỈ telemetry/log — KHÔNG BAO GIỜ đổi điểm → default ON an toàn.
@@ -415,6 +421,9 @@ def load_config() -> Config:
         ).strip().lower() in {"1", "true", "yes", "on"},
         phoneme_s_cluster_enabled=(
             os.getenv("TOEIC_PHONEME_S_CLUSTER", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_collapse_gate_enabled=(
+            os.getenv("TOEIC_PHONEME_COLLAPSE_GATE_ENABLED", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},
         phoneme_deletion_evidence_enabled=(
             os.getenv("TOEIC_PHONEME_DELETION_EVIDENCE", "true") or "true"

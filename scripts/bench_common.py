@@ -170,7 +170,8 @@ def run_scoring(config, segments, posteriors, reference_text: str,
                 gates_on: bool, homograph_on: bool | None = None,
                 word_windows_locked: set | None = None,
                 boundary_refine_on: bool | None = None,
-                s_cluster_on: bool | None = None) -> dict:
+                s_cluster_on: bool | None = None,
+                collapse_on: bool | None = None) -> dict:
     """Gọi compute_phoneme_score với đúng tham số analyzer truyền (accent default),
     capture diagnostics in-memory. Trả {score, diags}.
 
@@ -180,7 +181,10 @@ def run_scoring(config, segments, posteriors, reference_text: str,
     config.phoneme_boundary_refine_enabled (env TOEIC_PHONEME_BOUNDARY_REFINE);
     bool để A/B ép.
     s_cluster_on: s-cluster leniency — None (mặc định) theo
-    config.phoneme_s_cluster_enabled (env TOEIC_PHONEME_S_CLUSTER); bool để A/B ép."""
+    config.phoneme_s_cluster_enabled (env TOEIC_PHONEME_S_CLUSTER); bool để A/B ép.
+    collapse_on: recognizer-collapse gate — None (mặc định) theo
+    config.phoneme_collapse_gate_enabled (env TOEIC_PHONEME_COLLAPSE_GATE_ENABLED);
+    bool để A/B ép."""
     phonemes, spans, stress, disp = text_to_ipa_sequence_with_spans(reference_text)
     captured: list = []
     score = compute_phoneme_score(
@@ -220,6 +224,10 @@ def run_scoring(config, segments, posteriors, reference_text: str,
         s_cluster_enabled=(
             config.phoneme_s_cluster_enabled if s_cluster_on is None
             else s_cluster_on
+        ),
+        collapse_gate_enabled=(
+            config.phoneme_collapse_gate_enabled if collapse_on is None
+            else collapse_on
         ),
     )
     return {"score": score, "diags": [asdict(d) for d in captured]}

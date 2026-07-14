@@ -69,6 +69,19 @@ PHONEME_COVERAGE_GATE_CAP: Final[float] = 0.2
 PHONEME_COVERAGE_GATE_MAX_LEN: Final[int] = 4
 PHONEME_COVERAGE_GATE_MIN_ASR_PROB: Final[float] = 0.60
 
+# Recognizer-collapse gate (mở rộng coverage gate cho collapse TỪNG PHẦN qua posterior
+# evidence): coverage gate chỉ bắt từ "del" 100% + wav2vec IM LẶNG. Nhưng wav2vec còn
+# collapse KIỂU KHÁC — nhả token BLANK (<pad>) đè lên âm VẪN CÓ trong audio (CTC
+# blank-collapse) — làm 1-2 âm giữa từ thành del/sub dù từ được đọc rõ (case "line to"
+# 2026-07-14: /aɪ n/ mass posterior 0.28-0.33 nhưng argmax=<pad>; Whisper prob 0.997;
+# đối chứng âm VẮNG THẬT mass ~0.001). Gate này cap del/sub về "low" khi âm THAM CHIẾU
+# có max_mass ≥ FLOOR (được nói) VÀ argmax là token silence (bị nhả blank) — hai điều
+# kiện tách CTC-collapse khỏi (a) nghe ra âm KHÁC = lỗi thật (argmax là IPam) và (b) âm
+# vắng thật (mass thấp). Cùng cap/min_asr_prob với coverage gate (COVERAGE_COLLAPSE,
+# không tô đỏ). Default OFF. FLOOR 0.10 nằm giữa del-thật (~0.001-0.03, xem
+# deletion-evidence telemetry) và blank-collapse (~0.28-0.33).
+PHONEME_COLLAPSE_GATE_MASS_FLOOR: Final[float] = 0.10
+
 # Drift cap (Track B): sub có predicted segment NGOÀI cửa sổ Whisper của chính từ đó
 # (±DRIFT_WINDOW_PAD_SEC, dùng chung is_within_word_window với telemetry) → khả năng
 # DTW "mượn" âm của từ kế bên, không phải lỗi phát âm thật. Đo lại trên 5905 từ:

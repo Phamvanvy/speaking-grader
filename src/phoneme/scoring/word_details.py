@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 from ..reliability import SkipDecision
 from .constants import (
     MAX_WORDS_RETURNED,
+    PHONEME_COLLAPSE_GATE_MASS_FLOOR,
     PHONEME_COVERAGE_GATE_CAP,
     PHONEME_COVERAGE_GATE_MAX_LEN,
     PHONEME_COVERAGE_GATE_MIN_ASR_PROB,
@@ -792,6 +793,82 @@ def _apply_coverage_gate(
             result[i] = (
                 PhonemePoint(
                     symbol=point.symbol, status="del",
+                    severity=_severity_from_penalty(cap),
+                    stress=point.stress, display_stress=point.display_stress,
+                    penalty_reason=PenaltyReason.COVERAGE_COLLAPSE.value,
+                    penalty_adjustment=round(cap / raw, 4) if raw > 0 else 0.0,
+                ),
+                cap,
+            )
+
+
+def _apply_recognizer_collapse_gate(
+    result: dict[int, tuple[PhonemePoint, float | None]],
+    raw_by_ref: dict[int, float],
+    reference: list[str],
+    spans: list[WordSpan],
+    ref_skipped: list[bool],
+    ref_is_onset: list[bool],
+    word_windows: Mapping[int, tuple[float, float]] | None,
+    word_probs: Mapping[int, float] | None,
+    posteriors: "FramePosteriors | None",
+    *,
+    cap: float = PHONEME_COVERAGE_GATE_CAP,
+    min_asr_prob: float = PHONEME_COVERAGE_GATE_MIN_ASR_PROB,
+    mass_floor: float = PHONEME_COLLAPSE_GATE_MASS_FLOOR,
+) -> None:
+    """Cap penalty các âm bị wav2vec CTC BLANK-COLLAPSE — mở rộng coverage gate cho
+    collapse TỪNG PHẦN (1-2 âm giữa từ, không cần 100% del). Mutate `result` in-place.
+
+    coverage gate chỉ bắt từ "del" 100% + wav2vec IM LẶNG trong window. Nhưng wav2vec
+    còn collapse khi nhả token BLANK (<pad>) đè lên âm VẪN CÓ trong audio (case "line
+    to" 2026-07-14: /aɪ n/ posterior mass 0.28-0.33 nhưng argmax=<pad>) → 1-2 âm giữa
+    từ thành del HOẶC sub (DTW mượn âm kề) dù từ đọc rõ. Bằng chứng phân biệt lấy TỪ
+    posterior của chính wav2vec (không heuristic conf/sim):
+
+      - âm THAM CHIẾU có max_mass ≥ mass_floor → âm ĐƯỢC nói (đối chứng âm vắng thật
+        mass ~0.001);
+      - VÀ argmax tại frame mass cao nhất là token SILENCE/blank (argmax_is_silence) →
+        wav2vec nhả blank chứ KHÔNG nghe ra âm khác. Nếu argmax là 1 IPA khác → đó là
+        thay-âm THẬT (lỗi người đọc) → KHÔNG cap.
+
+    Cửa sổ probe = Whisper WORD window của từ (không dùng segment của point vì với sub
+    nó là âm DRIFT ở thời điểm khác). Chỉ áp khi Whisper prob ≥ min_asr_prob (transcript
+    không phải ground truth tuyệt đối — cùng convention coverage gate). Chỉ HẠ penalty
+    (`penalty > cap`); reuse COVERAGE_COLLAPSE (cùng họ "recognizer collapse", severity
+    "low", không tô đỏ). An toàn no-op khi thiếu posteriors/window/prob.
+
+    GUARD ĐẦU TỪ (ref_is_onset): BỎ QUA phụ âm ONSET. Collapse quan sát được luôn ở
+    NHÂN/CODA (case "line" /aɪ n/); còn phụ âm đầu từ là lỗi có giá trị sư phạm nhất
+    (v→b, r→t/w kiểu L1 — deletion_severity cũng xếp onset = "high"). Cửa sổ probe cả từ
+    dễ dính 1 frame blank ở ranh giới → cap oan sub đầu từ (đo bench 2026-07-14: "very"
+    v→b, "room" r→t bị cap sai) → chặn hẳn onset để KHÔNG giấu lỗi thật.
+    """
+    if not spans or word_windows is None or word_probs is None or posteriors is None:
+        return
+    n = len(reference)
+    for k, span in enumerate(spans):
+        win = word_windows.get(k)
+        if win is None:
+            continue
+        prob = word_probs.get(k, 0.0)
+        if prob < min_asr_prob or prob <= 0:
+            continue
+        for i in range(span.start_idx, min(span.end_idx, n)):
+            if ref_skipped[i] or i not in result or ref_is_onset[i]:
+                continue
+            point, penalty = result[i]
+            if penalty is None or penalty <= cap or point.status not in ("del", "sub"):
+                continue
+            stats = posteriors.evidence_stats(reference[i], win[0], win[1])
+            if stats is None or stats.n_frames == 0:
+                continue
+            if stats.max_mass < mass_floor or not stats.argmax_is_silence:
+                continue
+            raw = raw_by_ref.get(i, penalty)
+            result[i] = (
+                PhonemePoint(
+                    symbol=point.symbol, status=point.status, heard=point.heard,
                     severity=_severity_from_penalty(cap),
                     stress=point.stress, display_stress=point.display_stress,
                     penalty_reason=PenaltyReason.COVERAGE_COLLAPSE.value,

@@ -229,13 +229,17 @@ class FramePosteriors:
         best = int(np.argmax(mass))
         top_k = np.sort(mass)[-EVIDENCE_TOP_K_FRAMES:]
         argmax_id = int(np.argmax(window[best]))
+        argmax_token = self.id_to_token.get(argmax_id, "")
         return EvidenceStats(
             max_mass=float(mass[best]),
             top_k_mean=float(top_k.mean()),
             p90=float(np.percentile(mass.astype(np.float64), 90)),
             n_frames=int(hi - lo),
-            argmax_token=self.id_to_token.get(argmax_id, ""),
+            argmax_token=argmax_token,
             argmax_prob=float(window[best, argmax_id]),
+            # Token blank/silence thắng tại frame mass cao nhất = chữ ký CTC collapse
+            # (âm có mass nhưng bị nhả blank). _resolve_ipa quy token về "" cho silence.
+            argmax_is_silence=_resolve_ipa(argmax_token, _SILENCE_TOKENS) == "",
         )
 
 
