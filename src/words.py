@@ -209,6 +209,45 @@ def upsert_word(
         conn.close()
 
 
+def merge_user(cfg: Config, from_user_id: str, to_user_id: str) -> int:
+    """Gộp dữ liệu từ user ẩn danh sang user tài khoản (dùng khi /auth/claim).
+
+    - saved_words: chuyển từ CHƯA trùng sang tài khoản (UPDATE OR IGNORE bỏ qua từ
+      đã có trong tài khoản do PK (user_id, word)), rồi xoá phần còn lại của user cũ.
+    - phoneme_stats + phoneme_profile_state: XOÁ của CẢ HAI user (không cộng dồn
+      thủ công) — hồ sơ âm sẽ tự dựng lại tăng dần từ history đã gộp ở lần gợi ý sau
+      (src/phoneme_profile.py quét lại từ con trỏ rỗng). Đúng & đơn giản hơn.
+
+    Trả số từ đã chuyển thành công.
+    """
+    from_user_id = validate_user_id(from_user_id)
+    to_user_id = validate_user_id(to_user_id)
+    if from_user_id == to_user_id:
+        return 0
+    conn = _connect(cfg)
+    try:
+        with conn:
+            cur = conn.execute(
+                "UPDATE OR IGNORE saved_words SET user_id = ? WHERE user_id = ?",
+                (to_user_id, from_user_id),
+            )
+            moved = cur.rowcount
+            conn.execute(
+                "DELETE FROM saved_words WHERE user_id = ?", (from_user_id,)
+            )
+            conn.execute(
+                "DELETE FROM phoneme_stats WHERE user_id IN (?, ?)",
+                (from_user_id, to_user_id),
+            )
+            conn.execute(
+                "DELETE FROM phoneme_profile_state WHERE user_id IN (?, ?)",
+                (from_user_id, to_user_id),
+            )
+        return moved
+    finally:
+        conn.close()
+
+
 def delete_word(cfg: Config, user_id: str, word: str) -> bool:
     conn = _connect(cfg)
     try:

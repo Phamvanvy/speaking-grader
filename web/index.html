@@ -13,10 +13,12 @@
     <link rel="stylesheet" href="/css/exam.css?v=exam-4">
     <link rel="stylesheet" href="/css/history.css?v=history-1">
     <link rel="stylesheet" href="/css/practice.css?v=practice-2">
+    <link rel="stylesheet" href="/css/auth.css?v=auth-1">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
     <a class="feedback-btn" href="https://www.facebook.com/myengbuddy/" target="_blank" rel="noopener" title="Góp ý, báo lỗi hoặc đề xuất cải tiến" aria-label="Góp ý, báo lỗi hoặc đề xuất cải tiến">💬</a>
+    <div class="auth-widget" id="auth-widget"></div>
     <div class="container">
         <h1>🎤 Speaking Grader</h1>
 
@@ -532,6 +534,7 @@
          const/state dùng chung); render trước recording & form (escapeHtml được
          gọi ở top-level khi 2 file này nạp). -->
     <script src="/js/state.js?v=apibase-1"></script>
+    <script src="/js/auth.js?v=auth-1"></script>
     <script src="/js/render.js?v=stress-1"></script>
     <script src="/js/playback.js?v=tts-v4"></script>
     <script src="/js/recording.js?v=accent-default-1"></script>

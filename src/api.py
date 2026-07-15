@@ -36,12 +36,13 @@ from time import perf_counter
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
-from . import history, word_suggest, words
+from . import auth, history, word_suggest, words
 from .config import Config, load_config
 from .core import grade_response
 from .exam_import import ExamImportError, extract_exam
@@ -125,6 +126,57 @@ def _valid_user_id_or_400(user_id: str) -> str:
         return history.validate_user_id(user_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+# ── Đăng nhập / phiên (xem src/auth.py) ──────────────────────────────────
+# Bảo mật per-user theo kiểu "token thắng, user_id không phải credential":
+# - UUID ẩn danh (không thuộc tài khoản nào) → mở như cách ly mềm cũ.
+# - user_id của tài khoản → CHỈ truy cập được khi kèm Authorization: Bearer <token>
+#   khớp (không thì 401), nên biết user_id thôi không đủ để đọc/ghi dữ liệu.
+
+
+def _bearer(authorization: str | None) -> str | None:
+    """Rút token từ header 'Authorization: Bearer <token>' (None nếu thiếu/sai dạng)."""
+    if not authorization:
+        return None
+    parts = authorization.split(None, 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1].strip() or None
+    return None
+
+
+def _require_session(authorization: str | None) -> str:
+    """user_id của phiên đăng nhập hợp lệ, hoặc 401."""
+    uid = auth.resolve_session(_BASE_CONFIG, _bearer(authorization))
+    if not uid:
+        raise HTTPException(status_code=401, detail="Chưa đăng nhập hoặc phiên đã hết hạn.")
+    return uid
+
+
+def _authz_user_id(authorization: str | None, user_id: str) -> str:
+    """Cấp phép truy cập dữ liệu của `user_id` (đã validate). Nếu user_id thuộc 1 tài
+    khoản thì bắt buộc session token khớp; UUID ẩn danh thì cho qua."""
+    if auth.is_account_user_id(_BASE_CONFIG, user_id):
+        session_uid = auth.resolve_session(_BASE_CONFIG, _bearer(authorization))
+        if session_uid != user_id:
+            raise HTTPException(
+                status_code=401,
+                detail="Cần đăng nhập để truy cập dữ liệu của tài khoản này.",
+            )
+    return user_id
+
+
+def _resolve_read_user_id(authorization: str | None, user_id: str) -> str:
+    """Cho endpoint đọc/ghi per-user (user_id BẮT BUỘC): validate + cấp phép."""
+    return _authz_user_id(authorization, _valid_user_id_or_400(user_id))
+
+
+def _resolve_save_user_id(authorization: str | None, user_id: str | None) -> str | None:
+    """Cho endpoint chấm (lưu lịch sử TUỲ CHỌN): user_id vắng → None (không lưu, giữ
+    đúng cơ chế opt-out của client); có → validate + cấp phép."""
+    if not user_id:
+        return None
+    return _authz_user_id(authorization, _valid_user_id_or_400(user_id))
 
 # Frontend tĩnh: thư mục web/ (index.html + CSS + JS) ở repo root
 # (src/ là con của root). Mount ở "/" cùng origin với API → không cần CORS, và ô
@@ -345,8 +397,10 @@ async def grade(
     history_session_title: str | None = Form(None),
     history_seq: int | None = Form(None),
     history_question_id: str | None = Form(None),
+    authorization: str | None = Header(None),
 ) -> dict:
     """Chấm 1 bài nói. Trả về JSON {transcript, features, scores}."""
+    user_id = _resolve_save_user_id(authorization, user_id)
     has_image = image is not None
     exam = _validate_exam(exam)
     accent = _validate_accent(accent)
@@ -443,6 +497,7 @@ async def grade_batch(
     user_id: str | None = Form(
         None, description="ID ẩn danh của user (bật lưu lịch sử khi có)"
     ),
+    authorization: str | None = Header(None),
 ) -> dict:
     """Chấm nhiều audio cho CÙNG đề bài. Trả kết quả theo từng file.
 
@@ -454,6 +509,7 @@ async def grade_batch(
     TUẦN TỰ (concurrency=1). Chỉ tăng max_concurrency khi backend là cloud
     (Anthropic) và bạn hiểu rủi ro tranh chấp Whisper trên GPU.
     """
+    user_id = _resolve_save_user_id(authorization, user_id)
     if not audios:
         raise HTTPException(status_code=400, detail="Cần ít nhất 1 file audio.")
     if len(audios) > _MAX_BATCH:
@@ -684,12 +740,14 @@ async def exam_grade(
     user_id: str | None = Form(
         None, description="ID ẩn danh của user (bật lưu lịch sử khi có)"
     ),
+    authorization: str | None = Header(None),
 ) -> dict:
     """Chấm TRỌN một đề: mỗi câu chấm độc lập qua pipeline hiện có, rồi gộp overall.
 
     audio_question_ids[i] cho biết file audios[i] thuộc câu nào (map theo
     question_id — KHÔNG theo index, vì UI cho reorder). Câu thiếu audio → bỏ qua.
     """
+    user_id = _resolve_save_user_id(authorization, user_id)
     try:
         paper_obj = ExamPaper.from_dict(json.loads(paper))
         qids = [str(x) for x in json.loads(audio_question_ids)]
@@ -870,6 +928,7 @@ def exam_overall(
     history_session_id: str | None = Form(
         None, description="UUID phiên thi đã gửi kèm từng câu qua /grade"
     ),
+    authorization: str | None = Header(None),
 ) -> dict:
     """Gộp điểm tổng cả đề từ danh sách điểm từng câu (client chấm từng câu qua /grade).
 
@@ -877,6 +936,7 @@ def exam_overall(
     proxy với đề dài/model local chậm) rồi gọi 1 lần tính overall TẤT ĐỊNH ở đây —
     dùng đúng `compute_exam_overall` để tránh lệch làm tròn so với chấm gộp.
     """
+    user_id = _resolve_save_user_id(authorization, user_id)
     exam = _validate_exam(exam)
     try:
         per_question = json.loads(scores)
@@ -909,6 +969,106 @@ def exam_overall(
     return response
 
 
+# ── Đăng nhập (tuỳ chọn — đồng bộ lịch sử đa thiết bị) ────────────────────
+# Tài khoản username+password. Đăng nhập chỉ để lấy user_id CỐ ĐỊNH của tài khoản
+# (thay UUID localStorage), nên mọi endpoint per-user ở trên/dưới chạy nguyên vẹn.
+
+
+class _RegisterBody(BaseModel):
+    username: str
+    password: str
+
+
+class _LoginBody(BaseModel):
+    username: str
+    password: str
+
+
+class _ChangePasswordBody(BaseModel):
+    old_password: str
+    new_password: str
+
+
+class _ClaimBody(BaseModel):
+    anon_user_id: str
+
+
+@app.post("/auth/register")
+def auth_register(body: _RegisterBody) -> dict:
+    """Tạo tài khoản mới → trả {token, user_id, username} (đăng nhập luôn)."""
+    try:
+        return auth.register(_BASE_CONFIG, body.username, body.password)
+    except auth.AuthError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/auth/login")
+def auth_login(body: _LoginBody) -> dict:
+    """Đăng nhập → {token, user_id, username}."""
+    try:
+        return auth.login(_BASE_CONFIG, body.username, body.password)
+    except auth.AuthError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/auth/logout")
+def auth_logout(authorization: str | None = Header(None)) -> dict:
+    """Thu hồi session token hiện tại."""
+    auth.logout(_BASE_CONFIG, _bearer(authorization))
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def auth_me(authorization: str | None = Header(None)) -> dict:
+    """Thông tin tài khoản của phiên hiện tại (để khôi phục đăng nhập khi mở lại trang)."""
+    uid = _require_session(authorization)
+    acct = auth.get_account(_BASE_CONFIG, uid)
+    if acct is None:
+        raise HTTPException(status_code=401, detail="Tài khoản không còn tồn tại.")
+    return acct
+
+
+@app.post("/auth/change-password")
+def auth_change_password(
+    body: _ChangePasswordBody, authorization: str | None = Header(None)
+) -> dict:
+    """Đổi mật khẩu (yêu cầu mật khẩu hiện tại)."""
+    uid = _require_session(authorization)
+    try:
+        auth.change_password(_BASE_CONFIG, uid, body.old_password, body.new_password)
+    except auth.AuthError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True}
+
+
+@app.post("/auth/claim")
+def auth_claim(body: _ClaimBody, authorization: str | None = Header(None)) -> dict:
+    """Gộp lịch sử + từ đã lưu của 1 UUID ẩn danh vào tài khoản đang đăng nhập.
+
+    Gọi 1 lần khi user đăng nhập lần đầu trên máy đang có dữ liệu ẩn danh. An toàn
+    khi không có gì để gộp (trả count 0). Từ chối nếu anon_user_id lại là 1 tài
+    khoản khác (không cho "cướp" dữ liệu tài khoản người khác)."""
+    uid = _require_session(authorization)
+    anon = _valid_user_id_or_400(body.anon_user_id)
+    if anon == uid:
+        return {"records": 0, "words": 0, "user_id": uid}
+    if auth.is_account_user_id(_BASE_CONFIG, anon):
+        raise HTTPException(
+            status_code=400,
+            detail="anon_user_id thuộc một tài khoản khác — không thể gộp.",
+        )
+    records = history.reassign_user(_BASE_CONFIG, anon, uid) if _BASE_CONFIG.history_enabled else 0
+    words_moved = words.merge_user(_BASE_CONFIG, anon, uid)
+    logger.info("Claim: gộp %d bản ghi + %d từ từ %s → %s", records, words_moved, anon, uid)
+    return {"records": records, "words": words_moved, "user_id": uid}
+
+
 # ── Lịch sử chấm bài ─────────────────────────────────────────────────────
 # Đọc/xoá lịch sử của 1 user (uuid ẩn danh phía client). Ghi lịch sử nằm trong
 # chính /grade, /grade-batch, /exam/grade, /exam/overall ở trên.
@@ -925,10 +1085,13 @@ _HISTORY_AUDIO_MEDIA: dict[str, str] = {
 # index.html. Vì vậy list nằm ở /history/list (đăng ký TRƯỚC /history/{record_id}
 # để chữ "list" không bị nuốt làm record_id).
 @app.get("/history/list")
-def history_list(user_id: str, limit: int = 20, offset: int = 0) -> dict:
+def history_list(
+    user_id: str, limit: int = 20, offset: int = 0,
+    authorization: str | None = Header(None),
+) -> dict:
     """Danh sách bản ghi lịch sử của user (mới nhất trước, phân trang)."""
     _require_history_enabled()
-    user_id = _valid_user_id_or_400(user_id)
+    user_id = _resolve_read_user_id(authorization, user_id)
     try:
         return history.list_records(_BASE_CONFIG, user_id, limit, offset)
     except Exception as e:  # noqa: BLE001
@@ -937,10 +1100,12 @@ def history_list(user_id: str, limit: int = 20, offset: int = 0) -> dict:
 
 
 @app.get("/history/{record_id}")
-def history_detail(record_id: str, user_id: str) -> dict:
+def history_detail(
+    record_id: str, user_id: str, authorization: str | None = Header(None)
+) -> dict:
     """Chi tiết 1 bản ghi (kèm items). 404 nếu không tồn tại HOẶC sai user."""
     _require_history_enabled()
-    user_id = _valid_user_id_or_400(user_id)
+    user_id = _resolve_read_user_id(authorization, user_id)
     rec = history.get_record(_BASE_CONFIG, user_id, record_id)
     if rec is None:
         raise HTTPException(status_code=404, detail="Không thấy bản ghi lịch sử.")
@@ -948,10 +1113,20 @@ def history_detail(record_id: str, user_id: str) -> dict:
 
 
 @app.get("/history/{record_id}/audio")
-def history_audio(record_id: str, user_id: str, item_id: str | None = None) -> FileResponse:
-    """Audio đã lưu của bản ghi (single: không cần item_id; exam/batch: bắt buộc)."""
+def history_audio(
+    record_id: str, user_id: str, item_id: str | None = None,
+    token: str | None = None,
+    authorization: str | None = Header(None),
+) -> FileResponse:
+    """Audio đã lưu của bản ghi (single: không cần item_id; exam/batch: bắt buộc).
+
+    Nạp qua thẻ <audio src> nên trình duyệt KHÔNG gửi header Authorization → cho
+    phép token qua query `?token=` (fallback) để dữ liệu audio của tài khoản vẫn
+    được cấp phép. Token là session (thu hồi được), không phải mật khẩu.
+    """
     _require_history_enabled()
-    user_id = _valid_user_id_or_400(user_id)
+    authz = authorization or (f"Bearer {token}" if token else None)
+    user_id = _resolve_read_user_id(authz, user_id)
     path = history.get_audio_path(_BASE_CONFIG, user_id, record_id, item_id)
     if path is None:
         raise HTTPException(status_code=404, detail="Không thấy audio của bản ghi này.")
@@ -960,10 +1135,12 @@ def history_audio(record_id: str, user_id: str, item_id: str | None = None) -> F
 
 
 @app.delete("/history/{record_id}")
-def history_delete(record_id: str, user_id: str) -> dict:
+def history_delete(
+    record_id: str, user_id: str, authorization: str | None = Header(None)
+) -> dict:
     """Xoá 1 bản ghi (cascade items) + toàn bộ audio của nó trên đĩa."""
     _require_history_enabled()
-    user_id = _valid_user_id_or_400(user_id)
+    user_id = _resolve_read_user_id(authorization, user_id)
     if not history.delete_record(_BASE_CONFIG, user_id, record_id):
         raise HTTPException(status_code=404, detail="Không thấy bản ghi lịch sử.")
     return {"deleted": True}
@@ -985,10 +1162,13 @@ def _valid_word_or_400(word: str) -> str:
 # tương lai để chữ "suggestions" không bị nuốt làm path param (cùng lý do
 # /history/list ở trên). Hiện /words/{word} chỉ có DELETE nên chưa đụng nhau.
 @app.get("/words/suggestions")
-async def words_suggestions(user_id: str, lang: str | None = None, limit: int = 12) -> dict:
+async def words_suggestions(
+    user_id: str, lang: str | None = None, limit: int = 12,
+    authorization: str | None = Header(None),
+) -> dict:
     """Gợi ý từ mới để luyện âm yếu (tab Từ đã lưu) — hồ sơ âm tính từ history
     + saved words; danh sách từ do LLM chọn per-phoneme, cache SQLite."""
-    user_id = _valid_user_id_or_400(user_id)
+    user_id = _resolve_read_user_id(authorization, user_id)
     config = _resolve_config(lang)
     lang_key = (config.feedback_lang or "vi").strip().lower()
     try:
@@ -1002,9 +1182,9 @@ async def words_suggestions(user_id: str, lang: str | None = None, limit: int = 
 
 
 @app.get("/words")
-def words_list(user_id: str) -> dict:
+def words_list(user_id: str, authorization: str | None = Header(None)) -> dict:
     """Toàn bộ từ đã lưu của user (mới lưu trước)."""
-    user_id = _valid_user_id_or_400(user_id)
+    user_id = _resolve_read_user_id(authorization, user_id)
     try:
         return words.list_words(_BASE_CONFIG, user_id)
     except Exception as e:  # noqa: BLE001
@@ -1020,9 +1200,10 @@ def words_upsert(
     phonemes: str | None = Form(None, description="JSON array snapshot phonemes của từ"),
     accuracy: float | None = Form(None),
     last_score: float | None = Form(None),
+    authorization: str | None = Header(None),
 ) -> dict:
     """Lưu từ mới hoặc cập nhật từ đã có (upsert theo (user_id, word))."""
-    user_id = _valid_user_id_or_400(user_id)
+    user_id = _resolve_read_user_id(authorization, user_id)
     w = _valid_word_or_400(word)
     phonemes_obj = None
     if phonemes:
@@ -1041,9 +1222,11 @@ def words_upsert(
 
 
 @app.delete("/words/{word}")
-def words_delete(word: str, user_id: str) -> dict:
+def words_delete(
+    word: str, user_id: str, authorization: str | None = Header(None)
+) -> dict:
     """Bỏ lưu 1 từ."""
-    user_id = _valid_user_id_or_400(user_id)
+    user_id = _resolve_read_user_id(authorization, user_id)
     w = _valid_word_or_400(word)
     if not words.delete_word(_BASE_CONFIG, user_id, w):
         raise HTTPException(status_code=404, detail="Từ này chưa được lưu.")

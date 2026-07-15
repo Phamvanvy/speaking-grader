@@ -653,5 +653,26 @@ def delete_record(cfg: Config, user_id: str, record_id: str) -> bool:
     return deleted
 
 
+def reassign_user(cfg: Config, from_user_id: str, to_user_id: str) -> int:
+    """Chuyển toàn bộ bản ghi lịch sử từ user ẩn danh sang user tài khoản (dùng khi
+    /auth/claim gộp lịch sử lúc đăng nhập lần đầu). Items đi theo record_id nên chỉ
+    cần đổi user_id ở bảng cha. Trả số bản ghi đã chuyển. KHÔNG enforce retention
+    ở đây (caller quyết định) — giữ hàm thuần chuyển khoá."""
+    from_user_id = validate_user_id(from_user_id)
+    to_user_id = validate_user_id(to_user_id)
+    if from_user_id == to_user_id:
+        return 0
+    conn = _connect(cfg)
+    try:
+        with conn:
+            cur = conn.execute(
+                "UPDATE history_records SET user_id = ? WHERE user_id = ?",
+                (to_user_id, from_user_id),
+            )
+        return cur.rowcount
+    finally:
+        conn.close()
+
+
 def _overall_max(exam: str | None) -> int:
     return 9 if exam == "ielts" else 200

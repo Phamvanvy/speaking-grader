@@ -45,6 +45,11 @@ services:
       # ở volumes) để sống qua docker compose down/up --build.
       TOEIC_HISTORY_DB_PATH: "data/history/history.db"
       TOEIC_HISTORY_AUDIO_DIR: "data/history/audio"
+      # Tài khoản đăng nhập + từ đã lưu: cũng đặt trong subtree đã mount để tài
+      # khoản/từ vựng KHÔNG mất khi rebuild (mặc định data/*.db nằm trong image,
+      # không được persist). Xem src/auth.py, src/words.py.
+      TOEIC_AUTH_DB_PATH: "data/history/auth.db"
+      TOEIC_WORDS_DB_PATH: "data/history/words.db"
       # NVIDIA_VISIBLE_DEVICES: "1" # Mở ra nếu muốn ép container chỉ nhìn thấy GPU số 2
 
     # Healthcheck dùng endpoint /health có sẵn của app.

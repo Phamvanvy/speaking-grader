@@ -144,6 +144,10 @@ function historyAudioUrl(recordId, itemId) {
     let url = `${apiBase()}/history/${encodeURIComponent(recordId)}/audio`
         + `?user_id=${encodeURIComponent(getUserId())}`;
     if (itemId) url += `&item_id=${encodeURIComponent(itemId)}`;
+    // <audio src> không qua fetch → không có header Authorization; đính token qua
+    // query để audio của tài khoản (user_id "khoá") vẫn được cấp phép.
+    const token = (typeof authToken === 'function') ? authToken() : null;
+    if (token) url += `&token=${encodeURIComponent(token)}`;
     return url;
 }
 

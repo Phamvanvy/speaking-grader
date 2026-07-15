@@ -1,0 +1,153 @@
+/* Đăng nhập tài khoản: widget góc trên-trái + modal login/đăng ký. Dark mode theo
+   quy ước body.dark như theme-dark.css. */
+
+/* ── Widget danh tính (đối xứng với theme-toggle ở góc phải) ───────────── */
+.auth-widget {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.auth-widget .auth-user {
+    background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    border-radius: 999px;
+    padding: 0.45rem 0.85rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #334155;
+    white-space: nowrap;
+}
+
+.auth-widget .auth-link {
+    border: none;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    border-radius: 999px;
+    padding: 0.45rem 0.85rem;
+    font-size: 0.9rem;
+    cursor: pointer;
+    color: #475569;
+    transition: transform 0.15s, background 0.2s;
+}
+.auth-widget .auth-link:hover { transform: scale(1.05); }
+.auth-widget .auth-login-cta { font-weight: 600; color: #2563eb; }
+
+body.dark .auth-widget .auth-user,
+body.dark .auth-widget .auth-link {
+    background: #1e293b;
+    color: #e2e8f0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+body.dark .auth-widget .auth-login-cta { color: #60a5fa; }
+
+/* ── Modal ─────────────────────────────────────────────────────────────── */
+.auth-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+.auth-modal-overlay.hidden { display: none; }
+
+.auth-modal {
+    position: relative;
+    width: 100%;
+    max-width: 380px;
+    background: white;
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    padding: 1.6rem 1.5rem 1.4rem;
+}
+body.dark .auth-modal { background: #1e293b; color: #e2e8f0; }
+
+.auth-modal-close {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.7rem;
+    border: none;
+    background: transparent;
+    font-size: 1.1rem;
+    cursor: pointer;
+    color: #94a3b8;
+    line-height: 1;
+}
+.auth-modal-close:hover { color: #475569; }
+body.dark .auth-modal-close:hover { color: #e2e8f0; }
+
+.auth-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.8rem;
+}
+.auth-tab {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 0.5rem 0;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #94a3b8;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+}
+.auth-tab.active {
+    color: #2563eb;
+    border-bottom-color: #2563eb;
+}
+body.dark .auth-tab.active { color: #60a5fa; border-bottom-color: #60a5fa; }
+
+.auth-hint {
+    font-size: 0.82rem;
+    color: #64748b;
+    margin: 0 0 1rem;
+    line-height: 1.4;
+}
+body.dark .auth-hint { color: #94a3b8; }
+
+.auth-modal .form-group { margin-bottom: 0.85rem; }
+.auth-modal label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+    color: #334155;
+}
+body.dark .auth-modal label { color: #cbd5e1; }
+.auth-modal input {
+    width: 100%;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    box-sizing: border-box;
+}
+body.dark .auth-modal input {
+    background: #0f172a;
+    border-color: #334155;
+    color: #e2e8f0;
+}
+.auth-modal input:focus { outline: none; border-color: #2563eb; }
+
+.auth-modal .btn { width: 100%; margin-top: 0.3rem; }
+
+.auth-error {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.85rem;
+    margin-bottom: 0.8rem;
+}
+body.dark .auth-error {
+    background: #422; color: #fca5a5; border-color: #7f1d1d;
+}

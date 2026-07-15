@@ -252,6 +252,10 @@ class Config:
     # Từ đã lưu để luyện tập (per-user) + cache định nghĩa LLM — DB file riêng
     # (không đụng schema versioning của history.db). Xem src/words.py.
     words_db_path: str = "data/words.db"
+    # Tài khoản đăng nhập (users + sessions) — DB file RIÊNG. QUAN TRỌNG: trong
+    # Docker phải trỏ vào subtree đã mount (data/history/) để tài khoản sống qua
+    # rebuild; xem docker-compose.yml (TOEIC_AUTH_DB_PATH). Xem src/auth.py.
+    auth_db_path: str = "data/auth.db"
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -472,5 +476,8 @@ def load_config() -> Config:
         ),
         words_db_path=(
             os.getenv("TOEIC_WORDS_DB_PATH", "data/words.db") or "data/words.db"
+        ),
+        auth_db_path=(
+            os.getenv("TOEIC_AUTH_DB_PATH", "data/auth.db") or "data/auth.db"
         ),
     )

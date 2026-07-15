@@ -13,22 +13,83 @@ function apiBase() {
     return ((el && el.value) || window.location.origin || '').replace(/\/$/, '');
 }
 
-// ── Lịch sử chấm bài (server-side) ────────────────────────────────────
-// "User" = uuid ẩn danh sinh 1 lần cho trình duyệt này, gửi kèm mỗi request chấm
-// để server tách lịch sử theo máy/trình duyệt. KHÔNG phải auth — chỉ cách ly mềm.
+// ── Danh tính user (ẩn danh ↔ tài khoản đăng nhập) ────────────────────
+// Hai lớp:
+//  1. UUID ẩn danh (USER_ID_KEY): sinh 1 lần/trình duyệt, cách ly mềm lịch sử theo
+//     máy — KHÔNG auth. Giữ nguyên để tương thích ngược khi CHƯA đăng nhập.
+//  2. Tài khoản (AUTH_KEY = {token, user_id, username}): đăng nhập để lấy user_id
+//     CỐ ĐỊNH gắn tài khoản → đồng bộ lịch sử qua nhiều thiết bị. Xem web/js/auth.js.
+// getUserId() trả user_id của tài khoản khi đã đăng nhập, ngược lại trả UUID ẩn danh.
 const USER_ID_KEY = 'speaking-grader-user-id';
-function getUserId() {
+const AUTH_KEY = 'speaking-grader-auth';
+
+function _newUuid() {
+    // Fallback uuid-shaped khi thiếu crypto.randomUUID (context không phải secure)
+    // — server validate [A-Za-z0-9_-]{1,64} nên format phải chuẩn.
+    return (crypto.randomUUID) ? crypto.randomUUID()
+        : ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+            (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+}
+
+// UUID ẩn danh của trình duyệt này (dùng khi CHƯA đăng nhập, và làm nguồn để
+// "claim" gộp lịch sử vào tài khoản lúc đăng nhập lần đầu).
+function getAnonUserId() {
     let id = localStorage.getItem(USER_ID_KEY);
     if (!id) {
-        // Fallback uuid-shaped khi thiếu crypto.randomUUID (context không phải
-        // secure) — server validate [A-Za-z0-9_-]{1,64} nên format phải chuẩn.
-        id = (crypto.randomUUID) ? crypto.randomUUID()
-            : ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
-                (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+        id = _newUuid();
         localStorage.setItem(USER_ID_KEY, id);
     }
     return id;
 }
+
+// Sau khi /auth/claim gộp xong, sinh UUID ẩn danh MỚI để id cũ (đã nhập vào tài
+// khoản) không bị tái dùng/gộp lại lần sau.
+function regenerateAnonUserId() {
+    const id = _newUuid();
+    localStorage.setItem(USER_ID_KEY, id);
+    return id;
+}
+
+function authState() {
+    try { return JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); }
+    catch (e) { return null; }
+}
+function isLoggedIn() { return !!(authState() && authState().token); }
+function authToken() { const a = authState(); return a ? a.token : null; }
+function setAuth(obj) { localStorage.setItem(AUTH_KEY, JSON.stringify(obj)); }
+function clearAuth() { localStorage.removeItem(AUTH_KEY); }
+
+// user_id "đang hoạt động": tài khoản nếu đã đăng nhập, ngược lại ẩn danh.
+function getUserId() {
+    const a = authState();
+    return (a && a.user_id) ? a.user_id : getAnonUserId();
+}
+
+// Tự gắn Authorization: Bearer cho MỌI fetch tới API cùng origin khi đã đăng nhập
+// (một chỗ, không phải sửa từng call site). Endpoint tài khoản yêu cầu header này;
+// riêng <audio src> không qua fetch nên đính token qua ?token= (xem history.js).
+(function patchFetchWithAuth() {
+    const orig = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+        const token = authToken();
+        if (token) {
+            const url = (typeof input === 'string') ? input
+                : (input && input.url) || '';
+            const base = apiBase();
+            const sameApi = url.startsWith('/') || (base && url.startsWith(base));
+            if (sameApi) {
+                const headers = new Headers(
+                    (init && init.headers) ||
+                    (typeof input !== 'string' && input && input.headers) || {});
+                if (!headers.has('Authorization')) {
+                    headers.set('Authorization', 'Bearer ' + token);
+                    init = Object.assign({}, init, { headers });
+                }
+            }
+        }
+        return orig(input, init);
+    };
+})();
 
 // Opt-out privacy: tắt → không gửi user_id → server không lưu gì (audio là dữ
 // liệu nhạy cảm). Default BẬT. Checkbox nằm ở đầu tab Lịch sử.
