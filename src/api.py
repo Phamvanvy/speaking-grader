@@ -49,7 +49,7 @@ from .exam_import import ExamImportError, extract_exam
 from .exam_paper import ExamPaper
 from .logging_setup import setup_logging
 from .rubrics import EXAM_REGISTRIES
-from .rubrics.base import QuestionType
+from .rubrics.base import QuestionType, exam_score_field, exam_score_max
 from .scoring import compute_exam_overall
 from .suggest import default_target_band, suggest_answer, word_info as _gen_word_info
 from .tts import TtsUnavailable, synthesize as _tts_synthesize
@@ -57,6 +57,7 @@ from .api_helpers import (
     _VIDEO_SUFFIXES,
     _audio_suffix,
     _extract_audio_from_video,
+    _ensure_exam_lang_enabled,
     _extract_telemetry_signals,
     _has_provided_info,
     _normalize_mode,
@@ -403,6 +404,7 @@ async def grade(
     user_id = _resolve_save_user_id(authorization, user_id)
     has_image = image is not None
     exam = _validate_exam(exam)
+    _ensure_exam_lang_enabled(exam, _BASE_CONFIG)
     accent = _validate_accent(accent)
     qt = _pick_question_type(text, has_image, provided_info, question_type, exam)
     image_b64, image_media_type = await _read_image(image)
@@ -520,6 +522,7 @@ async def grade_batch(
 
     has_image = image is not None
     exam = _validate_exam(exam)
+    _ensure_exam_lang_enabled(exam, _BASE_CONFIG)
     accent = _validate_accent(accent)
     qt = _pick_question_type(text, has_image, provided_info, question_type, exam)
     requested_mode = _normalize_mode(mode)
@@ -755,6 +758,7 @@ async def exam_grade(
         raise HTTPException(status_code=400, detail=f"'paper'/'audio_question_ids' JSON sai: {e}") from e
 
     exam = _validate_exam(paper_obj.exam)
+    _ensure_exam_lang_enabled(exam, _BASE_CONFIG)
     accent = _validate_accent(accent)
     config = _resolve_config(feedback_lang)
     requested_mode = _normalize_mode(mode)
@@ -829,7 +833,7 @@ async def exam_grade(
         "exam": exam,
         "title": paper_obj.title,
         "overall": overall,
-        "overall_max": 9 if exam == "ielts" else 200,
+        "overall_max": exam_score_max(exam),
         "overall_estimated": True,  # ƯỚC TÍNH nội bộ — không phải điểm thi official
         "count": len(paper_obj.questions),
         "graded": sum(1 for r in graded if "result" in r),
@@ -946,12 +950,12 @@ def exam_overall(
         raise HTTPException(status_code=400, detail=f"'scores' JSON sai: {e}") from e
 
     overall = compute_exam_overall(exam, per_question)
-    field = "estimated_ielts_band" if exam == "ielts" else "estimated_toeic_score"
+    field = exam_score_field(exam)
     graded = sum(1 for s in per_question if s and s.get(field) is not None)
     response = {
         "exam": exam,
         "overall": overall,
-        "overall_max": 9 if exam == "ielts" else 200,
+        "overall_max": exam_score_max(exam),
         "overall_estimated": True,  # ƯỚC TÍNH nội bộ — không phải điểm thi official
         "count": len(per_question),
         "graded": graded,

@@ -31,7 +31,11 @@ logger = logging.getLogger("toeic.phoneme.reliability")
 
 # Tokenizer DÙNG CHUNG với text_to_ipa_sequence_with_spans (ipa/__init__.py) — phải
 # giống hệt để mapping token ↔ span word là 1-1 theo cấu trúc, không cần fuzzy.
+# Ngôn ngữ khác truyền token_re riêng (LangProfile.word_token_re) — mặc định EN.
 _WORD_TOKEN_RE = re.compile(r"[a-zA-Z'-]+")
+# Tokenizer transcript cho RecognizerEvidence (EN): thêm chữ số vì transcript
+# Whisper chứa số ("9am") — khác _WORD_TOKEN_RE (reference không có số).
+_EN_TRANSCRIPT_TOKEN_RE = re.compile(r"[a-z0-9']+")
 
 # Ngưỡng SequenceMatcher.ratio để coi 1 từ substituted là "lệch lớn" → skip.
 # Ratio cao (mountains→mountain ≈0.94) giữ lại chấm; thấp (Son Tinh→Andy ≈0) skip.
@@ -73,9 +77,17 @@ class RecognizerEvidence:
     recognized_words: tuple[str, ...]
 
     @classmethod
-    def from_transcript(cls, transcript: str) -> RecognizerEvidence:
-        """Tách transcript thành danh sách từ (lowercase, bỏ dấu câu)."""
-        return cls(tuple(re.findall(r"[a-z0-9']+", (transcript or "").lower())))
+    def from_transcript(
+        cls, transcript: str, token_re: re.Pattern[str] | None = None
+    ) -> RecognizerEvidence:
+        """Tách transcript thành danh sách từ (lowercase, bỏ dấu câu).
+
+        token_re: tokenizer theo NGÔN NGỮ transcript (None = tiếng Anh, giữ đúng
+        regex cũ `[a-z0-9']+` — bao chữ số vì transcript Whisper có thể chứa số).
+        """
+        if token_re is None:
+            token_re = _EN_TRANSCRIPT_TOKEN_RE
+        return cls(tuple(token_re.findall((transcript or "").lower())))
 
 
 def assess_reliability(
@@ -126,6 +138,7 @@ def assess_asr_confidence(
     *,
     min_probability: float,
     transcript_text: str | None = None,
+    token_re: re.Pattern[str] | None = None,
 ) -> Mapping[int, SkipDecision]:
     """Free-speech gate: từ mà chính Whisper không chắc → reference không đáng tin → skip.
 
@@ -179,8 +192,12 @@ def assess_asr_confidence(
         cursor = pos + len(wt)
 
     # [2] Prob theo token: MIN các ký tự được phủ; không phủ → unknown (0.0).
+    # token_re PHẢI cùng nguồn với tokenizer đã dựng reference spans (LangProfile
+    # .word_token_re) — None = EN, giữ regex cũ.
+    if token_re is None:
+        token_re = _WORD_TOKEN_RE
     tokens: list[tuple[str, float]] = []
-    for m in _WORD_TOKEN_RE.finditer(transcript_text):
+    for m in token_re.finditer(transcript_text):
         covered = [p for p in char_prob[m.start():m.end()] if p > 0]
         tokens.append((m.group(), min(covered) if covered else 0.0))
 

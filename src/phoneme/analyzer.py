@@ -20,7 +20,7 @@ from collections.abc import Callable, Collection, Mapping
 from pathlib import Path
 
 from .diagnostics import DRIFT_WINDOW_PAD_SEC, WordDiagnostic
-from .ipa import text_to_ipa_sequence_with_spans
+from .ipa.profile import LangProfile, get_profile
 from .models import PhonemeResult
 from .reliability import SkipDecision
 from .scoring import (
@@ -107,8 +107,12 @@ class HybridPhonemeAnalyzer:
         boundary_refine_enabled: bool = False,
         s_cluster_enabled: bool = False,
         collapse_gate_enabled: bool = False,
+        profile: LangProfile | None = None,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
+        # LangProfile — bộ hàm G2P/similarity theo NGÔN NGỮ ĐANG CHẤM (không phải
+        # feedback_lang). None = tiếng Anh, wrap đúng các hàm cũ (bit-for-bit).
+        self._profile = profile or get_profile("en")
         self._max_words = max_words
         self._confidence_knee = confidence_knee
         self._l1_enabled = l1_enabled
@@ -235,7 +239,7 @@ class HybridPhonemeAnalyzer:
         # Build reference phoneme sequence + word spans (để map lỗi → từ)
         if reference_text:
             reference_phonemes, reference_spans, reference_stress, reference_display_stress = (
-                text_to_ipa_sequence_with_spans(reference_text)
+                self._profile.text_to_ipa_with_spans(reference_text)
             )
         else:
             reference_phonemes, reference_spans, reference_stress = [], [], []
@@ -308,6 +312,7 @@ class HybridPhonemeAnalyzer:
                 boundary_refine_enabled=self._boundary_refine_enabled,
                 s_cluster_enabled=self._s_cluster_enabled,
                 collapse_gate_enabled=self._collapse_gate_enabled,
+                profile=self._profile,
             )
 
         logger.info(

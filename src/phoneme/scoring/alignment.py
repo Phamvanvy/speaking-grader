@@ -10,15 +10,7 @@ from collections.abc import Collection, Mapping
 from typing import Final
 
 from ..diagnostics import DRIFT_WINDOW_PAD_SEC, is_within_word_window
-from ..ipa import (
-    FUNCTION_WORDS,
-    is_nasal_coda_linking,
-    is_real_error_substitution,
-    is_vowel,
-    normalize_ipa,
-    phoneme_similarity,
-    phonemes_match,
-)
+from ..ipa.profile import LangProfile, get_profile
 from ..l1_vietnamese import PenaltyReason
 from ..models import PhonemePoint, WordSpan
 from .constants import (
@@ -60,6 +52,7 @@ _DTW_GAP_COST: Final[float] = 1.0
 def _dtw_align(
     predicted: list[str],
     reference: list[str],
+    profile: LangProfile | None = None,
 ) -> list[tuple[int, int]]:
     """Global alignment (Needleman–Wunsch) predicted → reference phoneme sequences.
 
@@ -74,6 +67,7 @@ def _dtw_align(
     """
     if not predicted or not reference:
         return []
+    profile = profile or get_profile("en")
 
     n, m = len(predicted), len(reference)
 
@@ -86,7 +80,7 @@ def _dtw_align(
     for i in range(1, n + 1):
         for j in range(1, m + 1):
             sub = cost[i - 1][j - 1] + (
-                1.0 - phoneme_similarity(predicted[i - 1], reference[j - 1])
+                1.0 - profile.phoneme_similarity(predicted[i - 1], reference[j - 1])
             )
             up = cost[i - 1][j] + _DTW_GAP_COST      # insertion (predicted i, no reference)
             left = cost[i][j - 1] + _DTW_GAP_COST    # deletion (reference j, no predicted)
@@ -150,6 +144,7 @@ def _refine_boundary_bleed(
     word_windows: Mapping[int, tuple[float, float]] | None = None,
     word_windows_locked: Collection[int] | None = None,
     pad: float = DRIFT_WINDOW_PAD_SEC,
+    profile: LangProfile | None = None,
 ) -> tuple[list[tuple[int, int]], list[dict]]:
     """Sửa mis-attribution biên từ trên DTW path (case "our eyes" 2026-07-05/08).
 
@@ -182,6 +177,7 @@ def _refine_boundary_bleed(
     """
     if not path or not spans or len(spans) < 2:
         return path, []
+    profile = profile or get_profile("en")
 
     n_ref = len(reference)
     # Trong NW path mỗi ref index xuất hiện ĐÚNG 1 lần (diagonal hoặc deletion),
@@ -199,24 +195,24 @@ def _refine_boundary_bleed(
         pred_ph = predicted[pred_idx]
         ref_ph = reference[ref_idx]
         word = ref_word[ref_idx]
-        if phonemes_match(
+        if profile.phonemes_match(
             ref_ph, pred_ph, word=word, reducible=ref_reducible[ref_idx]
         ):
             return 0.0
         if (
             accept_accent_variants
             and ref_r_droppable[ref_idx]
-            and (is_vowel(pred_ph) or normalize_ipa(pred_ph) == "w")
+            and (profile.is_vowel(pred_ph) or profile.normalize_ipa(pred_ph) == "w")
         ):
             return 0.0
         if (
             ref_is_coda[ref_idx]
-            and (word or "").lower() in FUNCTION_WORDS
-            and is_nasal_coda_linking(ref_ph, pred_ph)
-            and _links_into_vowel(reference, ref_word, ref_idx, word)
+            and (word or "").lower() in profile.function_words
+            and profile.is_nasal_coda_linking(ref_ph, pred_ph)
+            and _links_into_vowel(reference, ref_word, ref_idx, word, profile)
         ):
             return 0.0
-        return 1.0 - phoneme_similarity(pred_ph, ref_ph)
+        return 1.0 - profile.phoneme_similarity(pred_ph, ref_ph)
 
     def deletion_cost(ref_idx: int) -> float:
         _, pen, _ = _score_deletion(
@@ -226,6 +222,7 @@ def _refine_boundary_bleed(
             accept_accent_variants=accept_accent_variants,
             g2p_uncertain=ref_g2p_uncertain[ref_idx],
             r_droppable=ref_r_droppable[ref_idx],
+            profile=profile,
         )
         return pen
 
@@ -285,7 +282,7 @@ def _refine_boundary_bleed(
                     if rp == r:
                         continue
                     # Guard cứng: đích phải khớp THẬT với segment.
-                    if not phonemes_match(
+                    if not profile.phonemes_match(
                         reference[rp], predicted[p],
                         word=ref_word[rp], reducible=ref_reducible[rp],
                     ):
@@ -371,7 +368,11 @@ def _better_point(a: PhonemePoint, b: PhonemePoint) -> PhonemePoint:
 
 
 def _links_into_vowel(
-    reference: list[str], ref_word: list[str | None], ref_idx: int, word: str | None
+    reference: list[str],
+    ref_word: list[str | None],
+    ref_idx: int,
+    word: str | None,
+    profile: LangProfile,
 ) -> bool:
     """True nếu âm tại ref_idx nối sang nguyên âm ĐẦU của TỪ KẾ TIẾP (linking).
 
@@ -381,7 +382,7 @@ def _links_into_vowel(
     nxt = ref_idx + 1
     if nxt >= len(reference) or ref_word[nxt] == word:
         return False
-    return is_vowel(reference[nxt])
+    return profile.is_vowel(reference[nxt])
 
 
 # S-cluster (xem PHONEME_S_CLUSTER_SUB_CAP): /p t k/ sau /s/ đầu từ là stop KHÔNG bật
@@ -395,6 +396,7 @@ def _is_s_cluster_stop(
     ref_word: list[str | None],
     ref_is_onset: list[bool],
     ref_idx: int,
+    profile: LangProfile,
 ) -> bool:
     """True nếu reference[ref_idx] là /p t k/ đứng NGAY SAU /s/ trong onset CÙNG TỪ.
 
@@ -404,13 +406,13 @@ def _is_s_cluster_stop(
     """
     if ref_idx <= 0:
         return False
-    if normalize_ipa(reference[ref_idx]) not in _S_CLUSTER_VOICED:
+    if profile.normalize_ipa(reference[ref_idx]) not in _S_CLUSTER_VOICED:
         return False
     if not (ref_is_onset[ref_idx] and ref_is_onset[ref_idx - 1]):
         return False
     if ref_word[ref_idx] is None or ref_word[ref_idx] != ref_word[ref_idx - 1]:
         return False
-    return normalize_ipa(reference[ref_idx - 1]) == "s"
+    return profile.normalize_ipa(reference[ref_idx - 1]) == "s"
 
 
 def _align_points(
@@ -436,6 +438,7 @@ def _align_points(
     recognizer_noise_conf_vowel: float = PHONEME_RECOGNIZER_NOISE_CONF_VOWEL,
     accept_accent_variants: bool = False,
     s_cluster_enabled: bool = False,
+    profile: LangProfile | None = None,
 ) -> tuple[dict[int, tuple[PhonemePoint, float | None]], int, dict[int, float]]:
     """Một lượt qua DTW path → (point+penalty mỗi ref index, số insertion, penalty gốc/ref).
 
@@ -450,6 +453,7 @@ def _align_points(
       → TRUNG HOÀ penalty về 0 (low_confidence_neutralized). Deletion: xem _score_deletion.
     - Mỗi ref index giữ point TỐT NHẤT nếu path chạm nhiều lần (_better_point).
     """
+    profile = profile or get_profile("en")
     result: dict[int, tuple[PhonemePoint, float | None]] = {}
     raw_by_ref: dict[int, float] = {}
     insertion_count = 0
@@ -458,7 +462,7 @@ def _align_points(
     if ref_r_droppable is None:
         # Fallback cho caller cũ: chỉ coda /r/ cuối từ (hành vi trước khi mở rộng).
         ref_r_droppable = [
-            ref_is_coda[i] and normalize_ipa(reference[i]) == "r"
+            ref_is_coda[i] and profile.normalize_ipa(reference[i]) == "r"
             for i in range(len(reference))
         ]
     for pred_idx, ref_idx in path:
@@ -479,7 +483,7 @@ def _align_points(
         elif pred_idx >= 0:
             pred_ph = predicted[pred_idx]
             conf = predicted_conf[pred_idx] if pred_idx < len(predicted_conf) else 1.0
-            if phonemes_match(
+            if profile.phonemes_match(
                 ref_ph, pred_ph, word=word, reducible=ref_reducible[ref_idx]
             ):
                 point = PhonemePoint(symbol=ref_ph, status="ok", stress=stress,
@@ -488,7 +492,7 @@ def _align_points(
             elif (
                 accept_accent_variants
                 and ref_r_droppable[ref_idx]
-                and (is_vowel(pred_ph) or normalize_ipa(pred_ph) == "w")
+                and (profile.is_vowel(pred_ph) or profile.normalize_ipa(pred_ph) == "w")
             ):
                 # Accent "default": /r/ non-prevocalic (coda âm tiết — cuối từ hoặc trước
                 # phụ âm: car, mo(r)ning) của giọng non-rhotic — predicted là NGUYÊN ÂM
@@ -503,9 +507,9 @@ def _align_points(
                 penalty = 0.0
             elif (
                 ref_is_coda[ref_idx]
-                and (word or "").lower() in FUNCTION_WORDS
-                and is_nasal_coda_linking(ref_ph, pred_ph)
-                and _links_into_vowel(reference, ref_word, ref_idx, word)
+                and (word or "").lower() in profile.function_words
+                and profile.is_nasal_coda_linking(ref_ph, pred_ph)
+                and _links_into_vowel(reference, ref_word, ref_idx, word, profile)
             ):
                 # Nối âm: coda MŨI của function word ("in", "on", "an"...) nối sang nguyên
                 # âm đầu từ kế ("in order" /ɪn/+/ɔ/) hay bị wav2vec gán thành stop homorganic
@@ -519,9 +523,11 @@ def _align_points(
                 penalty = 0.0
             elif (
                 s_cluster_enabled
-                and _is_s_cluster_stop(reference, ref_word, ref_is_onset, ref_idx)
-                and normalize_ipa(pred_ph)
-                == _S_CLUSTER_VOICED[normalize_ipa(ref_ph)]
+                and _is_s_cluster_stop(
+                    reference, ref_word, ref_is_onset, ref_idx, profile
+                )
+                and profile.normalize_ipa(pred_ph)
+                == _S_CLUSTER_VOICED[profile.normalize_ipa(ref_ph)]
             ):
                 # S-cluster bậc 1: /p t k/ sau /s/ đầu từ không bật hơi — về âm học
                 # chính là voiced counterpart, recognizer gán p→b/t→d/k→ɡ là nhãn
@@ -533,12 +539,17 @@ def _align_points(
                 )
                 penalty = 0.0
             else:
-                sim = phoneme_similarity(pred_ph, ref_ph)
+                sim = profile.phoneme_similarity(pred_ph, ref_ph)
                 conf_factor = min(1.0, conf / knee) if knee > 0 else 1.0
                 base_sub = (1.0 - sim) * conf_factor
                 # Stage 2 recognizer cap: ð/h "thay" bằng nguyên âm = recognizer nuốt phụ
                 # âm rồi lệch align (không phải lỗi người đọc) → hạ về low.
-                if normalize_ipa(ref_ph) in _RECOGNIZER_DROP_CONS and is_vowel(pred_ph):
+                # Rule ĐẶC THÙ tiếng Anh (ð/h) → gate theo profile.
+                if (
+                    profile.english_rules_enabled
+                    and profile.normalize_ipa(ref_ph) in _RECOGNIZER_DROP_CONS
+                    and profile.is_vowel(pred_ph)
+                ):
                     base_sub = min(base_sub, 0.1)
                 penalty = base_sub
                 reason: str | None = None
@@ -547,10 +558,10 @@ def _align_points(
                 # âm học + recognizer không chắc → wav2vec hallucinate, KHÔNG phải lỗi
                 # người đọc. Bảo vệ near-pair (sim cao) và lỗi VN thật (_REAL_ERROR_SUBS).
                 noise_conf = (
-                    recognizer_noise_conf_vowel if is_vowel(ref_ph)
+                    recognizer_noise_conf_vowel if profile.is_vowel(ref_ph)
                     else recognizer_noise_conf
                 )
-                if conf < noise_conf and not is_real_error_substitution(
+                if conf < noise_conf and not profile.is_real_error_substitution(
                     ref_ph, pred_ph, sim_floor=recognizer_noise_sim
                 ):
                     penalty = 0.0
@@ -579,9 +590,9 @@ def _align_points(
                 if (
                     s_cluster_enabled
                     and penalty > PHONEME_S_CLUSTER_SUB_CAP
-                    and normalize_ipa(pred_ph) in _S_CLUSTER_PLOSIVES
+                    and profile.normalize_ipa(pred_ph) in _S_CLUSTER_PLOSIVES
                     and _is_s_cluster_stop(
-                        reference, ref_word, ref_is_onset, ref_idx
+                        reference, ref_word, ref_is_onset, ref_idx, profile
                     )
                 ):
                     penalty = PHONEME_S_CLUSTER_SUB_CAP
@@ -601,6 +612,7 @@ def _align_points(
                 accept_accent_variants=accept_accent_variants,
                 g2p_uncertain=ref_g2p_uncertain[ref_idx],
                 r_droppable=ref_r_droppable[ref_idx],
+                profile=profile,
             )
 
         existing = result.get(ref_idx)

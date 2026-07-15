@@ -104,6 +104,13 @@ class Config:
     # Phoneme analysis (wav2vec 2.0 backend — Phase 1, hybrid-ready for MFA Phase 2)
     phoneme_analysis_enabled: bool = False
     phoneme_wav2vec_model: str = "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
+    # Chấm nói TIẾNG HÀN (TOPIK/practice lang=ko). Default OFF — lang=ko khi flag
+    # tắt → HTTP 400. Bật qua TOEIC_LANG_KO_ENABLED sau khi bench M2 chốt model.
+    lang_ko_enabled: bool = False
+    # Acoustic model cho tiếng Hàn — mặc định dùng CHUNG xlsr-espeak (đa ngôn ngữ,
+    # emit IPA); bench M2 quyết định có đổi sang model Korean-phone riêng không.
+    # Model cache key theo model_id:device nên EN/KO coexist không tốn gì thêm.
+    phoneme_wav2vec_model_ko: str = "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
     phoneme_device: str = "cpu"
     phoneme_confidence_threshold: float = 0.1
     phoneme_min_duration_sec: float = 0.1
@@ -346,6 +353,16 @@ def load_config() -> Config:
         phoneme_wav2vec_model=(
             os.getenv(
                 "TOEIC_PHONEME_WAV2VEC_MODEL",
+                "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
+            )
+            or "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
+        ),
+        lang_ko_enabled=(
+            os.getenv("TOEIC_LANG_KO_ENABLED", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_wav2vec_model_ko=(
+            os.getenv(
+                "TOEIC_PHONEME_WAV2VEC_MODEL_KO",
                 "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
             )
             or "facebook/wav2vec2-xlsr-53-espeak-cv-ft"

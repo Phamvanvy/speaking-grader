@@ -25,7 +25,7 @@ from .phoneme.diagnostics import (
     map_reference_words_to_indices,
     subtoken_window,
 )
-from .phoneme.ipa import text_to_ipa_sequence_with_spans
+from .phoneme.ipa.profile import get_profile
 from .phoneme.models import PhonemeResult
 from .phoneme.reliability import (
     RecognizerEvidence,
@@ -34,7 +34,7 @@ from .phoneme.reliability import (
     assess_asr_confidence,
     assess_reliability,
 )
-from .rubrics.base import QuestionType
+from .rubrics.base import QuestionType, exam_language, exam_score_field
 
 logger = logging.getLogger("toeic.core")
 
@@ -90,6 +90,7 @@ def grade_response(
     question_id: str = "adhoc",
     save: bool = True,
     accent: str = "default",
+    lang: str | None = None,
 ) -> dict[str, Any]:
     """Chạy toàn bộ pipeline cho 1 audio và trả về dict kết quả (build_output).
 
@@ -109,7 +110,14 @@ def grade_response(
     - save: ghi JSON ra outputs/ (CLI cần; API có thể tắt).
     - accent: giọng tham chiếu phát âm ("default" | "gb" | "us"). CHỈ truyền xuống phoneme
       analyzer; "default" chấp nhận coda /r/ non-rhotic (Anh-Anh), không trừ điểm.
+    - lang: ngôn ngữ NÓI đang chấm ("en" | "ko"...). None = suy từ qt.exam
+      (exam_language). Quyết định ASR language + LangProfile (G2P/similarity).
+      KHÁC config.feedback_lang (ngôn ngữ lời nhận xét).
     """
+    lang = lang or exam_language(qt.exam)
+    # LangProfile: bộ hàm G2P/similarity/tokenizer theo ngôn ngữ đang chấm.
+    # get_profile raise với mã lạ — chặn sớm thay vì chấm sai câm.
+    lang_profile = get_profile(lang)
     phoneme_enabled = (
         config.phoneme_analysis_enabled
         if phoneme_analysis is None
@@ -143,11 +151,14 @@ def grade_response(
 
     # [1] ASR
     step_started = time.perf_counter()
+    # language: trước đây không truyền → asr tự default "en" (khoá ngầm tiếng Anh).
+    # Truyền tường minh theo lang — "en" cho toeic/ielts = hành vi cũ bit-for-bit.
     asr_run = asr.transcribe_with_backend(
         audio_path,
         backend=asr_backend,
         model_size=asr_model or config.whisper_model,
         device=config.whisper_device,
+        language=lang,
     )
     transcription = asr_run.transcription
     step_timings_ms["asr"] = int((time.perf_counter() - step_started) * 1000)
@@ -184,18 +195,30 @@ def grade_response(
         # hỏng cả request — nhất là khi pronunciation-only thì notice vẫn phải
         # trả về được thay vì 500.
         try:
+            # lang=ko: (a) model acoustic riêng (config, mặc định dùng chung
+            # xlsr-espeak); (b) ÉP TẮT các rule đặc thù tiếng Anh bất kể config —
+            # homograph (CMUdict), s-cluster, connected-speech elision, L1-vi
+            # (bảng lỗi người Việt nói TIẾNG ANH), coda-r accent (accent="ko"
+            # → analyzer map accept_accent_variants=False).
+            _is_ko = lang == "ko"
             phoneme_analyzer = HybridPhonemeAnalyzer(
-                wav2vec_model=config.phoneme_wav2vec_model,
+                wav2vec_model=(
+                    config.phoneme_wav2vec_model_ko
+                    if _is_ko
+                    else config.phoneme_wav2vec_model
+                ),
                 device=config.phoneme_device,
                 max_words=config.phoneme_max_words,
                 confidence_knee=config.phoneme_confidence_knee,
-                l1_enabled=config.phoneme_l1_enabled,
+                l1_enabled=config.phoneme_l1_enabled and not _is_ko,
                 l1_min_confidence=config.phoneme_l1_min_confidence,
                 low_conf_floor=config.phoneme_l1_low_conf_floor,
                 recognizer_noise_sim=config.phoneme_recognizer_noise_sim,
                 recognizer_noise_conf=config.phoneme_recognizer_noise_conf,
                 recognizer_noise_conf_vowel=config.phoneme_recognizer_noise_conf_vowel,
-                connected_speech_enabled=config.phoneme_connected_speech_enabled,
+                connected_speech_enabled=(
+                    config.phoneme_connected_speech_enabled and not _is_ko
+                ),
                 coverage_gate_enabled=config.phoneme_coverage_gate_enabled,
                 coverage_gate_cap=config.phoneme_coverage_gate_cap,
                 coverage_gate_max_len=config.phoneme_coverage_gate_max_len,
@@ -211,10 +234,13 @@ def grade_response(
                 drift_sub_cap=config.phoneme_drift_sub_cap,
                 drift_window_pad=config.phoneme_drift_window_pad,
                 deletion_evidence_enabled=config.phoneme_deletion_evidence_enabled,
-                homograph_selection_enabled=config.phoneme_homograph_multiref,
+                homograph_selection_enabled=(
+                    config.phoneme_homograph_multiref and not _is_ko
+                ),
                 boundary_refine_enabled=config.phoneme_boundary_refine_enabled,
-                s_cluster_enabled=config.phoneme_s_cluster_enabled,
+                s_cluster_enabled=config.phoneme_s_cluster_enabled and not _is_ko,
                 collapse_gate_enabled=config.phoneme_collapse_gate_enabled,
+                profile=lang_profile,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về
@@ -237,12 +263,14 @@ def grade_response(
             phoneme_reference_text = reference_script or transcription.text
             ref_spans: list = []
             if phoneme_reference_text.strip():
-                _ph, ref_spans, _st, _ds = text_to_ipa_sequence_with_spans(
+                _ph, ref_spans, _st, _ds = lang_profile.text_to_ipa_with_spans(
                     phoneme_reference_text
                 )
             reference_words = [s.word for s in ref_spans]
             if reference_script and reference_words:
-                evidence = RecognizerEvidence.from_transcript(transcription.text)
+                evidence = RecognizerEvidence.from_transcript(
+                    transcription.text, token_re=lang_profile.transcript_token_re
+                )
                 skips = dict(assess_reliability(
                     reference_words, evidence, skip_ratio=config.phoneme_skip_ratio
                 ))
@@ -257,6 +285,7 @@ def grade_response(
                     [(w.text, w.probability) for w in transcription.words],
                     min_probability=min_prob,
                     transcript_text=phoneme_reference_text,
+                    token_re=lang_profile.word_token_re,
                 ))
                 # Từ OOV (IPA từ eSpeak) — setdefault để không ghi đè lý do ASR.
                 for k, s in enumerate(ref_spans):
@@ -345,7 +374,9 @@ def grade_response(
                 word_windows=word_windows,
                 word_windows_locked=word_windows_locked,
                 word_probs=word_probs,
-                accent=accent,
+                # "ko" không phải mode accent EN nào → accept_accent_variants=False
+                # (coda-r non-rhotic là chuyện tiếng Anh).
+                accent="ko" if _is_ko else accent,
                 chunk_spans=chunk_spans,
             )
         except Exception:  # noqa: BLE001 - phoneme là phụ trợ, lỗi không fatal
@@ -424,11 +455,7 @@ def grade_response(
         step_timings_ms["scoring"] = int((time.perf_counter() - step_started) * 1000)
         scores_dict = result.model_dump(mode="json")
         scoring_status = "completed"
-        _score_field = (
-            "estimated_ielts_band"
-            if qt.exam == "ielts"
-            else "estimated_toeic_score"
-        )
+        _score_field = exam_score_field(qt.exam)
         logger.info(
             "Timing | question=%s | step=scoring | duration_ms=%d | exam=%s | score=%s",
             question_id,

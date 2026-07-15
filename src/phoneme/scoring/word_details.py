@@ -13,13 +13,7 @@ from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING
 
 from ..diagnostics import DRIFT_WINDOW_PAD_SEC, is_within_word_window
-from ..ipa import (
-    deletion_penalty,
-    deletion_severity,
-    is_vowel,
-    normalize_ipa,
-    phoneme_similarity,
-)
+from ..ipa.profile import LangProfile, get_profile
 from ..l1_vietnamese import PenaltyReason, match_l1_final_deletion
 from ..models import (
     EVIDENCE_VERSION,
@@ -83,6 +77,7 @@ def _ref_metadata(
     reference: list[str],
     spans: list[WordSpan] | None,
     stress: list[str | None] | None,
+    profile: LangProfile | None = None,
 ) -> tuple[
     list[str | None], list[bool], list[str | None], list[bool], list[bool], list[bool],
     list[bool],
@@ -110,7 +105,7 @@ def _ref_metadata(
       accent_variant khi accept_accent_variants. /r/ trước nguyên âm (red, very)
       KHÔNG droppable — nuốt là lỗi thật.
     """
-    from ..ipa import FUNCTION_WORDS
+    profile = profile or get_profile("en")
 
     n = len(reference)
     ref_word: list[str | None] = [None] * n
@@ -126,7 +121,9 @@ def _ref_metadata(
     if spans:
         for span in spans:
             lo, hi = span.start_idx, min(span.end_idx, n)
-            in_func = span.word.lower().strip(".,;:!?\"'()[]{}") in FUNCTION_WORDS
+            in_func = (
+                span.word.lower().strip(".,;:!?\"'()[]{}") in profile.function_words
+            )
             g2p_uncertain = getattr(span, "source", "cmudict") == "espeak"
             for i in range(lo, hi):
                 ref_word[i] = span.word
@@ -134,22 +131,22 @@ def _ref_metadata(
                     ref_g2p_uncertain[i] = True
                 # /r/ không đứng trước nguyên âm TRONG CÙNG TỪ (cuối từ / trước phụ
                 # âm) = coda âm tiết → non-rhotic được nuốt (xem docstring).
-                if normalize_ipa(reference[i]) == "r" and (
-                    i == hi - 1 or not is_vowel(reference[i + 1])
+                if profile.normalize_ipa(reference[i]) == "r" and (
+                    i == hi - 1 or not profile.is_vowel(reference[i + 1])
                 ):
                     ref_r_droppable[i] = True
             # Onset = các phụ âm liên tiếp từ đầu từ cho tới nguyên âm đầu tiên.
             for i in range(lo, hi):
-                if is_vowel(reference[i]):
+                if profile.is_vowel(reference[i]):
                     break
                 ref_is_onset[i] = True
             # Nhân chính của từ: nguyên âm có nhấn primary, nếu không có thì nguyên
             # âm đầu tiên. Các nguyên âm còn lại (+ mọi âm trong function word) reducible.
-            vowels = [i for i in range(lo, hi) if is_vowel(reference[i])]
+            vowels = [i for i in range(lo, hi) if profile.is_vowel(reference[i])]
             primary = next((i for i in vowels if ref_stress[i] == "primary"), None)
             main = primary if primary is not None else (vowels[0] if vowels else None)
             for i in range(lo, hi):
-                if in_func or (is_vowel(reference[i]) and i != main):
+                if in_func or (profile.is_vowel(reference[i]) and i != main):
                     ref_reducible[i] = True
             # Coda = phụ âm sau nguyên âm CUỐI CÙNG của từ tới hết từ (bổ sung onset).
             if vowels:
@@ -354,7 +351,9 @@ _REANCHOR_MAX_AVG_COST: float = 0.6
 
 
 def _fit_word_segments(
-    predicted: list[str], reference: list[str]
+    predicted: list[str],
+    reference: list[str],
+    profile: LangProfile | None = None,
 ) -> tuple[int, int, float] | None:
     """FITTING alignment (reference khớp TRỌN VẸN vào 1 đoạn predicted) + traceback.
 
@@ -367,13 +366,14 @@ def _fit_word_segments(
     n, m = len(predicted), len(reference)
     if not n or not m:
         return None
+    profile = profile or get_profile("en")
     dp = [[0.0] * (m + 1) for _ in range(n + 1)]
     dp[0] = [j * _REANCHOR_GAP_COST for j in range(m + 1)]
     for i in range(1, n + 1):
         # dp[i][0] = 0: bỏ predicted prefix miễn phí (fitting)
         for j in range(1, m + 1):
             sub = dp[i - 1][j - 1] + (
-                1.0 - phoneme_similarity(predicted[i - 1], reference[j - 1])
+                1.0 - profile.phoneme_similarity(predicted[i - 1], reference[j - 1])
             )
             dp[i][j] = min(sub, dp[i - 1][j] + _REANCHOR_GAP_COST,
                            dp[i][j - 1] + _REANCHOR_GAP_COST)
@@ -387,7 +387,7 @@ def _fit_word_segments(
     i, j = best_i, m
     while j > 0:
         if i > 0 and dp[i][j] == dp[i - 1][j - 1] + (
-            1.0 - phoneme_similarity(predicted[i - 1], reference[j - 1])
+            1.0 - profile.phoneme_similarity(predicted[i - 1], reference[j - 1])
         ):
             matched.append(i - 1)
             i, j = i - 1, j - 1
@@ -407,6 +407,7 @@ def _reanchor_locked_windows(
     reference_phonemes: list[str],
     reference_spans: list[WordSpan],
     pad: float = DRIFT_WINDOW_PAD_SEC,
+    profile: LangProfile | None = None,
 ) -> None:
     """Neo lại cửa sổ phát lại của từ LOCKED theo acoustic (sửa `times` in-place).
 
@@ -431,7 +432,7 @@ def _reanchor_locked_windows(
         ]
         if not ref or not cands:
             continue
-        fit = _fit_word_segments([s.phoneme for s in cands], ref)
+        fit = _fit_word_segments([s.phoneme for s in cands], ref, profile=profile)
         if fit is None:
             continue
         i0, i1, cost = fit
@@ -556,6 +557,7 @@ def _score_deletion(
     accept_accent_variants: bool = False,
     g2p_uncertain: bool = False,
     r_droppable: bool = False,
+    profile: LangProfile | None = None,
 ) -> tuple[PhonemePoint, float, float]:
     """1 âm reference bị THIẾU → (PhonemePoint, penalty đã điều chỉnh, penalty gốc).
 
@@ -576,19 +578,20 @@ def _score_deletion(
     `g2p_uncertain`: IPA của từ lấy từ eSpeak (OOV/tên riêng) → reference tự nó là đoán →
     cap penalty về PHONEME_G2P_UNCERTAIN_CAP (severity "low", vào nhóm hidden-noise).
     """
+    profile = profile or get_profile("en")
     if accept_accent_variants and (
-        r_droppable or (is_coda and normalize_ipa(ref_ph) == "r")
+        r_droppable or (is_coda and profile.normalize_ipa(ref_ph) == "r")
     ):
         point = PhonemePoint(
             symbol=ref_ph, status="ok", stress=stress, display_stress=display_stress,
             penalty_reason=PenaltyReason.ACCENT_VARIANT.value, penalty_adjustment=0.0,
         )
         return point, 0.0, 0.0
-    raw = deletion_penalty(ref_ph, is_onset=is_onset, stress=stress)
+    raw = profile.deletion_penalty(ref_ph, is_onset=is_onset, stress=stress)
     penalty = raw
     reason: str | None = None
     adjustment = 1.0
-    severity = deletion_severity(ref_ph, is_onset=is_onset, stress=stress)
+    severity = profile.deletion_severity(ref_ph, is_onset=is_onset, stress=stress)
     if l1_enabled:
         reason = PenaltyReason.HARD_ERROR.value
         match = match_l1_final_deletion(ref_ph) if is_coda else None

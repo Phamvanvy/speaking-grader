@@ -121,6 +121,11 @@ def score(
             if qt.exam == Exam.IELTS.value:
                 result.estimated_ielts_band = _compute_ielts_band(result)
                 result.estimated_toeic_score = None
+            elif qt.exam == Exam.TOPIK.value:
+                # TOPIK (M1): công thức estimated_topik_score đến ở M3 — trong
+                # lúc đó KHÔNG được nhận nhầm điểm TOEIC (criterion scores vẫn có).
+                result.estimated_toeic_score = None
+                result.estimated_ielts_band = None
             else:
                 result.estimated_toeic_score = _compute_toeic_score(result)
                 result.estimated_ielts_band = None

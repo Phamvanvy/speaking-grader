@@ -19,6 +19,43 @@ class Exam(str, Enum):
 
     TOEIC = "toeic"
     IELTS = "ielts"
+    TOPIK = "topik"
+
+
+# Ngôn ngữ NÓI của kỳ thi — quyết định ASR language + G2P + bộ rule phát âm.
+# Khác với feedback_lang (ngôn ngữ NHẬN XÉT, config.py): một bài TOPIK có thể
+# nói tiếng Hàn nhưng nhận xét bằng tiếng Việt.
+EXAM_LANGUAGE: dict[str, str] = {
+    Exam.TOEIC.value: "en",
+    Exam.IELTS.value: "en",
+    Exam.TOPIK.value: "ko",
+}
+
+
+def exam_language(exam: str) -> str:
+    """Ngôn ngữ nói của kỳ thi; exam lạ → "en" (an toàn, khớp hành vi cũ)."""
+    return EXAM_LANGUAGE.get(exam, "en")
+
+
+# (field điểm tổng trong scores dict, max điểm tổng) theo kỳ thi — nguồn duy nhất,
+# thay cho các hardcode `9 if exam == "ielts" else 200` rải ở api/core/scoring.
+EXAM_SCORE: dict[str, tuple[str, int]] = {
+    Exam.TOEIC.value: ("estimated_toeic_score", 200),
+    Exam.IELTS.value: ("estimated_ielts_band", 9),
+    # TOPIK 말하기: 0-200, level 1-6. Field vào schema + compute ở M3; trước đó
+    # scores.get(field) trả None → overall None (an toàn, không nhận nhầm điểm TOEIC).
+    Exam.TOPIK.value: ("estimated_topik_score", 200),
+}
+
+
+def exam_score_field(exam: str) -> str:
+    """Field điểm tổng của kỳ thi; exam lạ → field TOEIC (khớp hành vi cũ)."""
+    return EXAM_SCORE.get(exam, EXAM_SCORE[Exam.TOEIC.value])[0]
+
+
+def exam_score_max(exam: str) -> int:
+    """Max điểm tổng của kỳ thi; exam lạ → max TOEIC (khớp hành vi cũ)."""
+    return EXAM_SCORE.get(exam, EXAM_SCORE[Exam.TOEIC.value])[1]
 
 
 @dataclass(frozen=True)

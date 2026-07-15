@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from .rubrics import EXAM_REGISTRIES, resolve_question_type
-from .rubrics.base import QuestionType
+from .rubrics.base import QuestionType, exam_score_field
 from .tts import MAX_TEXT_LEN as _TTS_MAX_TEXT
 
 logger = logging.getLogger("toeic.api")
@@ -63,6 +63,24 @@ def _validate_exam(exam: str) -> str:
             detail=f"Kỳ thi không hợp lệ: '{exam}'. Hợp lệ: {sorted(EXAM_REGISTRIES)}",
         )
     return value
+
+
+def _ensure_exam_lang_enabled(exam: str, config) -> None:
+    """Chặn kỳ thi nói tiếng Hàn khi flag TOEIC_LANG_KO_ENABLED tắt (→ 400).
+
+    Gate Ở ĐÂY (request level) chứ không trong core: pipeline lang=ko chưa qua
+    bench M2 thì không nhận request — default OFF theo văn hoá flag của repo.
+    """
+    from .rubrics.base import exam_language
+
+    if exam_language(exam) == "ko" and not getattr(config, "lang_ko_enabled", False):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Kỳ thi '{exam}' (tiếng Hàn) chưa được bật trên server này. "
+                "Bật TOEIC_LANG_KO_ENABLED=1 để dùng."
+            ),
+        )
 
 
 def _validate_accent(accent: str) -> str:
@@ -172,8 +190,7 @@ def _overall_score(scores: dict | None, exam: str) -> float | None:
     """
     if not scores:
         return None
-    field = "estimated_ielts_band" if exam == "ielts" else "estimated_toeic_score"
-    value = scores.get(field)
+    value = scores.get(exam_score_field(exam))
     return float(value) if value is not None else None
 
 

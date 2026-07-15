@@ -7,14 +7,25 @@ truy vấn cross-exam (vd hỏi 'read_aloud' với exam='ielts' sẽ báo lỗi)
 
 from __future__ import annotations
 
-from .base import Criterion, Exam, QuestionType
+from .base import (
+    Criterion,
+    Exam,
+    EXAM_LANGUAGE,
+    EXAM_SCORE,
+    QuestionType,
+    exam_language,
+    exam_score_field,
+    exam_score_max,
+)
 from .ielts import IELTS_QUESTION_TYPES
 from .toeic import TOEIC_QUESTION_TYPES
+from .topik import TOPIK_QUESTION_TYPES
 
 # Keyed bằng giá trị enum (không hardcode chuỗi) để Exam là nguồn hằng duy nhất.
 EXAM_REGISTRIES: dict[str, dict[str, QuestionType]] = {
     Exam.TOEIC.value: TOEIC_QUESTION_TYPES,
     Exam.IELTS.value: IELTS_QUESTION_TYPES,
+    Exam.TOPIK.value: TOPIK_QUESTION_TYPES,
 }
 
 
@@ -49,8 +60,13 @@ def list_question_types(exam: str = Exam.TOEIC.value) -> list[str]:
 __all__ = [
     "Criterion",
     "Exam",
+    "EXAM_LANGUAGE",
+    "EXAM_SCORE",
     "QuestionType",
     "EXAM_REGISTRIES",
+    "exam_language",
+    "exam_score_field",
+    "exam_score_max",
     "resolve_question_type",
     "list_question_types",
 ]

@@ -21,7 +21,7 @@ from ..diagnostics import (
     WordDiagnostic,
     build_word_diagnostics,
 )
-from ..ipa import is_elidable_stop, is_vowel, normalize_ipa
+from ..ipa.profile import LangProfile, get_profile
 from ..l1_vietnamese import PenaltyReason
 from ..models import (
     PhonemeError,
@@ -95,6 +95,7 @@ def _apply_connected_speech(
     reference: list[str],
     spans: list[WordSpan],
     ref_skipped: list[bool],
+    profile: LangProfile | None = None,
 ) -> None:
     """Chấp nhận nuốt STOP cuối từ khi nối từ (connected speech) — sửa `result` in-place.
 
@@ -113,6 +114,7 @@ def _apply_connected_speech(
     (/s z l n/... cuối — lỗi L1 VN kinh điển — vẫn bắt); CHỈ khi từ kế mở đầu bằng
     phụ âm (trước nguyên âm phải nối âm, nuốt là lỗi → vẫn bắt).
     """
+    profile = profile or get_profile("en")
     n = len(reference)
     for a, b in zip(spans, spans[1:]):
         i = a.end_idx - 1
@@ -121,7 +123,9 @@ def _apply_connected_speech(
             continue
         if ref_skipped[i] or i not in result or j not in result:
             continue
-        if is_vowel(reference[j]) or not is_elidable_stop(reference[i]):
+        if profile.is_vowel(reference[j]) or not profile.is_elidable_stop(
+            reference[i]
+        ):
             continue
         point, _pen = result[i]
         if point.status == "del":
@@ -130,7 +134,8 @@ def _apply_connected_speech(
         elif (
             point.status == "sub"
             and point.heard is not None
-            and normalize_ipa(point.heard) == normalize_ipa(reference[j])
+            and profile.normalize_ipa(point.heard)
+            == profile.normalize_ipa(reference[j])
         ):
             result[i] = (_connected_ok(point), 0.0)
             raw_by_ref.pop(i, None)
@@ -174,6 +179,7 @@ def compute_phoneme_score(
     s_cluster_enabled: bool = False,
     collapse_gate_enabled: bool = False,
     collapse_gate_mass_floor: float = PHONEME_COLLAPSE_GATE_MASS_FLOOR,
+    profile: LangProfile | None = None,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -273,10 +279,14 @@ def compute_phoneme_score(
     = gate cuối cùng THỰC SỰ thay đổi penalty (point đã 0 hoặc đã cap ≤ mức mới giữ
     nguyên reason cũ).
 
+        profile: LangProfile — bộ hàm similarity/normalize/tokenizer theo NGÔN NGỮ
+            ĐANG CHẤM. None = tiếng Anh (EN profile wrap đúng các hàm cũ — bit-for-bit).
+
     Returns None nếu reference_phonemes rỗng.
     """
     if not reference_phonemes:
         return None
+    profile = profile or get_profile("en")
 
     # Multi-reference homograph (flag OFF = no-op): đổi lát reference của từ
     # đa-entry sang entry khớp acoustic nhất TRƯỚC DTW. Số span/chỉ số span không
@@ -298,7 +308,9 @@ def compute_phoneme_score(
     (
         ref_word, ref_is_onset, ref_stress, ref_reducible, ref_is_coda,
         ref_g2p_uncertain, ref_r_droppable,
-    ) = _ref_metadata(reference_phonemes, reference_spans, reference_stress)
+    ) = _ref_metadata(
+        reference_phonemes, reference_spans, reference_stress, profile=profile
+    )
     # Nhấn-hiển-thị (dời về onset) song song reference — CHỈ để gắn PhonemePoint.display_stress.
     # Pad/cắt về đúng len(reference) như ref_stress; không tham gia bất kỳ tính toán điểm nào.
     n_ref = len(reference_phonemes)
@@ -321,7 +333,7 @@ def compute_phoneme_score(
         raw_by_ref: dict[int, float] = {}
         empty_prediction = True
     else:
-        path = _dtw_align(predicted_phonemes, reference_phonemes)
+        path = _dtw_align(predicted_phonemes, reference_phonemes, profile=profile)
         # Boundary refinement (flag OFF = no-op): sửa segment bị DTW gán nhầm
         # sang từ kề TRƯỚC khi chấm — statuses/penalty do _align_points tính lại
         # trên path đã sửa, slot bị bỏ trống rơi vào vòng bổ sung deletion dưới.
@@ -336,6 +348,7 @@ def compute_phoneme_score(
                 word_windows=word_windows,
                 word_windows_locked=word_windows_locked,
                 pad=drift_window_pad,
+                profile=profile,
             )
             for mv in boundary_moves:
                 logger.info(
@@ -361,6 +374,7 @@ def compute_phoneme_score(
             recognizer_noise_conf_vowel=recognizer_noise_conf_vowel,
             accept_accent_variants=accept_accent_variants,
             s_cluster_enabled=s_cluster_enabled,
+            profile=profile,
         )
         empty_prediction = False
 
@@ -381,6 +395,7 @@ def compute_phoneme_score(
                 accept_accent_variants=accept_accent_variants,
                 g2p_uncertain=ref_g2p_uncertain[i],
                 r_droppable=ref_r_droppable[i],
+                profile=profile,
             )
             result[i] = (point, pen)
             raw_by_ref[i] = raw
@@ -389,7 +404,8 @@ def compute_phoneme_score(
     # của âm lân cận nên không làm được trong _align_points).
     if connected_speech_enabled and reference_spans and not empty_prediction:
         _apply_connected_speech(
-            result, raw_by_ref, reference_phonemes, reference_spans, ref_skipped
+            result, raw_by_ref, reference_phonemes, reference_spans, ref_skipped,
+            profile,
         )
 
     # Post-pass coverage gate (Track A, chỉ del) rồi drift cap (Track B, chỉ sub) —
@@ -514,6 +530,7 @@ def compute_phoneme_score(
         _reanchor_locked_windows(
             playback_times, word_windows_locked, segments,
             reference_phonemes, reference_spans,
+            profile=profile,
         )
     # Đệm + clamp theo từ liền kề → cửa sổ phát lại không lẹm sang từ khác (frontend phát
     # verbatim). Backend là nơi DUY NHẤT biết ranh giới từ kề nên đệm phải nằm ở đây.

@@ -76,7 +76,9 @@ def test_resolver_rejects_unknown_exam():
 
 
 def test_exam_registries_keyed_by_enum_values():
-    assert set(EXAM_REGISTRIES) == {Exam.TOEIC.value, Exam.IELTS.value}
+    # Registry key = ĐÚNG tập giá trị Exam enum (nguồn hằng duy nhất) — derive
+    # từ enum thay vì pin cứng danh sách để thêm kỳ thi không phải sửa test này.
+    assert set(EXAM_REGISTRIES) == {e.value for e in Exam}
     assert set(list_question_types("ielts")) == set(IELTS_QUESTION_TYPES)
 
 
