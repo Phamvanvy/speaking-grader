@@ -993,6 +993,10 @@ class _ClaimBody(BaseModel):
     anon_user_id: str
 
 
+class _GoogleBody(BaseModel):
+    credential: str  # id_token JWT từ Google Identity Services
+
+
 @app.post("/auth/register")
 def auth_register(body: _RegisterBody) -> dict:
     """Tạo tài khoản mới → trả {token, user_id, username} (đăng nhập luôn)."""
@@ -1013,6 +1017,31 @@ def auth_login(body: _LoginBody) -> dict:
         raise HTTPException(status_code=401, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/auth/config")
+def auth_config() -> dict:
+    """Cấu hình auth công khai cho frontend: client_id Google (rỗng = ẩn nút).
+    CLIENT_ID không phải secret — an toàn để lộ."""
+    return {"google_client_id": _BASE_CONFIG.google_client_id}
+
+
+@app.post("/auth/google")
+async def auth_google(body: _GoogleBody) -> dict:
+    """Đăng nhập bằng Google: nhận id_token (credential) từ GIS, verify qua
+    tokeninfo rồi tìm-hoặc-tạo tài khoản theo google_sub/email → {token, user_id,
+    username}. Xem auth.google_login cho luật liên kết tài khoản."""
+    if not _BASE_CONFIG.google_client_id:
+        raise HTTPException(status_code=503, detail="Đăng nhập Google chưa được cấu hình.")
+    try:
+        # verify gọi HTTPS ra Google → threadpool để không chặn event loop.
+        info = await run_in_threadpool(
+            auth.verify_google_credential,
+            _BASE_CONFIG.google_client_id, body.credential,
+        )
+        return auth.google_login(_BASE_CONFIG, sub=info["sub"], email=info["email"])
+    except auth.AuthError as e:
+        raise HTTPException(status_code=401, detail=str(e)) from e
 
 
 @app.post("/auth/logout")

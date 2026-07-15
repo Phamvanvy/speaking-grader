@@ -42,6 +42,7 @@ function openAuthModal(tab) {
     setAuthTab(tab || 'login');
     setAuthError('');
     modal.classList.remove('hidden');
+    initGoogleButton();   // async, tự ẩn nếu server không cấu hình Google
     const first = modal.querySelector('input');
     if (first) first.focus();
 }
@@ -83,9 +84,9 @@ function buildAuthModal() {
            Không đăng nhập vẫn dùng được (lưu theo trình duyệt).</p>
         <form id="auth-form" autocomplete="on">
           <div class="form-group">
-            <label for="auth-username">Tên đăng nhập</label>
+            <label for="auth-username">Tên đăng nhập hoặc email</label>
             <input type="text" id="auth-username" name="username" autocomplete="username"
-                   placeholder="3–32 ký tự: chữ, số, . _ -">
+                   placeholder="Nhập tên đăng nhập hoặc email">
           </div>
           <div class="form-group">
             <label for="auth-password">Mật khẩu</label>
@@ -100,6 +101,10 @@ function buildAuthModal() {
           <div class="auth-error" id="auth-error" style="display:none"></div>
           <button type="submit" class="btn btn-primary" id="auth-submit">Đăng nhập</button>
         </form>
+        <div id="auth-google-wrap">
+          <div class="auth-divider"><span>hoặc</span></div>
+          <div id="auth-google-slot" class="auth-google-slot"></div>
+        </div>
       </div>`;
     modal.querySelector('#auth-close').onclick = closeAuthModal;
     modal.querySelector('#auth-tab-login').onclick = () => setAuthTab('login');
@@ -118,7 +123,7 @@ async function onAuthSubmit(e) {
     const submitBtn = modal.querySelector('#auth-submit');
     setAuthError('');
 
-    if (!username || !password) { setAuthError('Nhập đủ tên đăng nhập và mật khẩu.'); return; }
+    if (!username || !password) { setAuthError('Nhập đủ tên đăng nhập (hoặc email) và mật khẩu.'); return; }
     if (tab === 'register') {
         const confirm = modal.querySelector('#auth-confirm').value;
         if (password.length < 8) { setAuthError('Mật khẩu phải ít nhất 8 ký tự.'); return; }
@@ -137,19 +142,92 @@ async function onAuthSubmit(e) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) { setAuthError(data.detail || 'Có lỗi xảy ra. Thử lại.'); return; }
-
-        // Ghi nhớ UUID ẩn danh TRƯỚC khi lưu auth (getUserId sẽ đổi sang tài khoản).
-        const anonId = getAnonUserId();
-        setAuth({ token: data.token, user_id: data.user_id, username: data.username });
-        closeAuthModal();
-        renderAuthWidget();
-        await maybeClaimHistory(anonId);
-        refreshAfterAuthChange();
+        await completeLogin(data);
     } catch (err) {
         setAuthError('Không kết nối được máy chủ.');
     } finally {
         submitBtn.disabled = false;
         submitBtn.textContent = prevText;
+    }
+}
+
+// Hoàn tất đăng nhập (dùng chung cho password + Google): lưu auth, đóng modal,
+// hỏi gộp lịch sử ẩn danh, nạp lại tab đang mở.
+async function completeLogin(data) {
+    // Ghi nhớ UUID ẩn danh TRƯỚC khi lưu auth (getUserId sẽ đổi sang tài khoản).
+    const anonId = getAnonUserId();
+    setAuth({ token: data.token, user_id: data.user_id, username: data.username });
+    closeAuthModal();
+    renderAuthWidget();
+    await maybeClaimHistory(anonId);
+    refreshAfterAuthChange();
+}
+
+// ── Đăng nhập với Google (Google Identity Services) ──────────────────
+// Bật khi server có GOOGLE_CLIENT_ID (/auth/config). Dùng CHUNG Client ID với
+// app khác cùng project GCP → cùng tài khoản Google = cùng người ở cả 2 app.
+// GIS bắt buộc nạp từ CDN Google (không self-host được) — nạp lười khi mở modal.
+let _googleClientId = null;   // null = chưa hỏi server; '' = server tắt
+let _gisScriptPromise = null;
+
+async function fetchGoogleClientId() {
+    if (_googleClientId !== null) return _googleClientId;
+    try {
+        const res = await fetch(authApi('/auth/config'));
+        _googleClientId = res.ok ? ((await res.json()).google_client_id || '') : '';
+    } catch (e) { _googleClientId = ''; }
+    return _googleClientId;
+}
+
+function loadGisScript() {
+    if (_gisScriptPromise) return _gisScriptPromise;
+    _gisScriptPromise = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://accounts.google.com/gsi/client';
+        s.async = true; s.defer = true;
+        s.onload = resolve;
+        s.onerror = () => { _gisScriptPromise = null; reject(new Error('GIS load failed')); };
+        document.head.appendChild(s);
+    });
+    return _gisScriptPromise;
+}
+
+async function initGoogleButton() {
+    const slot = document.getElementById('auth-google-slot');
+    if (!slot) return;
+    const clientId = await fetchGoogleClientId();
+    const wrap = document.getElementById('auth-google-wrap');
+    if (!clientId) { if (wrap) wrap.style.display = 'none'; return; }
+    if (slot.dataset.ready) return;   // đã render rồi (mở modal lần 2)
+    try {
+        await loadGisScript();
+        google.accounts.id.initialize({
+            client_id: clientId,
+            callback: onGoogleCredential,
+        });
+        google.accounts.id.renderButton(slot, {
+            theme: document.body.classList.contains('dark') ? 'filled_black' : 'outline',
+            size: 'large', width: 320, text: 'signin_with', locale: 'vi',
+        });
+        slot.dataset.ready = '1';
+    } catch (e) {
+        if (wrap) wrap.style.display = 'none';   // chặn mạng/CDN lỗi → ẩn, còn form thường
+    }
+}
+
+async function onGoogleCredential(response) {
+    setAuthError('');
+    try {
+        const res = await fetch(authApi('/auth/google'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credential: response.credential }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { setAuthError(data.detail || 'Đăng nhập Google thất bại.'); return; }
+        await completeLogin(data);
+    } catch (e) {
+        setAuthError('Không kết nối được máy chủ.');
     }
 }
 

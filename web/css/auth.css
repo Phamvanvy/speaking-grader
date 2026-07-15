@@ -139,6 +139,31 @@ body.dark .auth-modal input {
 
 .auth-modal .btn { width: 100%; margin-top: 0.3rem; }
 
+/* ── Google Sign-In ────────────────────────────────────────────────────── */
+.auth-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin: 1rem 0 0.8rem;
+    color: #94a3b8;
+    font-size: 0.8rem;
+}
+.auth-divider::before,
+.auth-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: #e2e8f0;
+}
+body.dark .auth-divider::before,
+body.dark .auth-divider::after { background: #334155; }
+
+.auth-google-slot {
+    display: flex;
+    justify-content: center;
+    min-height: 44px;
+}
+
 .auth-error {
     background: #fef2f2;
     color: #b91c1c;

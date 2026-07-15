@@ -256,6 +256,11 @@ class Config:
     # Docker phải trỏ vào subtree đã mount (data/history/) để tài khoản sống qua
     # rebuild; xem docker-compose.yml (TOEIC_AUTH_DB_PATH). Xem src/auth.py.
     auth_db_path: str = "data/auth.db"
+    # OAuth Client ID cho "Đăng nhập với Google" (dùng chung với app khác cùng
+    # project GCP → cùng tài khoản Google = cùng người ở các app). Rỗng = tắt nút
+    # Google trên UI. CLIENT_ID là thông tin CÔNG KHAI (không phải secret); flow
+    # id_token phía web KHÔNG cần client secret. Xem /auth/google trong api.py.
+    google_client_id: str = ""
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -480,4 +485,5 @@ def load_config() -> Config:
         auth_db_path=(
             os.getenv("TOEIC_AUTH_DB_PATH", "data/auth.db") or "data/auth.db"
         ),
+        google_client_id=(os.getenv("GOOGLE_CLIENT_ID", "") or "").strip(),
     )

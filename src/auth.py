@@ -36,11 +36,13 @@ import time
 import uuid
 from pathlib import Path
 
+import requests
+
 from .config import Config
 
 logger = logging.getLogger("toeic.auth")
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 # Thời hạn session (giây). 30 ngày — cân bằng tiện lợi & rủi ro token bị lộ.
 SESSION_TTL_SEC = 30 * 24 * 3600
@@ -54,6 +56,11 @@ _SCRYPT_DKLEN = 32
 _SCRYPT_MAXMEM = 64 * 1024 * 1024
 
 _USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,32}$")
+# Email "đủ tốt" cho định danh đăng nhập (không cố cover full RFC 5322): có đúng
+# 1 @, domain có dấu chấm, không khoảng trắng. KHÔNG gửi mail xác thực (app
+# self-hosted, không có SMTP) — email ở đây chỉ là username dễ nhớ.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_MAX_EMAIL_LEN = 254
 _MIN_PASSWORD_LEN = 8
 
 _DDL = """
@@ -61,9 +68,12 @@ CREATE TABLE IF NOT EXISTS users (
   username      TEXT PRIMARY KEY,
   user_id       TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  google_sub    TEXT,
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   updated_at    TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub
+  ON users(google_sub) WHERE google_sub IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS sessions (
   token        TEXT PRIMARY KEY,
@@ -90,6 +100,11 @@ def _connect(cfg: Config) -> sqlite3.Connection:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version < _SCHEMA_VERSION:
         with conn:
+            # v1 → v2: thêm cột google_sub TRƯỚC executescript (index trong _DDL
+            # tham chiếu cột này — chạy sau ALTER mới hợp lệ). DB mới (v0) đã có
+            # cột trong CREATE TABLE nên bỏ qua ALTER.
+            if version == 1:
+                conn.execute("ALTER TABLE users ADD COLUMN google_sub TEXT")
             conn.executescript(_DDL)
             conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     return conn
@@ -150,10 +165,20 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def validate_username(username: str) -> str:
+    """Định danh đăng nhập: username HOẶC email (cùng 1 cột `username`).
+
+    Email được lowercase (case-insensitive theo quy ước) để "Vy@X.com" và
+    "vy@x.com" không thành 2 tài khoản; username giữ nguyên hoa/thường.
+    """
     u = (username or "").strip()
+    if "@" in u:
+        u = u.lower()
+        if len(u) > _MAX_EMAIL_LEN or not _EMAIL_RE.match(u):
+            raise ValueError("Email không hợp lệ.")
+        return u
     if not _USERNAME_RE.match(u):
         raise ValueError(
-            "Tên đăng nhập không hợp lệ (3–32 ký tự, chỉ chữ/số/._-)."
+            "Tên đăng nhập không hợp lệ (3–32 ký tự, chỉ chữ/số/._-) — hoặc dùng email."
         )
     return u
 
@@ -237,6 +262,103 @@ def change_password(
             )
     finally:
         conn.close()
+
+
+# ── Đăng nhập với Google (id_token từ Google Identity Services) ──────────
+# "Sync user" với app khác cùng project GCP: dùng CHUNG OAuth Client ID → cùng
+# tài khoản Google = cùng người, danh tính khớp theo email. KHÔNG cần client
+# secret (flow id_token phía web) và KHÔNG đọc Firestore của app kia.
+
+
+_GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+_GOOGLE_ISSUERS = {"https://accounts.google.com", "accounts.google.com"}
+
+
+def verify_google_credential(client_id: str, credential: str) -> dict:
+    """Xác thực id_token (JWT `credential` từ GIS) qua endpoint tokeninfo của
+    Google — Google tự kiểm chữ ký + hạn; mình kiểm aud/iss/email_verified.
+
+    Chọn tokeninfo thay vì verify chữ ký cục bộ để KHÔNG thêm dependency
+    (google-auth/PyJWT); đổi lấy 1 call HTTPS mỗi lần đăng nhập — chấp nhận được
+    với app self-hosted. Trả {sub, email}. Raise AuthError nếu token không hợp lệ.
+    """
+    try:
+        resp = requests.get(
+            _GOOGLE_TOKENINFO_URL, params={"id_token": credential}, timeout=10
+        )
+    except requests.RequestException as e:
+        raise AuthError("Không kết nối được Google để xác thực token.") from e
+    if resp.status_code != 200:
+        raise AuthError("Token Google không hợp lệ hoặc đã hết hạn.")
+    data = resp.json()
+    if data.get("aud") != client_id:
+        raise AuthError("Token không phát hành cho app này (sai client_id).")
+    if data.get("iss") not in _GOOGLE_ISSUERS:
+        raise AuthError("Token không do Google phát hành.")
+    # tokeninfo trả chuỗi "true"/"false" (JSON string, không phải bool).
+    if str(data.get("email_verified")).lower() != "true":
+        raise AuthError("Email của tài khoản Google chưa được xác minh.")
+    sub = data.get("sub")
+    email = (data.get("email") or "").strip().lower()
+    if not sub or not email:
+        raise AuthError("Token Google thiếu thông tin định danh.")
+    return {"sub": sub, "email": email}
+
+
+def google_login(cfg: Config, *, sub: str, email: str) -> dict:
+    """Đăng nhập/đăng ký bằng danh tính Google ĐÃ verify (sub + email).
+
+    Thứ tự khớp:
+    1. google_sub đã liên kết → đăng nhập (email đổi bên Google không ảnh hưởng).
+    2. username == email (tài khoản email+mật khẩu tạo trước đó) → LIÊN KẾT
+       google_sub vào tài khoản đó rồi đăng nhập — Google đã xác minh người này
+       sở hữu email, nên họ là chủ hợp lệ; đường mật khẩu cũ vẫn dùng được.
+    3. Chưa có → tạo tài khoản mới: username = email, password_hash = ''
+       (chuỗi rỗng KHÔNG verify được với bất kỳ mật khẩu nào → tài khoản
+       Google-only, không có đường đăng nhập mật khẩu).
+    """
+    conn = _connect(cfg)
+    try:
+        row = conn.execute(
+            "SELECT user_id, username FROM users WHERE google_sub = ?", (sub,)
+        ).fetchone()
+        if row is None:
+            linked = conn.execute(
+                "SELECT user_id, username FROM users WHERE username = ?", (email,)
+            ).fetchone()
+            if linked is not None:
+                with conn:
+                    conn.execute(
+                        "UPDATE users SET google_sub = ?,"
+                        " updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+                        " WHERE user_id = ?",
+                        (sub, linked["user_id"]),
+                    )
+                row = linked
+            else:
+                user_id = str(uuid.uuid4())
+                try:
+                    with conn:
+                        conn.execute(
+                            "INSERT INTO users (username, user_id, password_hash,"
+                            " google_sub) VALUES (?, ?, '', ?)",
+                            (email, user_id, sub),
+                        )
+                except sqlite3.IntegrityError:
+                    # Race 2 worker cùng tạo — đọc lại bản thắng cuộc.
+                    row = conn.execute(
+                        "SELECT user_id, username FROM users"
+                        " WHERE google_sub = ? OR username = ?",
+                        (sub, email),
+                    ).fetchone()
+                    if row is None:
+                        raise AuthError("Không tạo được tài khoản Google.") from None
+                else:
+                    row = {"user_id": user_id, "username": email}
+        token = _new_session(conn, row["user_id"])
+    finally:
+        conn.close()
+    return {"token": token, "user_id": row["user_id"], "username": row["username"]}
 
 
 # ── Session ──────────────────────────────────────────────────────────────
