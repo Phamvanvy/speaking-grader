@@ -139,6 +139,11 @@ class Config:
     phoneme_l1_language: str = "vi"
     phoneme_l1_min_confidence: float = 0.70
     phoneme_l1_low_conf_floor: float = 0.40
+    # L1 vi→ko (M5): tolerance chuyển di cho người VIỆT nói tiếng HÀN (tense→plain,
+    # ʌ↔o, coda l→n/nuốt — xem src/phoneme/l1/vi_ko.py). Flag RIÊNG với
+    # phoneme_l1_enabled (bảng vi→en): default OFF, chỉ bật sau khi tune multiplier
+    # bằng telemetry học viên thật. Bật qua TOEIC_PHONEME_L1_KO_ENABLED.
+    phoneme_l1_ko_enabled: bool = False
     # Recognizer-noise gate (ĐỘC LẬP với L1): sub bất khả thi về âm học (sim < _sim &
     # không nằm trong _REAL_ERROR_SUBS) + recognizer không chắc (conf < ngưỡng theo loại
     # âm) → coi là wav2vec hallucinate → ẩn khỏi đỏ + bỏ penalty. Ngưỡng conf TÁCH nguyên
@@ -472,6 +477,9 @@ def load_config() -> Config:
         phoneme_l1_low_conf_floor=float(
             os.getenv("TOEIC_PHONEME_L1_LOW_CONF_FLOOR", "0.40")
         ),
+        phoneme_l1_ko_enabled=(
+            os.getenv("TOEIC_PHONEME_L1_KO_ENABLED", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         phoneme_recognizer_noise_sim=float(
             os.getenv("TOEIC_PHONEME_RECOGNIZER_NOISE_SIM", "0.2")
         ),

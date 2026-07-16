@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .diagnostics import DRIFT_WINDOW_PAD_SEC, WordDiagnostic
 from .ipa.profile import LangProfile, get_profile
+from .l1 import L1Profile
 from .models import PhonemeResult
 from .reliability import SkipDecision
 from .scoring import (
@@ -108,6 +109,7 @@ class HybridPhonemeAnalyzer:
         s_cluster_enabled: bool = False,
         collapse_gate_enabled: bool = False,
         profile: LangProfile | None = None,
+        l1_profile: L1Profile | None = None,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         # LangProfile — bộ hàm G2P/similarity theo NGÔN NGỮ ĐANG CHẤM (không phải
@@ -116,6 +118,9 @@ class HybridPhonemeAnalyzer:
         self._max_words = max_words
         self._confidence_knee = confidence_knee
         self._l1_enabled = l1_enabled
+        # Bảng L1 theo cặp (l1, target) — None = ("vi","en") hành vi hiện hành.
+        # Chỉ có tác dụng khi l1_enabled (xem src/phoneme/l1/).
+        self._l1_profile = l1_profile
         self._l1_min_confidence = l1_min_confidence
         self._low_conf_floor = low_conf_floor
         self._recognizer_noise_sim = recognizer_noise_sim
@@ -313,6 +318,7 @@ class HybridPhonemeAnalyzer:
                 s_cluster_enabled=self._s_cluster_enabled,
                 collapse_gate_enabled=self._collapse_gate_enabled,
                 profile=self._profile,
+                l1_profile=self._l1_profile,
             )
 
         logger.info(

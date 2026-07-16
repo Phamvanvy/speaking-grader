@@ -11,6 +11,7 @@ from typing import Final
 
 from ..diagnostics import DRIFT_WINDOW_PAD_SEC, is_within_word_window
 from ..ipa.profile import LangProfile, get_profile
+from ..l1 import L1Profile
 from ..l1_vietnamese import PenaltyReason
 from ..models import PhonemePoint, WordSpan
 from .constants import (
@@ -147,6 +148,7 @@ def _refine_boundary_bleed(
     word_windows_locked: Collection[int] | None = None,
     pad: float = DRIFT_WINDOW_PAD_SEC,
     profile: LangProfile | None = None,
+    l1_profile: L1Profile | None = None,
 ) -> tuple[list[tuple[int, int]], list[dict]]:
     """Sửa mis-attribution biên từ trên DTW path (case "our eyes" 2026-07-05/08).
 
@@ -225,6 +227,7 @@ def _refine_boundary_bleed(
             g2p_uncertain=ref_g2p_uncertain[ref_idx],
             r_droppable=ref_r_droppable[ref_idx],
             profile=profile,
+            l1_profile=l1_profile,
         )
         return pen
 
@@ -441,6 +444,7 @@ def _align_points(
     accept_accent_variants: bool = False,
     s_cluster_enabled: bool = False,
     profile: LangProfile | None = None,
+    l1_profile: L1Profile | None = None,
 ) -> tuple[dict[int, tuple[PhonemePoint, float | None]], int, dict[int, float]]:
     """Một lượt qua DTW path → (point+penalty mỗi ref index, số insertion, penalty gốc/ref).
 
@@ -454,6 +458,9 @@ def _align_points(
     - Substitution: base=(1-sim)*conf_factor [+ cap ð/h]; nếu l1_enabled & conf<low_conf_floor
       → TRUNG HOÀ penalty về 0 (low_confidence_neutralized). Deletion: xem _score_deletion.
     - Mỗi ref index giữ point TỐT NHẤT nếu path chạm nhiều lần (_better_point).
+    - `l1_profile` (M5): bảng L1 theo cặp (l1, target). None = ("vi","en") — sub matcher
+      luôn trả None nên nhánh sub y hệt trước (bit-for-bit); chỉ ("vi","ko") có bảng sub
+      (tense→plain, ʌ↔o, coda l→n) → penalty × multiplier, reason L1_SUBSTITUTION.
     """
     profile = profile or get_profile("en")
     result: dict[int, tuple[PhonemePoint, float | None]] = {}
@@ -576,6 +583,17 @@ def _align_points(
                         penalty = 0.0
                         reason = PenaltyReason.LOW_CONFIDENCE_NEUTRALIZED.value
                         adjustment = 0.0
+                    elif l1_profile is not None:
+                        # Stage 4.5 L1 substitution (M5): sub khớp bảng chuyển di
+                        # (l1, target) → GIẢM penalty (×multiplier ≤ 0.6), vẫn hiển
+                        # thị. ("vi","en") matcher luôn None → nhánh này no-op cho EN.
+                        l1_sub = l1_profile.match_substitution(
+                            ref_ph, pred_ph, is_coda=ref_is_coda[ref_idx]
+                        )
+                        if l1_sub is not None:
+                            penalty = base_sub * l1_sub.multiplier
+                            adjustment = l1_sub.multiplier
+                            reason = PenaltyReason.L1_SUBSTITUTION.value
                 # Stage 5 g2p-uncertain cap: IPA chuẩn của từ lấy từ eSpeak (OOV/tên
                 # riêng) → reference tự nó là đoán → cap penalty về "low" (hidden-noise).
                 if (
@@ -615,6 +633,7 @@ def _align_points(
                 g2p_uncertain=ref_g2p_uncertain[ref_idx],
                 r_droppable=ref_r_droppable[ref_idx],
                 profile=profile,
+                l1_profile=l1_profile,
             )
 
         existing = result.get(ref_idx)

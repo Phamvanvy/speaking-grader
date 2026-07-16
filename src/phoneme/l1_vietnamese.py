@@ -25,6 +25,7 @@ class PenaltyReason(str, Enum):
     NONE = "none"                              # âm đúng (ok) hoặc không chấm (skipped)
     HARD_ERROR = "hard_error"                  # lỗi thật, penalty đầy đủ
     L1_FINAL_DELETION = "l1_final_deletion"    # nuốt phụ âm cuối kiểu L1 → giảm penalty
+    L1_SUBSTITUTION = "l1_substitution"        # sub khớp bảng chuyển di L1 (vd vi→ko tense→plain) → giảm penalty
     LOW_CONFIDENCE_NEUTRALIZED = "low_confidence_neutralized"  # conf rất thấp → trung hoà
     RECOGNIZER_NOISE = "recognizer_noise"      # sub bất khả thi + conf thấp → wav2vec hallucinate
     ACCENT_VARIANT = "accent_variant"          # biến thể giọng được chấp nhận (coda /r/ non-rhotic)

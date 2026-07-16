@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from ..diagnostics import DRIFT_WINDOW_PAD_SEC, is_within_word_window
 from ..ipa.profile import LangProfile, get_profile
+from ..l1 import L1Profile
 from ..l1_vietnamese import PenaltyReason, match_l1_final_deletion
 from ..models import (
     EVIDENCE_VERSION,
@@ -560,6 +561,7 @@ def _score_deletion(
     g2p_uncertain: bool = False,
     r_droppable: bool = False,
     profile: LangProfile | None = None,
+    l1_profile: L1Profile | None = None,
 ) -> tuple[PhonemePoint, float, float]:
     """1 âm reference bị THIẾU → (PhonemePoint, penalty đã điều chỉnh, penalty gốc).
 
@@ -596,7 +598,13 @@ def _score_deletion(
     severity = profile.deletion_severity(ref_ph, is_onset=is_onset, stress=stress)
     if l1_enabled:
         reason = PenaltyReason.HARD_ERROR.value
-        match = match_l1_final_deletion(ref_ph) if is_coda else None
+        # Bảng final-deletion theo cặp (l1, target): None = ("vi","en") — đúng hàm
+        # cũ, bit-for-bit (xem src/phoneme/l1/). Chỉ lang=ko truyền profile khác.
+        match_fn = (
+            l1_profile.match_final_deletion if l1_profile is not None
+            else match_l1_final_deletion
+        )
+        match = match_fn(ref_ph) if is_coda else None
         if match is not None:
             penalty = raw * match.multiplier
             adjustment = match.multiplier

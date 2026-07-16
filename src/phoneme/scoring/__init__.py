@@ -22,6 +22,7 @@ from ..diagnostics import (
     build_word_diagnostics,
 )
 from ..ipa.profile import LangProfile, get_profile
+from ..l1 import L1Profile
 from ..l1_vietnamese import PenaltyReason
 from ..models import (
     PhonemeError,
@@ -180,6 +181,7 @@ def compute_phoneme_score(
     collapse_gate_enabled: bool = False,
     collapse_gate_mass_floor: float = PHONEME_COLLAPSE_GATE_MASS_FLOOR,
     profile: LangProfile | None = None,
+    l1_profile: L1Profile | None = None,
 ) -> PhonemeScore | None:
     """Tính phoneme accuracy score từ predicted segments + reference.
 
@@ -281,6 +283,10 @@ def compute_phoneme_score(
 
         profile: LangProfile — bộ hàm similarity/normalize/tokenizer theo NGÔN NGỮ
             ĐANG CHẤM. None = tiếng Anh (EN profile wrap đúng các hàm cũ — bit-for-bit).
+        l1_profile: bảng L1 tolerance theo cặp (tiếng mẹ đẻ, ngôn ngữ đích) — xem
+            src/phoneme/l1/ (M5). None = ("vi","en") hành vi hiện hành (bit-for-bit,
+            sub matcher rỗng); ("vi","ko") thêm sub leniency tense→plain/ʌ↔o/coda l→n
+            + final-deletion coda l. CHỈ tác động khi l1_enabled=True.
 
     Returns None nếu reference_phonemes rỗng.
     """
@@ -349,6 +355,7 @@ def compute_phoneme_score(
                 word_windows_locked=word_windows_locked,
                 pad=drift_window_pad,
                 profile=profile,
+                l1_profile=l1_profile,
             )
             for mv in boundary_moves:
                 logger.info(
@@ -375,6 +382,7 @@ def compute_phoneme_score(
             accept_accent_variants=accept_accent_variants,
             s_cluster_enabled=s_cluster_enabled,
             profile=profile,
+            l1_profile=l1_profile,
         )
         empty_prediction = False
 
@@ -396,6 +404,7 @@ def compute_phoneme_score(
                 g2p_uncertain=ref_g2p_uncertain[i],
                 r_droppable=ref_r_droppable[i],
                 profile=profile,
+                l1_profile=l1_profile,
             )
             result[i] = (point, pen)
             raw_by_ref[i] = raw
@@ -487,7 +496,12 @@ def compute_phoneme_score(
             scored += 1
             # L1 metadata: penalty GỐC (trước L1/neutralization) để tính tỉ lệ giảm.
             raw_penalty_sum += raw_by_ref.get(i, penalty)
-        if point.penalty_reason == PenaltyReason.L1_FINAL_DELETION.value:
+        # L1_SUBSTITUTION (M5) gộp chung l1_adjusted_count: field nghĩa là "số điểm
+        # được L1 layer điều chỉnh" — giữ nguyên shape payload/telemetry.
+        if point.penalty_reason in (
+            PenaltyReason.L1_FINAL_DELETION.value,
+            PenaltyReason.L1_SUBSTITUTION.value,
+        ):
             l1_adjusted_count += 1
         elif point.penalty_reason == PenaltyReason.LOW_CONFIDENCE_NEUTRALIZED.value:
             low_conf_neutralized_count += 1
@@ -546,6 +560,7 @@ def compute_phoneme_score(
             path, predicted_phonemes, predicted_conf, reference_phonemes,
             reference_spans, result, span_skip_reason,
             predicted_times=predicted_times, word_windows=word_windows,
+            l1_profile=l1_profile,
         ))
 
     # Sort errors by severity (high → medium → low) rồi cap.

@@ -26,6 +26,7 @@ from .phoneme.diagnostics import (
     subtoken_window,
 )
 from .phoneme.ipa.profile import get_profile
+from .phoneme.l1 import get_l1_profile
 from .phoneme.models import PhonemeResult
 from .phoneme.reliability import (
     RecognizerEvidence,
@@ -197,10 +198,12 @@ def grade_response(
         try:
             # lang=ko: (a) model acoustic riêng (config, mặc định dùng chung
             # xlsr-espeak); (b) ÉP TẮT các rule đặc thù tiếng Anh bất kể config —
-            # homograph (CMUdict), s-cluster, connected-speech elision, L1-vi
-            # (bảng lỗi người Việt nói TIẾNG ANH), coda-r accent (accent="ko"
-            # → analyzer map accept_accent_variants=False).
+            # homograph (CMUdict), s-cluster, connected-speech elision, coda-r
+            # accent (accent="ko" → analyzer map accept_accent_variants=False).
+            # L1 layer key theo cặp (l1, target): vi→en dùng flag/bảng hiện hành;
+            # vi→ko (M5) flag RIÊNG default OFF + bảng src/phoneme/l1/vi_ko.py.
             _is_ko = lang == "ko"
+            _l1_ko = _is_ko and config.phoneme_l1_ko_enabled
             phoneme_analyzer = HybridPhonemeAnalyzer(
                 wav2vec_model=(
                     config.phoneme_wav2vec_model_ko
@@ -210,7 +213,8 @@ def grade_response(
                 device=config.phoneme_device,
                 max_words=config.phoneme_max_words,
                 confidence_knee=config.phoneme_confidence_knee,
-                l1_enabled=config.phoneme_l1_enabled and not _is_ko,
+                l1_enabled=(config.phoneme_l1_enabled and not _is_ko) or _l1_ko,
+                l1_profile=get_l1_profile("vi", "ko") if _l1_ko else None,
                 l1_min_confidence=config.phoneme_l1_min_confidence,
                 low_conf_floor=config.phoneme_l1_low_conf_floor,
                 recognizer_noise_sim=config.phoneme_recognizer_noise_sim,

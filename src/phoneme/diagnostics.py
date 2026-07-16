@@ -29,6 +29,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .l1 import L1Profile
 from .l1_vietnamese import PenaltyReason, match_l1_final_deletion
 from .models import PhonemePoint, WordSpan
 
@@ -241,6 +242,7 @@ def build_word_diagnostics(
     predicted_times: list[tuple[float, float]] | None = None,
     word_windows: Mapping[int, tuple[float, float]] | None = None,
     pad: float = DRIFT_WINDOW_PAD_SEC,
+    l1_profile: L1Profile | None = None,
 ) -> list[WordDiagnostic]:
     """THUẦN: dựng WordDiagnostic cho mỗi span từ alignment đã có.
 
@@ -328,7 +330,28 @@ def build_word_diagnostics(
             reason = point.penalty_reason
             l1_rule_id = None
             if reason == PenaltyReason.L1_FINAL_DELETION.value:
-                m = match_l1_final_deletion(reference[i])
+                # Bảng theo cặp (l1, target) khi có (M5) — fallback bảng vi→en cũ.
+                match_fn = (
+                    l1_profile.match_final_deletion if l1_profile is not None
+                    else match_l1_final_deletion
+                )
+                m = match_fn(reference[i])
+                l1_rule_id = m.rule_id if m is not None else None
+            elif (
+                reason == PenaltyReason.L1_SUBSTITUTION.value
+                and l1_profile is not None
+                and pred_symbol is not None
+            ):
+                # rule_id suy lại từ cặp âm (thuần hàm). is_coda không có ở đây →
+                # thử coda trước rồi any-position; bảng disjoint nên deterministic.
+                m = (
+                    l1_profile.match_substitution(
+                        reference[i], pred_symbol, is_coda=True
+                    )
+                    or l1_profile.match_substitution(
+                        reference[i], pred_symbol, is_coda=False
+                    )
+                )
                 l1_rule_id = m.rule_id if m is not None else None
             entry = {
                 "ref_symbol": reference[i],
