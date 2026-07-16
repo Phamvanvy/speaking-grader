@@ -157,6 +157,15 @@ def synthesize(
     if not norm:
         raise ValueError("'text' rỗng.")
 
+    # Tiếng Hàn: chưa cấu hình voice Piper tiếng Hàn → 503 (TtsUnavailable) thay vì
+    # để voice EN "đánh vần" Hangul thành rác rồi cache vĩnh viễn. Frontend
+    # (playback.js) tự phát hiện Hangul và fallback Web Speech API ko-KR nên nhánh
+    # này chỉ chặn client cũ/gọi tay.
+    if any("가" <= ch <= "힣" for ch in norm):
+        raise TtsUnavailable(
+            "Chưa có voice TTS tiếng Hàn trên server — dùng giọng đọc của trình duyệt."
+        )
+
     canonical = _resolve_accent(accent, config)
     model_path = _voice_path(canonical, config)
 

@@ -81,6 +81,20 @@ const TTS_AUDIO_VERSION = 'v4';
 
 function playWordTts(word) {
     if (!word) return;
+    // Từ tiếng HÀN: Piper server chưa có voice Hàn (/tts trả 503) → đọc thẳng bằng
+    // Web Speech API của trình duyệt với giọng ko-KR, khỏi tốn round-trip lỗi.
+    if (typeof hasHangul === 'function' && hasHangul(word)) {
+        if (!window.speechSynthesis) {
+            alert('Trình duyệt không hỗ trợ đọc văn bản (Web Speech API) — chưa phát được audio mẫu tiếng Hàn.');
+            return;
+        }
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(word);
+        u.lang = 'ko-KR';
+        u.rate = 0.85;   // chậm hơn chút cho người học nghe rõ biến âm
+        window.speechSynthesis.speak(u);
+        return;
+    }
     const url = `${apiBase()}/tts?text=${encodeURIComponent(word)}&accent=${encodeURIComponent(currentAccent)}&v=${TTS_AUDIO_VERSION}`;
     if (!ttsAudio) ttsAudio = new Audio();
     ttsAudio.pause();

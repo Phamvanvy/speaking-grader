@@ -86,10 +86,10 @@ function practiceIsBad(p) {
     return p.status !== 'skipped' && !(p.status === 'ok' || p.severity === 'low');
 }
 
-function practicePhonemesHtml(phonemes) {
+function practicePhonemesHtml(phonemes, isKo) {
     // GB chỉ đổi HIỂN THỊ (data-practice giữ symbol gốc US) — tái dùng transform
-    // của render.js qua object từ giả.
-    const disp = (currentAccent === 'gb' && typeof toBritishWord === 'function')
+    // của render.js qua object từ giả. Từ tiếng Hàn: không có giọng Anh/Mỹ → bỏ qua.
+    const disp = (currentAccent === 'gb' && !isKo && typeof toBritishWord === 'function')
         ? toBritishWord({ phonemes }).phonemes : phonemes;
     const shown = (disp || []).filter(p => !p._hidden);
     if (!shown.length) return '';
@@ -139,19 +139,24 @@ function practicePhonemesHtml(phonemes) {
 // như dải chip) để TRÙNG với Pronunciation detail. Không có phonemes (vd gợi ý luyện
 // từ chưa chấm) → fallback chuỗi d.ipa từ backend (nay cũng đã kèm nhấn âm).
 function practiceIpaString(d) {
-    const disp = (currentAccent === 'gb' && typeof toBritishWord === 'function')
+    const isKo = typeof hasHangul === 'function' && hasHangul(d.word);
+    const disp = (currentAccent === 'gb' && !isKo && typeof toBritishWord === 'function')
         ? toBritishWord({ phonemes: d.phonemes || [] }).phonemes : (d.phonemes || []);
     return (typeof ipaStressString === 'function' ? ipaStressString(disp) : '') || (d.ipa || '');
 }
 
 function renderPracticeBody() {
     const d = practiceState.data;
+    const isKo = typeof hasHangul === 'function' && hasHangul(d.word);
     document.getElementById('practice-word').textContent = d.word;
     const ipaStr = practiceIpaString(d);
     const ipaDisp = ipaStr ? `/${ipaStr}/` : '';
     document.getElementById('practice-ipa').innerHTML = `${escapeHtml(ipaDisp)}
         <button type="button" class="tts-play" data-word="${escapeHtml(d.word)}" title="Nghe phát âm chuẩn">🔊</button>`;
-    document.getElementById('practice-phonemes').innerHTML = practicePhonemesHtml(d.phonemes);
+    document.getElementById('practice-phonemes').innerHTML = practicePhonemesHtml(d.phonemes, isKo);
+    // Từ Hangul: ẩn ☆ (server /words chỉ nhận từ Latin — xem render.js bookmarkBtn).
+    const bookmark = document.getElementById('practice-bookmark');
+    if (bookmark) bookmark.classList.toggle('hidden', isKo);
     practiceRingUpdate(practicePct(d.phonemes));
     const status = document.getElementById('practice-status');
     status.className = 'practice-status';
@@ -163,6 +168,9 @@ function renderPracticeBody() {
 // ── Định nghĩa + ví dụ (lazy, không chặn luyện tập khi lỗi) ─────────────
 async function loadPracticeWordInfo(word) {
     const box = document.getElementById('practice-info');
+    // Từ tiếng Hàn: /word-info hiện là từ điển tiếng ANH (validate + prompt EN)
+    // → bỏ qua, không gọi cho đỡ 400 noise. Từ điển Hàn là backlog riêng (D7/M5).
+    if (typeof hasHangul === 'function' && hasHangul(word)) { box.innerHTML = ''; return; }
     const key = word.toLowerCase();
     if (wordInfoCache.has(key)) { box.innerHTML = wordInfoCache.get(key); return; }
     box.innerHTML = '<span class="practice-info__loading">Đang tải định nghĩa…</span>';
@@ -285,6 +293,10 @@ async function gradePracticeAttempt(blob, mime) {
         fd.append('mode', 'mock_test');   // ép bật phoneme analysis
         fd.append('no_ai', 'true');       // 1 từ không cần LLM chấm — chỉ cần phoneme
         fd.append('accent', currentAccent);
+        // Từ tiếng Hàn: phải chấm bằng pipeline ko (G2P 표준발음법 + model acoustic
+        // Hàn) — exam=topik là cách backend suy lang. Thiếu dòng này sẽ chấm bằng
+        // pipeline EN → IPA reference rác.
+        if (typeof hasHangul === 'function' && hasHangul(d.word)) fd.append('exam', 'topik');
         const res = await fetch(`${apiBase()}/grade`, { method: 'POST', body: fd });
         if (!res.ok) {
             const raw = await res.text();
@@ -335,6 +347,7 @@ function updatePracticeBookmarkStar() {
 async function togglePracticeBookmark() {
     const d = practiceState.data;
     if (!d || !window.SavedWords) return;
+    if (typeof hasHangul === 'function' && hasHangul(d.word)) return;  // nút đã ẩn — chặn nốt edge case
     try {
         if (SavedWords.has(d.word)) await SavedWords.remove(d.word);
         else await SavedWords.add({

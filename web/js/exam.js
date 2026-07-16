@@ -72,6 +72,16 @@ const IIG_TIMING = {
         part2_long_turn: { prep: 60, resp: 120 },
         part3_discussion: { prep: 5, resp: null },
     },
+    // TOPIK 말하기 IBT chính thức: 준비(prep)/응답(resp) tăng dần theo mức câu.
+    topik: {
+        read_aloud: { prep: 40, resp: null },
+        q1_answer_question: { prep: 20, resp: 30 },
+        q2_role_play: { prep: 30, resp: 40 },
+        q3_picture_story: { prep: 40, resp: 60 },
+        q4_complete_dialogue: { prep: 40, resp: 60 },
+        q5_interpret_data: { prep: 70, resp: 80 },
+        q6_present_opinion: { prep: 70, resp: 80 },
+    },
 };
 const IIG_PART = {
     read_aloud: 'Part 1–2 · Read a Text Aloud',
@@ -92,6 +102,28 @@ const IIG_DIRECTIONS = {
     part1_interview: 'Part one. The examiner will ask you general questions about yourself and familiar topics. Answer naturally and extend your answers.',
     part2_long_turn: 'Part two. You will be given a topic card. You have one minute to prepare, then speak for one to two minutes.',
     part3_discussion: 'Part three. The examiner will ask you to discuss more abstract ideas related to the topic. Develop your answers with reasons and examples.',
+};
+
+// TOPIK tách bảng RIÊNG (không trộn vào map phẳng ở trên): key 'read_aloud' tồn
+// tại ở cả TOEIC lẫn TOPIK — map phẳng sẽ lấy nhầm directions tiếng Anh. Tra cứu
+// exam-aware ở partIntro. Directions tiếng HÀN + đọc bằng giọng ko-KR như thi thật.
+const TOPIK_PART = {
+    read_aloud: '낭독 · Đọc to đoạn văn',
+    q1_answer_question: '문항 1 · 질문에 대답하기',
+    q2_role_play: '문항 2 · 그림 보고 역할 수행하기',
+    q3_picture_story: '문항 3 · 그림 보고 이야기하기',
+    q4_complete_dialogue: '문항 4 · 대화 완성하기',
+    q5_interpret_data: '문항 5 · 자료 해석하기',
+    q6_present_opinion: '문항 6 · 의견 제시하기',
+};
+const TOPIK_DIRECTIONS = {
+    read_aloud: '주어진 글을 소리 내어 읽으십시오.',
+    q1_answer_question: '질문을 잘 듣고 대답하십시오. 20초 동안 준비하십시오. 삐 소리가 끝나면 30초 동안 말하십시오.',
+    q2_role_play: '그림을 보고 질문에 대답하십시오. 30초 동안 준비하십시오. 삐 소리가 끝나면 40초 동안 말하십시오.',
+    q3_picture_story: '그림을 보고 순서대로 이야기하십시오. 40초 동안 준비하십시오. 삐 소리가 끝나면 60초 동안 말하십시오.',
+    q4_complete_dialogue: '대화를 듣고 이어서 말하십시오. 40초 동안 준비하십시오. 삐 소리가 끝나면 60초 동안 말하십시오.',
+    q5_interpret_data: '자료를 보고 설명하십시오. 70초 동안 준비하십시오. 삐 소리가 끝나면 80초 동안 말하십시오.',
+    q6_present_opinion: '질문을 듣고 의견을 제시하십시오. 70초 동안 준비하십시오. 삐 소리가 끝나면 80초 동안 말하십시오.',
 };
 
 function timingFor(exam, q) {
@@ -125,13 +157,14 @@ function examBeep(freq = 880, ms = 200) {
     } catch (e) { /* ignore */ }
 }
 // TTS đọc directions; resolve khi đọc xong (hoặc fallback timeout/không hỗ trợ).
-function examSpeak(text) {
+// `lang`: giọng đọc — TOPIK truyền 'ko-KR' (thiếu voice Hàn thì onerror → resolve luôn).
+function examSpeak(text, lang) {
     return new Promise(resolve => {
         try {
             if (!window.speechSynthesis || !text) { resolve(); return; }
             window.speechSynthesis.cancel();
             const u = new SpeechSynthesisUtterance(text);
-            u.lang = 'en-US'; u.rate = 0.95;
+            u.lang = lang || 'en-US'; u.rate = 0.95;
             let done = false;
             const fin = () => { if (!done) { done = true; resolve(); } };
             u.onend = fin; u.onerror = fin;
@@ -198,8 +231,14 @@ function examSession() {
             return (examConfig(this.exam).questionTypes || []).filter(t => t.value);
         },
         needsScript(t) { return t === 'read_aloud'; },
-        needsProvided(t) { return t === 'respond_with_info' || t === 'part2_long_turn'; },
-        isPicture(t) { return t === 'describe_picture'; },
+        needsProvided(t) {
+            return t === 'respond_with_info' || t === 'part2_long_turn'
+                || t === 'q4_complete_dialogue' || t === 'q5_interpret_data';
+        },
+        isPicture(t) {
+            return t === 'describe_picture'
+                || t === 'q2_role_play' || t === 'q3_picture_story' || t === 'q5_interpret_data';
+        },
         typeLabel(t) {
             const o = this.typeOptions().find(x => x.value === t);
             return o ? o.label : t;
@@ -348,10 +387,12 @@ function examSession() {
         async partIntro(q, token) {
             this.phase = 'intro';
             this.statusKey = 'listening';
-            this.partName = IIG_PART[q.type] || this.typeLabel(q.type);
-            this.directionsText = IIG_DIRECTIONS[q.type] || '';
+            // Tra bảng theo exam trước (read_aloud có ở CẢ toeic lẫn topik) rồi mới fallback.
+            const isTopik = this.exam === 'topik';
+            this.partName = (isTopik ? TOPIK_PART[q.type] : IIG_PART[q.type]) || this.typeLabel(q.type);
+            this.directionsText = (isTopik ? TOPIK_DIRECTIONS[q.type] : IIG_DIRECTIONS[q.type]) || '';
             this.countdownNum = 0;
-            await examSpeak(this.directionsText);
+            await examSpeak(this.directionsText, isTopik ? 'ko-KR' : 'en-US');
             if (token !== this._runToken) return;
             for (let n = 3; n >= 1; n--) {
                 if (token !== this._runToken) return;
@@ -568,7 +609,7 @@ function examSession() {
             this.gradedCount = 0; this.gradeTotal = withAudio.length;
             this.result = {
                 exam: this.exam, title: this.title,
-                overall: null, overall_max: this.exam === 'ielts' ? 9 : 200,
+                overall: null, overall_max: examConfig(this.exam).overallMax,
                 overall_estimated: true,
                 count: this.order.length, graded: 0,
                 questions: withAudio.map(q => ({
@@ -678,6 +719,11 @@ function examSession() {
             if (this.grading) return `Đang chấm ${this.gradedCount}/${this.gradeTotal}…`;
             if (!this.result) return '--';
             return this.result.overall != null ? `${this.result.overall}/${this.result.overall_max}` : '--';
+        },
+        // Nhãn điểm tổng theo kỳ thi (thay ternary ielts/toeic hardcode ở index.html
+        // — thêm TOPIK). Lấy từ EXAM_CONFIG để 1 nguồn label duy nhất.
+        overallLabelText() {
+            return examConfig((this.result && this.result.exam) || this.exam).overallLabelVi;
         },
         questionScore(item) {
             // Badge dùng x-text → emoji thay cho "--": ⚠️ câu lỗi, ⏳ chưa chấm xong.

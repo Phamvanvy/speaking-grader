@@ -101,6 +101,13 @@ function setHistorySaveEnabled(on) {
     localStorage.setItem(HISTORY_OPT_KEY, on ? 'true' : 'false');
 }
 
+// ── Ngôn ngữ nói ──────────────────────────────────────────────────────
+// TOPIK chấm tiếng HÀN: nhiều chỗ hiển thị/TTS rẽ nhánh theo "từ này là Hangul?"
+// (ổn định hơn truyền exam xuyên mọi tầng render — payload lịch sử cũ vẫn đúng).
+function hasHangul(s) {
+    return /[가-힣]/.test(s || '');
+}
+
 // ── Exam config ───────────────────────────────────────────────────────
 // Mọi khác biệt theo kỳ thi gom về một chỗ (tránh if/else rải rác). Dùng SỐ
 // (overallMax/criterionMax) thay vì chuỗi '/200' để dễ thêm TOEFL/VSTEP sau này.
@@ -109,8 +116,10 @@ const EXAM_CONFIG = {
         label: 'TOEIC',
         scoreField: 'estimated_toeic_score',
         overallLabel: 'Estimated TOEIC Speaking Score',
+        overallLabelVi: 'Điểm TOEIC Speaking (ước tính)',
         overallMax: 200,
         criterionMax: 3,
+        lang: 'en',
         // `uses` = ô nhập nào HIỆN cho dạng câu này (khớp display_inputs ở backend).
         // `required` = chỉ cần MỘT trong các input này là coi như "có đề" (khớp
         // required_inputs backend) — dùng cho popup cảnh báo trước khi chấm. Cả hai
@@ -128,13 +137,36 @@ const EXAM_CONFIG = {
         label: 'IELTS',
         scoreField: 'estimated_ielts_band',
         overallLabel: 'Estimated IELTS Band',
+        overallLabelVi: 'IELTS band (ước tính)',
         overallMax: 9,
         criterionMax: 9,
+        lang: 'en',
         // Không có "Auto-detect": Part 1 vs Part 3 không phân biệt được → luôn gửi rõ.
         questionTypes: [
             { value: 'part1_interview', label: 'Part 1 — Interview', uses: ['prompt'], required: ['prompt'] },
             { value: 'part2_long_turn', label: 'Part 2 — Long turn (cue card)', uses: ['prompt'], required: ['prompt'] },
             { value: 'part3_discussion', label: 'Part 3 — Discussion', uses: ['prompt'], required: ['prompt'] },
+        ],
+    },
+    topik: {
+        label: 'TOPIK',
+        scoreField: 'estimated_topik_score',
+        overallLabel: 'Estimated TOPIK Speaking Score',
+        overallLabelVi: 'Điểm TOPIK 말하기 (ước tính)',
+        overallMax: 200,
+        criterionMax: 5,   // rubric NIIED: mỗi tiêu chí 0-5 (khác thang 3 của TOEIC)
+        lang: 'ko',
+        // Khớp rubrics/topik.py (display_inputs/required_inputs). q4/q5 dùng
+        // provided_info nhưng form chấm lẻ CHƯA có ô đó → uses/required chỉ liệt
+        // kê input form có; luồng "Thi cả đề" có ô provided_info riêng (exam.js).
+        questionTypes: [
+            { value: 'read_aloud', label: '낭독 — Đọc to (luyện tập)', uses: ['reference'], required: ['reference'] },
+            { value: 'q1_answer_question', label: '문항 1 — Trả lời câu hỏi', uses: ['prompt'], required: ['prompt'] },
+            { value: 'q2_role_play', label: '문항 2 — Nhìn tranh, thực hiện vai', uses: ['prompt', 'image'], required: ['prompt', 'image'] },
+            { value: 'q3_picture_story', label: '문항 3 — Nhìn tranh, kể chuyện', uses: ['prompt', 'image'], required: ['prompt', 'image'] },
+            { value: 'q4_complete_dialogue', label: '문항 4 — Hoàn thành hội thoại', uses: ['prompt'], required: ['prompt'] },
+            { value: 'q5_interpret_data', label: '문항 5 — Diễn giải tư liệu', uses: ['prompt', 'image'], required: ['prompt', 'image'] },
+            { value: 'q6_present_opinion', label: '문항 6 — Trình bày ý kiến', uses: ['prompt'], required: ['prompt'] },
         ],
     },
 };

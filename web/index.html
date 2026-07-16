@@ -58,6 +58,7 @@
                     <select id="exam">
                         <option value="toeic">TOEIC</option>
                         <option value="ielts">IELTS</option>
+                        <option value="topik">TOPIK 말하기 (tiếng Hàn)</option>
                     </select>
                 </div>
 
@@ -150,7 +151,8 @@
                     </select>
                 </div>
 
-                <div class="form-group">
+                <!-- Accent chỉ có nghĩa với tiếng Anh — form.js ẩn group này khi chọn TOPIK. -->
+                <div class="form-group" id="accent-group">
                     <label for="accent">Pronunciation Reference</label>
                     <select id="accent" class="accent-select">
                         <option value="default">Tự động (default)</option>
@@ -253,6 +255,7 @@
                         <select x-model="exam" @change="loadBuiltinSets()">
                             <option value="toeic">TOEIC</option>
                             <option value="ielts">IELTS</option>
+                            <option value="topik">TOPIK 말하기 (tiếng Hàn)</option>
                         </select>
                     </div>
                     <div class="form-group" x-show="builtinSets.length">
@@ -464,7 +467,7 @@
                     </div>
                 </div>
                 <div class="exam-overall">
-                    <div class="label" x-text="(result && result.exam==='ielts') ? 'IELTS band (ước tính)' : 'Điểm TOEIC Speaking (ước tính)'"></div>
+                    <div class="label" x-text="overallLabelText()"></div>
                     <div class="score" x-text="overallText()"></div>
                     <div class="note">Ước tính nội bộ (trung bình các câu) — không thay thế kết quả thi chính thức.</div>
                 </div>
@@ -537,14 +540,14 @@
     <!-- http.js: fetchWithRetry (timeout + tự retry khi 429/502 — server quá tải).
          Không phụ thuộc file khác; nạp đầu để grade.js/exam.js dùng. -->
     <script src="/js/http.js?v=retry-1"></script>
-    <script src="/js/state.js?v=apibase-1"></script>
+    <script src="/js/state.js?v=topik-1"></script>
     <script src="/js/auth.js?v=auth-4"></script>
-    <script src="/js/render.js?v=stress-1"></script>
-    <script src="/js/playback.js?v=tts-v4"></script>
+    <script src="/js/render.js?v=topik-1"></script>
+    <script src="/js/playback.js?v=topik-1"></script>
     <script src="/js/recording.js?v=accent-default-1"></script>
-    <script src="/js/form.js?v=apibase-1"></script>
+    <script src="/js/form.js?v=topik-1"></script>
     <script src="/js/grade.js?v=retry-1"></script>
-    <script src="/js/suggest.js?v=apibase-1"></script>
+    <script src="/js/suggest.js?v=topik-1"></script>
     <script src="/js/report.js?v=apibase-1"></script>
     <!-- Tab Lịch sử: list/chi tiết/xoá bản ghi đã lưu server-side. Dùng builder của
          render.js (featureGridHtml, scoresBreakdownHtml...) lúc RUNTIME nên chỉ cần
@@ -556,10 +559,10 @@
          (switchMode gọi loadSavedWords). -->
     <script src="/js/phoneme-tips.js?v=practice-1"></script>
     <script src="/js/saved.js?v=stress-1"></script>
-    <script src="/js/practice.js?v=stress-1"></script>
+    <script src="/js/practice.js?v=topik-1"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
-    <script src="/js/exam.js?v=exam-8"></script>
+    <script src="/js/exam.js?v=exam-9"></script>
     <!-- Router (URL path thật, History API) — nạp SAU exam.js (dùng switchMode +
          window.__exam) nhưng TRƯỚC Alpine (examSession.init() gọi router ngay khi
          Alpine dựng component). -->

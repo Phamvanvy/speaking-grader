@@ -16,6 +16,10 @@ const TARGET_BAND_OPTIONS = {
         { value: 'TOEIC mức cao nhất (~200)', label: 'Mức cao nhất (~200)' },
         { value: 'TOEIC mức khá (~160)', label: 'Mức khá (~160)' },
     ],
+    topik: [
+        { value: 'TOPIK 말하기 mức cao nhất (6급, ~190/200)', label: '6급 (cao nhất)' },
+        { value: 'TOPIK 말하기 mức khá (4-5급, ~130-170/200)', label: '4–5급 (khá)' },
+    ],
 };
 
 // Đổ option band theo kỳ thi đang chọn (gọi từ form.js khi đổi exam/type).
@@ -140,7 +144,10 @@ function renderSuggest(data) {
 }
 
 // ── Đọc bài mẫu bằng Web Speech API ───────────────────────────────────
+// Bài mẫu viết bằng NGÔN NGỮ NÓI của kỳ thi (topik → tiếng Hàn) → giọng đọc theo
+// kỳ thi trước, rồi mới tới accent Anh-Anh/Anh-Mỹ.
 function _voiceLangForAccent() {
+    if (examConfig(examSelect.value).lang === 'ko') return 'ko-KR';
     if (typeof currentAccent !== 'undefined' && currentAccent === 'gb') return 'en-GB';
     return 'en-US';
 }

@@ -103,9 +103,18 @@ function syncSuggestUI() {
     if (typeof updateSuggestUI === 'function') updateSuggestUI();
 }
 
+// Accent tham chiếu (default/gb/us) chỉ có nghĩa với tiếng ANH → ẩn khi chấm
+// TOPIK (tiếng Hàn). Chỉ ẩn UI — giá trị currentAccent giữ nguyên cho lần quay
+// lại TOEIC/IELTS; backend bỏ qua accent khi lang=ko nên gửi kèm cũng vô hại.
+function syncAccentVisibility() {
+    const group = document.getElementById('accent-group');
+    if (group) group.classList.toggle('hidden', examConfig(examSelect.value).lang === 'ko');
+}
+
 examSelect.addEventListener('change', () => {
     populateQuestionTypes();
     syncConditionalFields();
+    syncAccentVisibility();
     syncSuggestUI();
 });
 questionTypeSelect.addEventListener('change', () => {
@@ -114,6 +123,7 @@ questionTypeSelect.addEventListener('change', () => {
 });
 populateQuestionTypes();
 syncConditionalFields();
+syncAccentVisibility();
 
 // ── Dark mode ─────────────────────────────────────────────────────────
 // Lựa chọn của user được lưu localStorage; lần đầu thì theo cài đặt hệ điều hành.

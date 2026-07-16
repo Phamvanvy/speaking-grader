@@ -149,9 +149,15 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         ? `<button type="button" class="tts-play" data-word="${escapeHtml(w.word)}" title="Nghe phát âm chuẩn (máy đọc — tham khảo)" aria-label="Nghe phát âm chuẩn của từ ${escapeHtml(w.word)}">🔊</button>`
         : '';
 
+    // Kết quả tiếng HÀN (TOPIK)? Suy từ chính dữ liệu từ (Hangul) thay vì truyền
+    // exam xuyên mọi call site — payload lịch sử/exam/batch cũ đều tự đúng.
+    // Khi ko: bỏ transform GB + ẩn hàng chọn giọng (accent chỉ có nghĩa với EN),
+    // ẩn ☆ lưu từ (backend validate_word hiện chỉ nhận chữ Latin).
+    const isKo = typeof hasHangul === 'function' && words.some(w => hasHangul(w.word));
+
     // Anh-Anh: bản clone đã biến đổi IPA hiển thị (dữ liệu gốc `words` giữ nguyên).
     // Mọi chỗ dựng IPA tham chiếu dùng `dispWords` và bỏ qua phoneme `_hidden`.
-    const dispWords = currentAccent === 'gb' ? words.map(toBritishWord) : words;
+    const dispWords = (currentAccent === 'gb' && !isKo) ? words.map(toBritishWord) : words;
 
     // CHỈ tô đỏ lỗi THẬT (sub/del severity medium|high). Âm severity 'low' (nhiều
     // khả năng do recognizer nuốt / biến thể) và 'skipped' (ASR nghe nhầm cả từ)
@@ -220,8 +226,10 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
         })),
     }))}"`;
     // ☆/★ lưu từ để luyện tập — trạng thái ban đầu theo cache SavedWords (saved.js
-    // nạp lúc mở trang); click xử lý delegated ở practice.js.
+    // nạp lúc mở trang); click xử lý delegated ở practice.js. Từ Hangul: ẩn (server
+    // /words validate_word chỉ nhận Latin — bấm sẽ 400, thà không hiện).
     const bookmarkBtn = orig => {
+        if (isKo) return '';
         const saved = window.SavedWords && SavedWords.has(orig.word);
         return `<button type="button" class="word-bookmark${saved ? ' saved' : ''}" data-word="${escapeHtml(orig.word)}"${practiceAttr(orig)} title="${saved ? 'Bỏ lưu từ này' : 'Lưu từ để luyện tập'}">${saved ? '★' : '☆'}</button>`;
     };
@@ -312,7 +320,8 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
     const titleText = `Pronunciation detail (phoneme)${accLine}`;
     // Chọn giọng IPA tham chiếu. `selected` set theo currentAccent để sau khi
     // re-render UI không nhảy về mặc định. Wire bằng delegated listener (1 lần).
-    const accentRow = `
+    // Tiếng Hàn: không có khái niệm giọng Anh/Mỹ → bỏ hẳn hàng chọn giọng.
+    const accentRow = isKo ? '' : `
         <div class="accent-row">
             <label class="accent-label">Giọng:
                 <select class="accent-select">
@@ -323,11 +332,15 @@ function phonemeErrorsHtml(phoneme, opts = {}) {
             </label>
             <span class="accent-note">đổi sau khi chấm chỉ đổi hiển thị, không chấm lại</span>
         </div>`;
+    // Legend dòng 2 khác theo ngôn ngữ: ví dụ nối âm tiếng Anh vs ghi chú 표준 발음법.
+    const noiseLegend = isKo
+        ? 'Các âm nhỏ/không chắc (recognizer nuốt, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ. IPA tham chiếu đã áp biến âm chuẩn tiếng Hàn (표준 발음법: 연음, 비음화, 경음화...) — đọc đúng biến âm mới được tính đúng.'
+        : `Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ. Nuốt âm cuối khi nối từ (vd "tes(t) preparation") là nối âm bản xứ hợp lệ — không tính lỗi.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}`;
     const body = `
         ${accentRow}
         ${sentenceAudioHtml}
-        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm · 🔊 = nghe phát âm chuẩn (máy đọc — tham khảo) · bấm vào TỪ để mở luyện tập · ☆ = lưu từ để luyện sau</div>
-        <div class="phoneme-legend">Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ. Nuốt âm cuối khi nối từ (vd "tes(t) preparation") là nối âm bản xứ hợp lệ — không tính lỗi.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}</div>
+        <div class="phoneme-legend"><span class="phoneme-sym--bad">đỏ/đậm</span> = âm sai rõ · <span class="phoneme-sym--missing">gạch</span> = thiếu âm · <span class="phoneme-stress">ˈ</span> = nhấn âm · 🔊 = nghe phát âm chuẩn (máy đọc — tham khảo) · bấm vào TỪ để mở luyện tập${isKo ? '' : ' · ☆ = lưu từ để luyện sau'}</div>
+        <div class="phoneme-legend">${noiseLegend}</div>
         ${truncLine}
         <div class="phoneme-words">${head}</div>${moreCards}
         ${table}
