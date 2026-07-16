@@ -615,7 +615,7 @@ function examSession() {
                             if (q.sequence != null) fd.append('history_seq', q.sequence);
                             fd.append('history_question_id', q.id);
                         }
-                        const res = await fetch(`${apiBase()}/grade`, { method: 'POST', body: fd });
+                        const res = await fetchWithRetry(`${apiBase()}/grade`, { method: 'POST', body: fd });
                         const data = await examParseResponse(res);
                         if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                         item.result = data;
@@ -642,7 +642,7 @@ function examSession() {
                     fd.append('user_id', getUserId());
                     fd.append('history_session_id', this._historySessionId);
                 }
-                const res = await fetch(`${apiBase()}/exam/overall`, { method: 'POST', body: fd });
+                const res = await fetchWithRetry(`${apiBase()}/exam/overall`, { method: 'POST', body: fd });
                 const data = await examParseResponse(res);
                 if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
                 this.result.overall = data.overall;

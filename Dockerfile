@@ -52,4 +52,6 @@ ENV TTS_VOICE_US=/app/voices/en_US-lessac-medium.onnx \
 # Tăng worker để tận dụng i5-14400F và 64GB RAM xử lý đa luồng gối đầu (Concurrency)
 ENV PORT=8000
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn src.api:app --host 0.0.0.0 --port ${PORT} --workers 2"]
+# --timeout-keep-alive 75 > idle keepalive mặc định của Caddy → tránh uvicorn
+# đóng connection giữa lúc proxy tái dùng (502 lẻ tẻ khi tải cao).
+CMD ["sh", "-c", "uvicorn src.api:app --host 0.0.0.0 --port ${PORT} --workers 2 --timeout-keep-alive 75"]

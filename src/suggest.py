@@ -15,7 +15,7 @@ import logging
 from .config import Config, resolve_language_name
 from .rubrics.base import Exam, QuestionType
 from .schema import SampleAnswer, WordInfo
-from .scoring.backends import _generate_anthropic, _generate_local
+from .scoring.backends import generate
 
 logger = logging.getLogger("toeic.suggest")
 
@@ -117,21 +117,16 @@ def suggest_answer(
         prompt_text, provided_info, expected_duration_sec, has_image=bool(image_b64)
     )
 
-    if config.is_local:
-        result = _generate_local(
-            config,
-            system_prompt,
-            user_prompt,
-            SampleAnswer,
-            SampleAnswer.model_json_schema(),
-            "SampleAnswer",
-            image_b64,
-            image_media_type,
-        )
-    else:
-        result = _generate_anthropic(
-            config, system_prompt, user_prompt, SampleAnswer, image_b64, image_media_type
-        )
+    # generate() dispatch theo config.backend (anthropic/local/openrouter, kèm
+    # fallback) — meta chỉ để log nội bộ, bài mẫu không cần telemetry.
+    result, _meta = generate(
+        config,
+        system_prompt,
+        user_prompt,
+        SampleAnswer,
+        image_b64=image_b64,
+        image_media_type=image_media_type,
+    )
 
     assert isinstance(result, SampleAnswer)
     # Bảo đảm target_band luôn có giá trị có nghĩa kể cả khi model bỏ trống.
@@ -160,15 +155,7 @@ def word_info(config: Config, word: str, lang: str) -> WordInfo:
     )
     user_prompt = f"WORD: {word}\n\nNow produce the entry as structured JSON."
 
-    if config.is_local:
-        result = _generate_local(
-            config, system_prompt, user_prompt, WordInfo,
-            WordInfo.model_json_schema(), "WordInfo", None, None,
-        )
-    else:
-        result = _generate_anthropic(
-            config, system_prompt, user_prompt, WordInfo, None, None
-        )
+    result, _meta = generate(config, system_prompt, user_prompt, WordInfo)
     assert isinstance(result, WordInfo)
     result.word = word
     return result

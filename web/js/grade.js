@@ -99,7 +99,9 @@ async function grade() {
 
     const endpoint = isBatch ? '/grade-batch' : '/grade';
     try {
-        const res = await fetch(`${url}${endpoint}`, { method: 'POST', body: formData });
+        // fetchWithRetry: server đầy tải trả 429 → tự chờ rồi gửi lại (học viên
+        // chỉ thấy "Grading..." lâu hơn thay vì lỗi).
+        const res = await fetchWithRetry(`${url}${endpoint}`, { method: 'POST', body: formData });
 
         if (!res.ok) {
             let detail = `HTTP ${res.status}`;

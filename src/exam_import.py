@@ -179,15 +179,26 @@ def _extract_user_text(llm_input: LlmInput) -> str:
 
 
 def call_llm_extract(llm_input: LlmInput, exam: str, config: Config) -> "ExtractedExam":
-    """Gọi LLM → ExtractedExam. Theo backend cấu hình (anthropic | local).
+    """Gọi LLM → ExtractedExam. Theo backend cấu hình (anthropic | local | openrouter).
 
-    - anthropic: Claude vision (messages.parse) — đọc được cả PDF scan/ảnh.
-    - local    : model local OpenAI-compatible (ép JSON schema, giống _score_local).
-                 Đọc ẢNH chỉ khi model local có VISION (vd Qwen-VL); model text thuần
-                 chỉ bóc được tài liệu có text-layer (PDF số / .docx).
+    - anthropic : Claude vision (messages.parse) — đọc được cả PDF scan/ảnh.
+    - local     : model local OpenAI-compatible (ép JSON schema, giống _score_local).
+                  Đọc ẢNH chỉ khi model local có VISION (vd Qwen-VL); model text thuần
+                  chỉ bóc được tài liệu có text-layer (PDF số / .docx).
+    - openrouter: mặc định vẫn bóc bằng LOCAL (model chấm điểm đã bench có thể
+                  không có vision) — chỉ đi OpenRouter khi bật
+                  TOEIC_OPENROUTER_VISION_EXTRACT.
     """
+    from .scoring.backends import _local_target, _openrouter_target
+
+    if config.is_openrouter:
+        if config.openrouter_vision_extract:
+            return _extract_openai_compat(
+                llm_input, exam, config, _openrouter_target(config)
+            )
+        return _extract_openai_compat(llm_input, exam, config, _local_target(config))
     if config.is_local:
-        return _extract_local(llm_input, exam, config)
+        return _extract_openai_compat(llm_input, exam, config, _local_target(config))
     return _extract_anthropic(llm_input, exam, config)
 
 
@@ -222,32 +233,40 @@ def _extract_anthropic(llm_input: LlmInput, exam: str, config: Config) -> "Extra
     return result
 
 
-def _extract_local(llm_input: LlmInput, exam: str, config: Config) -> "ExtractedExam":
-    """Bóc tách bằng model local (OpenAI-compatible). Ép JSON schema của ExtractedExam.
+def _extract_openai_compat(
+    llm_input: LlmInput, exam: str, config: Config, target
+) -> "ExtractedExam":
+    """Bóc tách qua đích OpenAI-compatible (local llama.cpp / OpenRouter).
 
-    Model text thuần không có text-layer để đọc → báo lỗi rõ (không gửi ảnh vô ích).
+    Ép JSON schema của ExtractedExam. Model text thuần không có text-layer để
+    đọc → báo lỗi rõ (không gửi ảnh vô ích). `target` là OpenAICompatTarget từ
+    scoring.backends (_local_target / _openrouter_target).
     """
     if not llm_input.text and llm_input.page_images:
-        # Có ảnh nhưng không có text-layer → cần model local CÓ VISION. Vẫn thử gửi
+        # Có ảnh nhưng không có text-layer → cần model CÓ VISION. Vẫn thử gửi
         # ảnh (data URI); nếu model text thuần sẽ lỗi/cho kết quả rỗng → báo gợi ý.
-        logger.info("Local extract: tài liệu chỉ có ảnh — cần model local có vision.")
+        logger.info("Extract (%s): tài liệu chỉ có ảnh — cần model có vision.", target.name)
 
-    from .scoring.backends import _get_local_client
+    from .scoring.backends import _get_openai_client
 
     try:
-        client = _get_local_client(config.local_base_url, config.local_api_key)
+        client = _get_openai_client(
+            target.base_url, target.api_key, target.timeout_sec, target.max_retries
+        )
     except ImportError as e:  # pragma: no cover
         raise ExamImportError("Backend local cần gói 'openai'. Cài: pip install openai") from e
 
-    # Quyết định có gửi ẢNH cho model local không:
-    # - local_vision_extract=True (server có --mmproj): gửi ảnh + text → đọc được
-    #   tranh/bảng/đề scan kể cả khi đã có text-layer.
-    # - Ngược lại: chỉ gửi ảnh khi KHÔNG có text-layer (model text-thuần nhồi base64
-    #   ảnh sẽ choke + cực chậm). Có text-layer → TEXT-ONLY cho nhanh.
-    user_text = _extract_user_text(llm_input)
-    send_images = bool(llm_input.page_images) and (
-        config.local_vision_extract or not llm_input.text
+    # Quyết định có gửi ẢNH không:
+    # - local: theo local_vision_extract (server có --mmproj mới đọc được ảnh);
+    #   không bật → chỉ gửi ảnh khi KHÔNG có text-layer (model text-thuần nhồi
+    #   base64 ảnh sẽ choke + cực chậm). Có text-layer → TEXT-ONLY cho nhanh.
+    # - openrouter: đã bật TOEIC_OPENROUTER_VISION_EXTRACT mới tới đây → model
+    #   được chọn có vision, luôn gửi ảnh kèm text.
+    vision_ok = (
+        config.local_vision_extract if target.name == "local" else True
     )
+    user_text = _extract_user_text(llm_input)
+    send_images = bool(llm_input.page_images) and (vision_ok or not llm_input.text)
     if send_images:
         user_content: object = [
             *({"type": "image_url", "image_url": {"url": f"data:{media};base64,{b64}"}}
@@ -261,37 +280,39 @@ def _extract_local(llm_input: LlmInput, exam: str, config: Config) -> "Extracted
         {"role": "system", "content": _extract_system_prompt(exam)},
         {"role": "user", "content": user_content},
     ]
+    from .scoring.backends import _openai_extra_body
+
     try:
         response = client.chat.completions.create(
-            model=config.local_model,
+            model=target.model,
             # Trần token có giới hạn: output là JSON cấu trúc (vài KB), KHÔNG cần cả
             # max_tokens chấm điểm (vd 180k). Tránh model sinh lan man.
-            max_tokens=min(config.max_tokens, _LOCAL_EXTRACT_MAX_TOKENS),
+            max_tokens=min(target.max_tokens, _LOCAL_EXTRACT_MAX_TOKENS),
             temperature=0,
             messages=messages,
             response_format={
                 "type": "json_schema",
                 "json_schema": {"name": "ExtractedExam", "schema": ExtractedExam.model_json_schema()},
             },
-            # TẮT "thinking" (Qwen3...) — bật sẽ sinh hàng chục nghìn token reasoning
-            # → import mất nhiều phút. Bóc tách không cần reasoning dài.
-            extra_body={"chat_template_kwargs": {"enable_thinking": config.local_enable_thinking}},
+            # local: TẮT "thinking" (Qwen3...) — bật sẽ sinh hàng chục nghìn token
+            # reasoning → import mất nhiều phút. openrouter: provider/reasoning.
+            extra_body=_openai_extra_body(config, target),
         )
     except Exception as e:  # noqa: BLE001 - bọc lỗi mạng/model cho rõ
         raise ExamImportError(
-            f"Gọi model local thất bại: {e}. Nếu đề là ảnh/PDF scan, cần model local có "
+            f"Gọi model {target.name} thất bại: {e}. Nếu đề là ảnh/PDF scan, cần model có "
             f"vision (vd Qwen-VL); model text thuần chỉ bóc được tài liệu có text-layer."
         ) from e
 
     content = response.choices[0].message.content
     if not content:
         raise ExamImportError(
-            "Model local không trả về nội dung. Nếu đề là ảnh/scan, model local cần có vision."
+            f"Model {target.name} không trả về nội dung. Nếu đề là ảnh/scan, model cần có vision."
         )
     try:
         return ExtractedExam.model_validate_json(content)
     except Exception as e:  # noqa: BLE001
-        raise ExamImportError(f"Model local trả JSON không đúng schema: {e}") from e
+        raise ExamImportError(f"Model {target.name} trả JSON không đúng schema: {e}") from e
 
 
 # ── BƯỚC 4: validate (KHÔNG tin LLM) ─────────────────────────────────────────

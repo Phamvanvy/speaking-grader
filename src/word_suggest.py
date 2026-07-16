@@ -24,7 +24,7 @@ from .phoneme.ipa import word_to_ipa, word_ipa_display
 from .phoneme.ipa.g2p import _get_cmudict
 from .phoneme.ipa.phoneme_set import _WORD_IPA_OVERRIDES, normalize_ipa
 from .schema import PhonemePracticeList
-from .scoring.backends import _generate_anthropic, _generate_local
+from .scoring.backends import generate
 from .words import _WORD_RE
 
 logger = logging.getLogger("toeic.word_suggest")
@@ -141,16 +141,7 @@ def rank_with_llm(config: Config, symbol: str, candidates: list[str]) -> list[di
         f"CANDIDATES: {', '.join(candidates)}\n\n"
         "Now produce the structured JSON."
     )
-    if config.is_local:
-        result = _generate_local(
-            config, system_prompt, user_prompt, PhonemePracticeList,
-            PhonemePracticeList.model_json_schema(), "PhonemePracticeList",
-            None, None,
-        )
-    else:
-        result = _generate_anthropic(
-            config, system_prompt, user_prompt, PhonemePracticeList, None, None
-        )
+    result, _meta = generate(config, system_prompt, user_prompt, PhonemePracticeList)
     assert isinstance(result, PhonemePracticeList)
     allowed = set(candidates)
     picked: list[dict] = []

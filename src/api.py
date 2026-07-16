@@ -43,6 +43,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import auth, history, word_suggest, words
+from .admission import admission_slot, admission_stats
 from .config import Config, load_config
 from .core import grade_response
 from .exam_import import ExamImportError, extract_exam
@@ -358,10 +359,14 @@ def health() -> dict:
         "model": (
             _BASE_CONFIG.local_model
             if _BASE_CONFIG.is_local
+            else _BASE_CONFIG.openrouter_model
+            if _BASE_CONFIG.is_openrouter
             else _BASE_CONFIG.model
         ),
         "whisper_model": _BASE_CONFIG.whisper_model,
         "max_tokens": _BASE_CONFIG.max_tokens,
+        # Tải chấm bài của worker này (per-process; tổng = số worker × capacity).
+        "grading": admission_stats(_BASE_CONFIG),
     }
 
 
@@ -415,27 +420,32 @@ async def grade(
         raise HTTPException(status_code=400, detail="File audio rỗng.")
 
     config = _resolve_config(feedback_lang)
-    try:
-        output = await run_in_threadpool(
-            _grade_bytes,
-            audio_bytes,
-            suffix,
-            config,
-            qt,
-            reference_script=text,
-            image_b64=image_b64,
-            image_media_type=image_media_type,
-            expected_duration_sec=expected_duration_sec,
-            prompt=prompt,
-            provided_info=provided_info,
-            no_ai=no_ai,
-            mode=mode,
-            user_requested_review=user_requested_review,
-            accent=accent,
-        )
-    except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
-        logger.exception("Lỗi khi chấm")
-        raise HTTPException(status_code=500, detail=f"Lỗi khi chấm: {e}") from e
+    # Admission control: giữ 1 slot chấm (xếp hàng khi đầy, quá tải → 429 để
+    # frontend tự retry). 429 raise TRƯỚC try để không bị gói thành 500. 1 slot
+    # cover trọn _grade_bytes — kể cả lần auto-escalation chạy lại pipeline.
+    async with admission_slot(config) as queue_wait_ms:
+        try:
+            output = await run_in_threadpool(
+                _grade_bytes,
+                audio_bytes,
+                suffix,
+                config,
+                qt,
+                reference_script=text,
+                image_b64=image_b64,
+                image_media_type=image_media_type,
+                expected_duration_sec=expected_duration_sec,
+                prompt=prompt,
+                provided_info=provided_info,
+                no_ai=no_ai,
+                mode=mode,
+                user_requested_review=user_requested_review,
+                accent=accent,
+            )
+        except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
+            logger.exception("Lỗi khi chấm")
+            raise HTTPException(status_code=500, detail=f"Lỗi khi chấm: {e}") from e
+    output.setdefault("telemetry", {})["queue_wait_ms"] = queue_wait_ms
 
     # Lưu lịch sử (best-effort, sau khi payload sẵn sàng). Có history_session_id
     # → đây là 1 câu của phiên thi cả đề (SPA chấm rời từng câu); không thì là
@@ -561,7 +571,10 @@ async def grade_batch(
         if not data:
             return {"index": idx, "audio_filename": filename,
                     "error": "File audio rỗng."}
-        async with sem:
+        # sem local giới hạn fan-out của batch này; admission_slot (queue=False,
+        # chờ không 429) mới là trần chấm đồng thời TOÀN HỆ THỐNG — batch chia
+        # slot công bằng với các request /grade lẻ của học viên khác.
+        async with sem, admission_slot(config, queue=False):
             try:
                 result = await run_in_threadpool(
                     _grade_bytes,
@@ -678,21 +691,25 @@ async def suggest(
     image_b64, image_media_type = await _read_image(image)
     band = target_band.strip() or default_target_band(exam)
     config = _resolve_config(feedback_lang)
-    try:
-        result = await run_in_threadpool(
-            suggest_answer,
-            config,
-            qt,
-            prompt_text=prompt,
-            provided_info=provided_info,
-            image_b64=image_b64,
-            image_media_type=image_media_type,
-            target_band=band,
-            expected_duration_sec=expected_duration_sec,
-        )
-    except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
-        logger.exception("Lỗi khi sinh bài mẫu")
-        raise HTTPException(status_code=500, detail=f"Lỗi khi sinh bài mẫu: {e}") from e
+    # Sinh bài mẫu cũng tốn 1 LLM call + 1 thread → dùng chung slot chấm bài.
+    async with admission_slot(config):
+        try:
+            result = await run_in_threadpool(
+                suggest_answer,
+                config,
+                qt,
+                prompt_text=prompt,
+                provided_info=provided_info,
+                image_b64=image_b64,
+                image_media_type=image_media_type,
+                target_band=band,
+                expected_duration_sec=expected_duration_sec,
+            )
+        except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
+            logger.exception("Lỗi khi sinh bài mẫu")
+            raise HTTPException(
+                status_code=500, detail=f"Lỗi khi sinh bài mẫu: {e}"
+            ) from e
     out = result.model_dump()
     out["question_type"] = qt.key
     out["exam"] = exam
@@ -799,7 +816,8 @@ async def exam_grade(
             return {**base, "error": "Câu không hợp lệ hoặc audio sai định dạng."}
         if not data:
             return {**base, "error": "Thiếu audio cho câu này."}
-        async with sem:
+        # Như /grade-batch: admission_slot (queue=False) chia slot toàn cục.
+        async with sem, admission_slot(config, queue=False):
             try:
                 result = await run_in_threadpool(
                     _grade_bytes,

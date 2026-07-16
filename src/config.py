@@ -268,6 +268,46 @@ class Config:
     # Google trên UI. CLIENT_ID là thông tin CÔNG KHAI (không phải secret); flow
     # id_token phía web KHÔNG cần client secret. Xem /auth/google trong api.py.
     google_client_id: str = ""
+    # ── Admission control cho các endpoint chấm bài ──────────────────────
+    # Giới hạn số bài chấm ĐỒNG THỜI mỗi uvicorn worker (Dockerfile chạy 2 worker
+    # → tổng = 2×N). ASR đã serialize bằng lock riêng nên slot >1 chỉ chồng lấn
+    # tầng LLM/feature; giữ ≤~10 để không cạn threadpool anyio (40 thread/process).
+    # 0 = TẮT admission control (hành vi cũ: nhận không giới hạn → quá tải là
+    # request treo). Đặt qua TOEIC_GRADE_CONCURRENCY.
+    grade_concurrency: int = 4
+    # Số request được XẾP HÀNG chờ slot mỗi worker; vượt → 429 ngay (chặn
+    # retry-storm). 2×(4+40)=88 > 50 học viên đồng thời → bình thường không ai
+    # bị 429, hàng đợi chỉ sắp thứ tự. Qua TOEIC_GRADE_QUEUE_MAX.
+    grade_queue_max: int = 40
+    # Chờ trong hàng quá N giây → 429 (chỉ shed load không thể phục vụ sớm;
+    # worst-case chờ thật ≈ 40 bài × 15s / 4 slot = 150s). Qua TOEIC_GRADE_QUEUE_TIMEOUT.
+    grade_queue_timeout_sec: float = 180.0
+    # Giá trị header Retry-After khi trả 429 (client tự thêm jitter).
+    # Qua TOEIC_GRADE_RETRY_AFTER.
+    grade_retry_after_sec: int = 15
+    # ── Backend "openrouter" (TOEIC_BACKEND=openrouter) ──────────────────
+    # Chấm điểm qua OpenRouter (OpenAI-compatible, model trả phí) để giải phóng
+    # CPU/GPU máy host cho ASR; llama.cpp local giữ làm FALLBACK khi OpenRouter
+    # lỗi/timeout — không học viên nào bị kẹt vì dịch vụ ngoài. ĐỔI MODEL CHẤM
+    # = ĐIỂM THAY ĐỔI → bắt buộc bench (scripts/bench_llm_scoring.py) trước khi
+    # flip .env sang backend này.
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Model do bench quyết định (vd "anthropic/claude-haiku-4.5") — không hardcode.
+    openrouter_model: str = ""
+    # Trần completion RIÊNG: nhiều provider reject max_tokens quá lớn — KHÔNG
+    # dùng chung TOEIC_MAX_TOKENS (đặt 180k cho thinking budget của local).
+    openrouter_max_tokens: int = 8000
+    # Model flash-class trả JSON chấm điểm trong 5-20s; 90s đủ cover đuôi chậm.
+    openrouter_timeout_sec: float = 90.0
+    # OpenRouter lỗi → tự chạy lại bằng backend local (config local_* sẵn có).
+    openrouter_fallback_local: bool = True
+    # Reasoning tokens: "none" (tắt — rẻ + nhanh, JSON không bị chờ think dài),
+    # "low"/"medium"/"high" (effort), "" = để model tự quyết.
+    openrouter_reasoning: str = "none"
+    # Bóc tách đề (vision) qua OpenRouter chỉ khi bật — model chấm điểm đã bench
+    # có thể KHÔNG có vision; default off = exam import vẫn đi local như prod.
+    openrouter_vision_extract: bool = False
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -281,6 +321,10 @@ class Config:
     @property
     def is_local(self) -> bool:
         return self.backend == "local"
+
+    @property
+    def is_openrouter(self) -> bool:
+        return self.backend == "openrouter"
 
 
 def load_config() -> Config:
@@ -298,6 +342,25 @@ def load_config() -> Config:
             f"Hợp lệ: {sorted(EXAM_REGISTRIES)} "
             f"(đặt qua SPEAKING_GRADER_DEFAULT_EXAM)."
         )
+    backend = (os.getenv("TOEIC_BACKEND", "anthropic") or "anthropic").lower()
+    if backend not in {"anthropic", "local", "openrouter"}:
+        raise ValueError(
+            f"TOEIC_BACKEND không hợp lệ: '{backend}'. "
+            "Hợp lệ: anthropic | local | openrouter."
+        )
+    openrouter_api_key = os.getenv("OPENROUTER_API_KEY") or None
+    openrouter_model = (os.getenv("TOEIC_OPENROUTER_MODEL", "") or "").strip()
+    if backend == "openrouter":
+        # Fail fast lúc khởi động thay vì 500 ở bài chấm đầu tiên.
+        if not openrouter_api_key:
+            raise ValueError(
+                "TOEIC_BACKEND=openrouter cần OPENROUTER_API_KEY trong .env."
+            )
+        if not openrouter_model:
+            raise ValueError(
+                "TOEIC_BACKEND=openrouter cần TOEIC_OPENROUTER_MODEL "
+                "(vd 'anthropic/claude-haiku-4.5' — chọn qua bench)."
+            )
     return Config(
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
         model=os.getenv("TOEIC_MODEL", "claude-sonnet-4-6"),
@@ -306,7 +369,7 @@ def load_config() -> Config:
         # 'cuda:N' để ghim Whisper vào 1 GPU cụ thể (vd WHISPER_DEVICE=cuda:0 còn
         # TOEIC_PHONEME_DEVICE=cuda:1 → ASR và wav2vec ở 2 card khác nhau).
         whisper_device=os.getenv("WHISPER_DEVICE", "auto"),
-        backend=(os.getenv("TOEIC_BACKEND", "anthropic") or "anthropic").lower(),
+        backend=backend,
         default_exam=default_exam,
         local_base_url=os.getenv("TOEIC_LOCAL_BASE_URL", "http://localhost:8080/v1"),
         local_model=os.getenv("TOEIC_LOCAL_MODEL", "qwen3"),
@@ -503,4 +566,33 @@ def load_config() -> Config:
             os.getenv("TOEIC_AUTH_DB_PATH", "data/auth.db") or "data/auth.db"
         ),
         google_client_id=(os.getenv("GOOGLE_CLIENT_ID", "") or "").strip(),
+        grade_concurrency=int(os.getenv("TOEIC_GRADE_CONCURRENCY", "4") or "4"),
+        grade_queue_max=int(os.getenv("TOEIC_GRADE_QUEUE_MAX", "40") or "40"),
+        grade_queue_timeout_sec=float(
+            os.getenv("TOEIC_GRADE_QUEUE_TIMEOUT", "180") or "180"
+        ),
+        grade_retry_after_sec=int(
+            os.getenv("TOEIC_GRADE_RETRY_AFTER", "15") or "15"
+        ),
+        openrouter_api_key=openrouter_api_key,
+        openrouter_base_url=(
+            os.getenv("TOEIC_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+            or "https://openrouter.ai/api/v1"
+        ),
+        openrouter_model=openrouter_model,
+        openrouter_max_tokens=int(
+            os.getenv("TOEIC_OPENROUTER_MAX_TOKENS", "8000") or "8000"
+        ),
+        openrouter_timeout_sec=float(
+            os.getenv("TOEIC_OPENROUTER_TIMEOUT", "90") or "90"
+        ),
+        openrouter_fallback_local=(
+            os.getenv("TOEIC_OPENROUTER_FALLBACK_LOCAL", "true") or "true"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        openrouter_reasoning=(
+            os.getenv("TOEIC_OPENROUTER_REASONING", "none") or ""
+        ).strip().lower(),
+        openrouter_vision_extract=(
+            os.getenv("TOEIC_OPENROUTER_VISION_EXTRACT", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
     )

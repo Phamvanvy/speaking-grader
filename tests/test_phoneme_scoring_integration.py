@@ -317,7 +317,7 @@ class TestScoreFunctionAcceptsPhonemeResult:
             mock_client.messages.parse.return_value = mock_response
             MockAnthropic.return_value = mock_client
 
-            result = score(
+            result, meta = score(
                 config=config,
                 qt=qt,
                 prompt_text="Read this",
@@ -327,6 +327,7 @@ class TestScoreFunctionAcceptsPhonemeResult:
                 gating=gating,
                 phoneme_result=phoneme,
             )
+            assert meta["backend_used"] == "anthropic"
 
             # Điểm tổng được TÍNH lại tất định, KHÔNG lấy 999 từ model:
             # base = (110 + 110) / 2 = 110; penalty = min(medium, medium) = 0.85

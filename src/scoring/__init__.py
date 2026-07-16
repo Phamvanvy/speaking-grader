@@ -35,6 +35,7 @@ from .backends import (
     _local_client_cache,
     _score_anthropic,
     _score_local,
+    generate,
 )
 from .compute import (
     _compute_ielts_band,
@@ -71,8 +72,11 @@ def score(
     image_b64: str | None = None,
     image_media_type: str | None = None,
     provided_info: str | None = None,
-) -> SpeakingResult:
-    """Gọi LLM (Claude hoặc model local) và trả về SpeakingResult.
+) -> tuple[SpeakingResult, dict]:
+    """Gọi LLM (Claude / OpenRouter / model local) → (SpeakingResult, meta).
+
+    meta (từ backends.generate): {backend_used, model, latency_ms,
+    fallback_reason} — backend nào THẬT SỰ chấm, đưa vào telemetry của bài.
 
     phoneme_result: kết quả phoneme analysis từ wav2vec/MFA (optional).
         Nếu có thì thêm vào payload để AI dùng làm evidence cho pronunciation.
@@ -100,14 +104,20 @@ def score(
     max_attempts = 2
     last_problems: list[str] = []
     for attempt in range(1, max_attempts + 1):
-        if config.is_local:
-            result = _score_local(
-                config, qt, system_prompt, user_prompt, image_b64, image_media_type
-            )
-        else:
-            result = _score_anthropic(
-                config, system_prompt, user_prompt, image_b64, image_media_type
-            )
+        raw, gen_meta = generate(
+            config,
+            system_prompt,
+            user_prompt,
+            SpeakingResult,
+            # Schema siết theo qt (ép đúng N tiêu chí + enum key) — chỉ các
+            # backend OpenAI-compatible dùng; anthropic đi messages.parse.
+            json_schema=_local_response_schema(qt),
+            schema_name="SpeakingResult",
+            image_b64=image_b64,
+            image_media_type=image_media_type,
+        )
+        assert isinstance(raw, SpeakingResult)
+        result = raw
         last_problems = _validate_result(result, qt)
         if not last_problems:
             # Loại các correction mà `said` không thực sự có trong transcript
@@ -129,7 +139,7 @@ def score(
             else:
                 result.estimated_toeic_score = _compute_toeic_score(result)
                 result.estimated_ielts_band = None
-            return result
+            return result, gen_meta
         logger.warning(
             "Kết quả chấm không hợp lệ (lần %d/%d): %s",
             attempt,
@@ -160,6 +170,7 @@ __all__ = [
     "_drop_invalid_corrections",
     "_norm_for_match",
     # backends
+    "generate",
     "_score_anthropic",
     "_score_local",
     "_get_local_client",

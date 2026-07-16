@@ -427,6 +427,7 @@ def grade_response(
     # [4] Scoring (trừ khi no_ai hoặc audio rỗng)
     scores_dict = None
     scoring_status = "skipped"
+    scoring_meta: dict = {}
     if no_ai:
         logger.info("Bỏ qua chấm điểm (no_ai).")
     elif gate.should_skip_ai:
@@ -439,7 +440,7 @@ def grade_response(
         )
     else:
         step_started = time.perf_counter()
-        result = scoring.score(
+        result, scoring_meta = scoring.score(
             config=config,
             qt=qt,
             prompt_text=prompt_text,
@@ -457,11 +458,14 @@ def grade_response(
         scoring_status = "completed"
         _score_field = exam_score_field(qt.exam)
         logger.info(
-            "Timing | question=%s | step=scoring | duration_ms=%d | exam=%s | score=%s",
+            "Timing | question=%s | step=scoring | duration_ms=%d | exam=%s | "
+            "score=%s | backend=%s | fallback=%s",
             question_id,
             step_timings_ms["scoring"],
             qt.exam,
             scores_dict.get(_score_field),
+            scoring_meta.get("backend_used"),
+            scoring_meta.get("fallback_reason"),
         )
 
     if scoring_status != "completed":
@@ -496,6 +500,11 @@ def grade_response(
             "asr_backend_used": asr_run.backend_used,
             "transcription_time_ms": asr_run.elapsed_ms,
             "step_timings_ms": step_timings_ms,
+            # Backend LLM THẬT SỰ chấm bài này ("local_fallback" = OpenRouter
+            # hỏng, local cứu) — theo dõi fallback rate sau khi ship openrouter.
+            "scoring_backend_used": scoring_meta.get("backend_used"),
+            "scoring_model": scoring_meta.get("model"),
+            "scoring_fallback_reason": scoring_meta.get("fallback_reason"),
         },
     )
     step_timings_ms["report_build"] = int((time.perf_counter() - step_started) * 1000)
