@@ -1,4 +1,4 @@
-"""Quy đổi điểm tiêu chí → điểm tổng TẤT ĐỊNH (TOEIC 0-200 / IELTS band 0-9).
+"""Quy đổi điểm tiêu chí → điểm tổng TẤT ĐỊNH (TOEIC 0-200 / IELTS 0-9 / TOPIK 0-200).
 
 Tách khỏi LLM call: cùng một bộ điểm tiêu chí + mức hoàn thành luôn ra cùng một số
 (loại dao động do model tự bốc số trong prose).
@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import math
 
-from ..rubrics.base import exam_score_field
+from ..rubrics.base import QuestionType, exam_score_field
+from ..rubrics.topik import TOPIK_LEVEL_CAP, TOPIK_OVERALL_WEIGHT
 from ..schema import CompletionLevel, SpeakingResult
 
 # --- Quy đổi điểm tiêu chí (0-3) → điểm TOEIC Speaking (0-200) -----------------
@@ -112,6 +113,54 @@ def _compute_ielts_band(result: SpeakingResult) -> float:
     return max(0.0, min(9.0, _round_half(capped)))
 
 
+# --- Quy đổi điểm tiêu chí (0-5) → điểm TOPIK 말하기 (0-200) --------------------
+# Cùng nguyên tắc với TOEIC: LLM chỉ chấm 0-5 mỗi tiêu chí; số 0-200 tính tất
+# định ở đây. Mốc neo theo cut-lines chính thức (công văn Bộ GD Hàn 2026): 1급
+# 20-49, 2급 50-89, 3급 90-109, 4급 110-129, 5급 130-159, 6급 160-200. Điểm 3/5
+# ("khá, lỗi thỉnh thoảng") ~ sàn 4급 (110); 4/5 ("tốt, vài lỗi nhỏ") ~ giữa
+# 5급 (155). Nội suy tuyến tính giữa các mốc.
+_TOPIK_CRIT_ANCHORS: tuple[tuple[float, float], ...] = (
+    (0.0, 0.0),
+    (1.0, 30.0),
+    (2.0, 70.0),
+    (3.0, 110.0),
+    (4.0, 155.0),
+    (5.0, 200.0),
+)
+
+
+def _interp_anchors(
+    score: float, anchors: tuple[tuple[float, float], ...]
+) -> float:
+    """Nội suy tuyến tính điểm tiêu chí → điểm thành phần theo bảng mốc neo."""
+    s = max(anchors[0][0], min(anchors[-1][0], score))
+    for (x0, y0), (x1, y1) in zip(anchors, anchors[1:]):
+        if s <= x1:
+            return y0 + (y1 - y0) * (s - x0) / (x1 - x0)
+    return anchors[-1][1]
+
+
+def _compute_topik_score(result: SpeakingResult, qt: QuestionType) -> int:
+    """Tính estimated_topik_score (0-200) TẤT ĐỊNH từ điểm tiêu chí + mức câu.
+
+    Như TOEIC: trung bình điểm thành phần nội suy từ tiêu chí 0-5, nhân phạt
+    completion (mắt xích yếu nhất). Khác TOEIC: áp TRẦN theo mức câu
+    (TOPIK_LEVEL_CAP — câu sơ cấp làm hoàn hảo không phải bằng chứng 6급).
+    Trả số nguyên (TOPIK official báo điểm nguyên, không bước 10).
+    """
+    if not result.criteria:
+        return 0
+    base = sum(
+        _interp_anchors(c.score, _TOPIK_CRIT_ANCHORS) for c in result.criteria
+    ) / len(result.criteria)
+    penalty = min(
+        _LEVEL_PENALTY.get(result.task_completion, 1.0),
+        _LEVEL_PENALTY.get(result.content_relevance, 1.0),
+    )
+    cap = TOPIK_LEVEL_CAP.get(qt.key, 200)
+    return max(0, min(cap, int(round(base * penalty))))
+
+
 # --- Gộp điểm tổng cho TRỌN một đề thi (nhiều câu/phần) -----------------------
 # Dùng cho luồng "Thi cả đề" (/exam/grade). Mỗi câu đã có điểm tổng riêng (TOEIC
 # /200, IELTS band) tính tất định ở trên; overall cả đề = TRUNG BÌNH các câu đã
@@ -126,19 +175,30 @@ def compute_exam_overall(
     """Trung bình điểm tổng các câu đã chấm → overall cả đề.
 
     per_question_scores: list các dict `scores` (field 'estimated_toeic_score' /
-    'estimated_ielts_band'); phần tử None / thiếu điểm (câu bỏ qua, lỗi) được loại.
-    Trả None nếu không câu nào có điểm. TOEIC làm tròn bội 10; IELTS làm tròn 0.5.
+    'estimated_ielts_band' / 'estimated_topik_score'); phần tử None / thiếu điểm
+    (câu bỏ qua, lỗi) được loại. Trả None nếu không câu nào có điểm. TOEIC làm
+    tròn bội 10; IELTS làm tròn 0.5; TOPIK trung bình CÓ TRỌNG SỐ theo mức câu
+    (TOPIK_OVERALL_WEIGHT, key 'question_type' trong scores — do score() ghi đè
+    bằng key authoritative, không tin echo của LLM) và làm tròn số nguyên.
     """
-    # Field theo registry EXAM_SCORE (nguồn duy nhất) — topik đọc đúng
-    # estimated_topik_score khi M3 thêm công thức, thay vì nhầm field TOEIC.
+    # Field theo registry EXAM_SCORE (nguồn duy nhất).
     field = exam_score_field(exam)
-    vals = [
-        float(s[field])
-        for s in per_question_scores
-        if s and s.get(field) is not None
-    ]
-    if not vals:
+    scored = [s for s in per_question_scores if s and s.get(field) is not None]
+    if not scored:
         return None
+    if exam == "topik":
+        # Câu khó đóng góp nhiều hơn vào nhận định level; dạng câu lạ → weight 1.
+        pairs = [
+            (
+                float(s[field]),
+                TOPIK_OVERALL_WEIGHT.get(s.get("question_type") or "", 1.0),
+            )
+            for s in scored
+        ]
+        total_w = sum(w for _, w in pairs)
+        mean = sum(v * w for v, w in pairs) / total_w
+        return max(0, min(200, int(round(mean))))
+    vals = [float(s[field]) for s in scored]
     mean = sum(vals) / len(vals)
     if exam == "ielts":
         return max(0.0, min(9.0, _round_half(mean)))

@@ -40,6 +40,7 @@ from .backends import (
 from .compute import (
     _compute_ielts_band,
     _compute_toeic_score,
+    _compute_topik_score,
     _interp_crit_points,
     _round_half,
     compute_exam_overall,
@@ -131,14 +132,19 @@ def score(
             if qt.exam == Exam.IELTS.value:
                 result.estimated_ielts_band = _compute_ielts_band(result)
                 result.estimated_toeic_score = None
+                result.estimated_topik_score = None
             elif qt.exam == Exam.TOPIK.value:
-                # TOPIK (M1): công thức estimated_topik_score đến ở M3 — trong
-                # lúc đó KHÔNG được nhận nhầm điểm TOEIC (criterion scores vẫn có).
+                # question_type trong result chỉ là echo của LLM — ghi đè bằng
+                # key authoritative vì compute_exam_overall weight overall theo
+                # scores["question_type"] (mức câu sơ/trung/cao cấp).
+                result.question_type = qt.key
+                result.estimated_topik_score = _compute_topik_score(result, qt)
                 result.estimated_toeic_score = None
                 result.estimated_ielts_band = None
             else:
                 result.estimated_toeic_score = _compute_toeic_score(result)
                 result.estimated_ielts_band = None
+                result.estimated_topik_score = None
             return result, gen_meta
         logger.warning(
             "Kết quả chấm không hợp lệ (lần %d/%d): %s",
@@ -157,6 +163,7 @@ __all__ = [
     # compute
     "_compute_toeic_score",
     "_compute_ielts_band",
+    "_compute_topik_score",
     "_round_half",
     "_interp_crit_points",
     # prompts

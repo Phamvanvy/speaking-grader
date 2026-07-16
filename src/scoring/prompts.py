@@ -42,9 +42,8 @@ def _build_system_prompt(qt: QuestionType, feedback_lang: str) -> str:
         else "TOPIK Speaking (한국어 말하기 평가)" if is_topik
         else "TOEIC"
     )
-    # TOPIK (M1): thí sinh nói TIẾNG HÀN — nói rõ cho LLM để không đánh giá theo
-    # chuẩn tiếng Anh. Persona/scale block đầy đủ + estimated_topik_score đến ở M3;
-    # tạm dùng khối final-score chung nhánh else (LLM chỉ chấm per-criterion).
+    # TOPIK: thí sinh nói TIẾNG HÀN — nói rõ cho LLM để không đánh giá theo
+    # chuẩn tiếng Anh.
     korean_note = (
         "\nLANGUAGE OF THE RESPONSE (important): the candidate is speaking KOREAN. "
         "The transcript is in Korean (Hangul). Judge vocabulary, grammar, register "
@@ -69,6 +68,20 @@ def _build_system_prompt(qt: QuestionType, feedback_lang: str) -> str:
             "band depends entirely on these per-criterion bands."
         )
         rationale_total = "overall band"
+    elif is_topik:
+        scale_label = "0-5"
+        final_score_block = (
+            "FINAL SCORE (important):\n"
+            "- Do NOT compute or output the 0-200 estimated_topik_score. It is "
+            "derived AUTOMATICALLY by the system from your per-criterion 0-5 "
+            "scores plus task_completion / content_relevance (and the question's "
+            "difficulty level). Your job is ONLY to score each criterion 0-5 "
+            "accurately and consistently.\n"
+            "- Be calibrated on the 0-5 scale: anchor every criterion to the "
+            "SCORING SCALE above and to the objective evidence, since the final "
+            "number depends entirely on these per-criterion scores."
+        )
+        rationale_total = "0-200 number"
     else:
         scale_label = "0-3"
         final_score_block = (

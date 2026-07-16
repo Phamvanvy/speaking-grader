@@ -185,6 +185,17 @@ class SpeakingResult(BaseModel):
             "tiêu chí, model KHÔNG cần điền. None nếu kỳ thi không phải IELTS."
         ),
     )
+    # TOPIK 말하기: thang 0-200 (level 1-6) — tính từ điểm tiêu chí 0-5, áp trần
+    # theo mức câu (sơ/trung/cao cấp — xem rubrics/topik.py + scoring/compute.py).
+    estimated_topik_score: int | None = Field(
+        default=None,
+        ge=0,
+        le=200,
+        description=(
+            "Điểm TOPIK 말하기 (0-200) — TÍNH TỰ ĐỘNG từ điểm tiêu chí, model "
+            "KHÔNG cần điền. None nếu kỳ thi không phải TOPIK."
+        ),
+    )
     # Giải thích logic chấm: tiêu chí nào mạnh/yếu và mức độ hoàn thành tổng thể.
     # KHÔNG nêu một con số 0-200 cụ thể (số tổng do code tính). Phải viết bằng
     # ngôn ngữ nhận xét được cấu hình.

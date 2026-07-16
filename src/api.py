@@ -378,7 +378,7 @@ async def grade(
     text: str | None = Form(None, description="Script tham chiếu (Read Aloud)"),
     image: UploadFile | None = File(None, description="Ảnh đề bài (Describe Picture)"),
     expected_duration_sec: float | None = Form(None),
-    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts"),
+    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts | topik"),
     question_type: str | None = Form(None),
     feedback_lang: str | None = Form(None),
     prompt: str = Form("", description="Đề bài hiển thị cho thí sinh (optional)"),
@@ -487,7 +487,7 @@ async def grade_batch(
     text: str | None = Form(None, description="Script tham chiếu (Read Aloud)"),
     image: UploadFile | None = File(None, description="Ảnh đề bài (Describe Picture)"),
     expected_duration_sec: float | None = Form(None),
-    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts"),
+    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts | topik"),
     question_type: str | None = Form(None),
     feedback_lang: str | None = Form(None),
     prompt: str = Form("", description="Đề bài hiển thị cho thí sinh (optional)"),
@@ -662,7 +662,7 @@ async def tts(text: str = "", accent: str = "default") -> Response:
 
 @app.post("/suggest")
 async def suggest(
-    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts"),
+    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts | topik"),
     question_type: str = Form(
         ..., description="Dạng câu mở (vd part2_long_turn / describe_picture)"
     ),
@@ -726,7 +726,7 @@ async def suggest(
 @app.post("/exam/import")
 async def exam_import(
     file: UploadFile = File(..., description="Tài liệu đề thi (.pdf/.docx/ảnh)"),
-    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts"),
+    exam: str = Form(_BASE_CONFIG.default_exam, description="Kỳ thi: toeic | ielts | topik"),
 ) -> dict:
     """Bóc tách đề từ tài liệu → ExamPaper JSON (kèm warnings) cho UI review/sửa.
 
@@ -945,7 +945,7 @@ def exam_builtin(exam: str, set_id: str = "set1") -> dict:
 
 @app.post("/exam/overall")
 def exam_overall(
-    exam: str = Form(..., description="Kỳ thi: toeic | ielts"),
+    exam: str = Form(..., description="Kỳ thi: toeic | ielts | topik"),
     scores: str = Form(
         ..., description="JSON list các dict `scores` từng câu (null = câu lỗi/bỏ qua)"
     ),

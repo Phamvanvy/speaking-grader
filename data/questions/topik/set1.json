@@ -1,0 +1,36 @@
+{
+  "title": "TOPIK 말하기 Practice Test 1",
+  "questions": [
+    {
+      "id": "topik_q1_weekend",
+      "type": "q1_answer_question",
+      "prompt": "주말에 보통 뭐 해요? 누구하고 같이 해요? 이야기해 보세요.",
+      "expected_duration_sec": 30
+    },
+    {
+      "id": "topik_q1_food",
+      "type": "q1_answer_question",
+      "prompt": "무슨 음식을 좋아해요? 그 음식을 얼마나 자주 먹어요? 이야기해 보세요.",
+      "expected_duration_sec": 30
+    },
+    {
+      "id": "topik_q4_online_class",
+      "type": "q4_complete_dialogue",
+      "prompt": "두 사람이 '온라인 수업'에 대해 이야기하고 있습니다. 남자의 마지막 말을 듣고 여자가 할 말로 대화를 완성해 보세요. 여자의 입장이 되어 남자의 의견에 대해 자신의 생각을 말해 보세요.",
+      "provided_info": "남자: 요즘 온라인으로 수업을 듣는 학생들이 많아졌어요.\n여자: 네, 저도 지난 학기에 온라인 수업을 몇 개 들었어요.\n남자: 그런데 저는 온라인 수업이 교실 수업보다 효과가 떨어진다고 생각해요. 집중도 잘 안 되고, 모르는 게 있어도 바로 질문하기 어렵잖아요.\n여자: (대답하십시오)",
+      "expected_duration_sec": 60
+    },
+    {
+      "id": "topik_q6_early_foreign_language",
+      "type": "q6_present_opinion",
+      "prompt": "최근 어릴 때부터 아이에게 외국어를 가르치는 조기 외국어 교육에 대한 관심이 높아지고 있습니다. 조기 외국어 교육이 필요하다고 생각합니까? 자신의 의견을 근거와 함께 말해 보세요.",
+      "expected_duration_sec": 80
+    },
+    {
+      "id": "topik_q6_social_media",
+      "type": "q6_present_opinion",
+      "prompt": "요즘 많은 사람들이 SNS(소셜 미디어)를 사용하면서 개인의 일상을 공유합니다. SNS가 우리 생활에 주는 영향은 긍정적이라고 생각합니까, 부정적이라고 생각합니까? 자신의 의견을 근거와 함께 말해 보세요.",
+      "expected_duration_sec": 80
+    }
+  ]
+}

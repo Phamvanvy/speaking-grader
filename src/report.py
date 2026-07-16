@@ -54,11 +54,18 @@ def _score_display(output: dict[str, Any], scores: dict[str, Any]) -> tuple[str,
     """Trả về (criterion_suffix, overall_line) theo kỳ thi của output.
 
     TOEIC: ('/3', 'ĐIỂM TOEIC ƯỚC TÍNH: 120/200'); IELTS: ('/9', 'IELTS BAND
-    ƯỚC TÍNH: 6.5/9'). Dùng chung cho cả bản plain lẫn rich.
+    ƯỚC TÍNH: 6.5/9'); TOPIK: ('/5', 'ĐIỂM TOPIK ƯỚC TÍNH: 120/200'). Dùng
+    chung cho cả bản plain lẫn rich.
     """
     if output.get("exam") == "ielts":
         band = scores.get("estimated_ielts_band")
         return "/9", f"IELTS BAND ƯỚC TÍNH: {band if band is not None else '--'}/9"
+    if output.get("exam") == "topik":
+        topik = scores.get("estimated_topik_score")
+        return (
+            "/5",
+            f"ĐIỂM TOPIK ƯỚC TÍNH: {topik if topik is not None else '--'}/200",
+        )
     toeic = scores.get("estimated_toeic_score")
     return "/3", f"ĐIỂM TOEIC ƯỚC TÍNH: {toeic if toeic is not None else '--'}/200"
 
