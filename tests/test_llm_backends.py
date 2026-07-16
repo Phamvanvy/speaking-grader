@@ -151,6 +151,21 @@ def test_openrouter_payload_no_llamacpp_fields(monkeypatch):
     assert "chat_template_kwargs" not in extra
 
 
+def test_openrouter_relaxed_provider_for_free_models(monkeypatch):
+    """Knob test model free: require_parameters off + data_collection allow."""
+    orc = _FakeClient()
+    _patch_clients(monkeypatch, {_OR_URL: orc})
+    cfg = _openrouter_config(
+        openrouter_require_parameters=False,
+        openrouter_data_collection="allow",
+    )
+    backends.generate(cfg, "SYS", "USER", _Out)
+    assert orc.calls[0]["extra_body"]["provider"] == {
+        "require_parameters": False,
+        "data_collection": "allow",
+    }
+
+
 def test_openrouter_reasoning_effort(monkeypatch):
     orc = _FakeClient()
     _patch_clients(monkeypatch, {_OR_URL: orc})

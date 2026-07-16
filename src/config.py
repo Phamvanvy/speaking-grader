@@ -305,6 +305,15 @@ class Config:
     # Reasoning tokens: "none" (tắt — rẻ + nhanh, JSON không bị chờ think dài),
     # "low"/"medium"/"high" (effort), "" = để model tự quyết.
     openrouter_reasoning: str = "none"
+    # require_parameters: chỉ route tới provider hỗ trợ ĐỦ mọi tham số request
+    # (đặc biệt structured_outputs cho json_schema strict). Model free thường
+    # thiếu capability → 404 "No endpoints found"; tắt (false) để test model
+    # free, nhưng provider có thể lờ schema → JSON sai → fallback local.
+    openrouter_require_parameters: bool = True
+    # "deny" (production: provider không được giữ transcript học viên để train)
+    # | "allow" (endpoint free thường THU THẬP data — bắt buộc allow mới route
+    # được; chỉ dùng khi test với audio không nhạy cảm).
+    openrouter_data_collection: str = "deny"
     # Bóc tách đề (vision) qua OpenRouter chỉ khi bật — model chấm điểm đã bench
     # có thể KHÔNG có vision; default off = exam import vẫn đi local như prod.
     openrouter_vision_extract: bool = False
@@ -591,6 +600,12 @@ def load_config() -> Config:
         ).strip().lower() in {"1", "true", "yes", "on"},
         openrouter_reasoning=(
             os.getenv("TOEIC_OPENROUTER_REASONING", "none") or ""
+        ).strip().lower(),
+        openrouter_require_parameters=(
+            os.getenv("TOEIC_OPENROUTER_REQUIRE_PARAMETERS", "true") or "true"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        openrouter_data_collection=(
+            os.getenv("TOEIC_OPENROUTER_DATA_COLLECTION", "deny") or "deny"
         ).strip().lower(),
         openrouter_vision_extract=(
             os.getenv("TOEIC_OPENROUTER_VISION_EXTRACT", "false") or "false"

@@ -123,11 +123,20 @@ def _get_anthropic_client(api_key: str):
 def _openai_extra_body(config: Config, target: OpenAICompatTarget) -> dict:
     """extra_body theo đích — field llama.cpp KHÔNG được lọt sang OpenRouter."""
     if target.name == "openrouter":
+        # require_parameters: chỉ route tới provider tôn trọng response_format
+        # json_schema (không thì JSON có thể sai schema âm thầm).
+        # data_collection deny: transcript học viên không cho provider giữ lại.
+        # Cả hai nới được qua env để TEST model free (thường thiếu capability
+        # / thu thập data → 404 "No endpoints found" khi giữ strict).
         extra: dict = {
-            # require_parameters: chỉ route tới provider tôn trọng response_format
-            # json_schema (không thì JSON có thể sai schema âm thầm).
-            # data_collection deny: transcript học viên không cho provider giữ lại.
-            "provider": {"require_parameters": True, "data_collection": "deny"},
+            "provider": {
+                "require_parameters": config.openrouter_require_parameters,
+                "data_collection": (
+                    "allow"
+                    if config.openrouter_data_collection == "allow"
+                    else "deny"
+                ),
+            },
         }
         reasoning = (config.openrouter_reasoning or "").strip().lower()
         if reasoning == "none":
