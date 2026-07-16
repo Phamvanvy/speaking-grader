@@ -151,7 +151,7 @@ button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px 
     border-bottom: 1px solid #f1f5f9; padding: 0.5rem 0.2rem;
 }
 .saved-row__word { font-weight: 700; min-width: 7rem; }
-.saved-row__ipa { color: #6b7280; }
+.saved-row__ipa { color: #6b7280; white-space: nowrap; }
 .saved-row__meta { color: #9ca3af; font-size: 0.82rem; margin-left: auto; white-space: nowrap; }
 .saved-row__score { font-weight: 700; color: #16a34a; white-space: nowrap; }
 .saved-empty { color: #9ca3af; font-style: italic; padding: 0.8rem 0; }
@@ -159,8 +159,23 @@ button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px 
 /* ── Gợi ý luyện âm (card dưới danh sách từ đã lưu) ── */
 .suggest-weak { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 0.6rem; }
 .suggest-note { flex-basis: 100%; color: #6b7280; font-size: 0.85rem; margin-bottom: 0.2rem; }
-.suggest-row__target { font-size: 0.78rem; font-weight: 600; padding: 0.12rem 0.4rem; margin-right: 0.25rem; }
-.suggest-row__reason { font-style: italic; white-space: normal; }
+.suggest-row__target { font-size: 0.78rem; font-weight: 600; padding: 0.12rem 0.4rem; }
+/* Hàng gợi ý 2 tầng: trên = từ + IPA + nghe + chip âm, dưới = lý do full-width;
+   nút Luyện tập chiếm cột phải riêng nên không bao giờ bị bóp xuống 2 dòng. */
+.suggest-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "main btn" "reason btn";
+    column-gap: 0.8rem; row-gap: 0.2rem;
+    align-items: center; padding: 0.6rem 0.2rem;
+}
+.suggest-row__main {
+    grid-area: main; min-width: 0;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem 0.6rem;
+}
+.suggest-row__targets { display: inline-flex; flex-wrap: wrap; gap: 0.25rem; }
+.suggest-row__reason { grid-area: reason; color: #9ca3af; font-size: 0.82rem; font-style: italic; }
+.suggest-row .practice-open { grid-area: btn; white-space: nowrap; justify-self: end; }
 
 /* ── Dark mode ── */
 body.dark .practice-modal { background: #1f2937; }

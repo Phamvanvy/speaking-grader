@@ -122,12 +122,15 @@ function suggestRowHtml(s) {
         .map(p => `<span class="practice-chip bad suggest-row__target">/${escapeHtml(p)}/</span>`)
         .join('');
     const reason = s.reason
-        ? `<span class="suggest-row__reason">${escapeHtml(s.reason)}</span>` : '';
-    return `<div class="saved-row">
-        <span class="saved-row__word">${escapeHtml(s.word)}</span>
-        <span class="saved-row__ipa">${s.ipa ? `/${escapeHtml(s.ipa)}/` : ''}</span>
-        <button type="button" class="tts-play" data-word="${escapeHtml(s.word)}" title="Nghe phát âm chuẩn">🔊</button>
-        <span class="saved-row__meta">${targets}${reason}</span>
+        ? `<div class="suggest-row__reason">${escapeHtml(s.reason)}</div>` : '';
+    return `<div class="saved-row suggest-row">
+        <div class="suggest-row__main">
+            <span class="saved-row__word">${escapeHtml(s.word)}</span>
+            <span class="saved-row__ipa">${s.ipa ? `/${escapeHtml(s.ipa)}/` : ''}</span>
+            <button type="button" class="tts-play" data-word="${escapeHtml(s.word)}" title="Nghe phát âm chuẩn">🔊</button>
+            <span class="suggest-row__targets">${targets}</span>
+        </div>
+        ${reason}
         <button type="button" class="btn btn-secondary btn-inline practice-open" data-practice="${payload}">🎙️ Luyện tập</button>
     </div>`;
 }
