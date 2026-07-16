@@ -19,16 +19,25 @@ from __future__ import annotations
 import os
 from typing import Final
 
-# Tense-fold: vocab của model mặc định (xlsr-53-espeak-cv-ft, kiểm 2026-07-16)
-# KHÔNG có token tense (p͈ t͈ k͈ s͈ t͈ɕ) → model không bao giờ emit được → âm căng
-# trong reference chỉ sinh substitution OAN trên audio đọc đúng. Fold tense→plain
-# Ở NGUỒN G2P (reference-side; predicted-side không bao giờ có tense với model
-# này). Default ON theo bằng chứng vocab; đặt TOEIC_PHONEME_KO_TENSE_FOLD=0 khi
-# đổi TOEIC_PHONEME_WAV2VEC_MODEL_KO sang model Korean-phone có tense (bench M2).
-# Tradeoff đã chấp nhận trong plan: lỗi học viên tense→plain tạm không chấm được.
+# Tense-fold: vocab espeak (xlsr-53-espeak-cv-ft, kiểm 2026-07-16) KHÔNG có token
+# tense (p͈ t͈ k͈ s͈ t͈ɕ) → model không bao giờ emit được → âm căng trong reference
+# chỉ sinh substitution OAN trên audio đọc đúng. Fold tense→plain Ở NGUỒN G2P
+# (reference-side). Model mặc định hiện tại (phone-mfa, bench 2026-07-16) CÓ token
+# tense (GG DD BB SS JJ) + verify end-to-end 0 lỗi tense oan → KHÔNG fold.
+#
+# Default vì thế theo MODEL: đọc cùng env var với config (không import config —
+# giữ module low-level); "espeak" trong model id → fold ON, còn lại OFF.
+# TOEIC_PHONEME_KO_TENSE_FOLD đặt tường minh luôn thắng.
+_MODEL_KO_DEFAULT = "slplab/wav2vec2-xls-r-300m_phone-mfa_korean"  # = config.py
+_model_ko_env = (
+    os.getenv("TOEIC_PHONEME_WAV2VEC_MODEL_KO", "") or _MODEL_KO_DEFAULT
+).strip()
+_fold_env = (os.getenv("TOEIC_PHONEME_KO_TENSE_FOLD", "") or "").strip().lower()
 KO_TENSE_FOLD: bool = (
-    os.getenv("TOEIC_PHONEME_KO_TENSE_FOLD", "1") or "1"
-).strip().lower() in {"1", "true", "yes", "on"}
+    _fold_env in {"1", "true", "yes", "on"}
+    if _fold_env
+    else "espeak" in _model_ko_env
+)
 
 _TENSE_TO_PLAIN: Final[dict[str, str]] = {
     "p͈": "p", "t͈": "t", "k͈": "k", "s͈": "s", "t͈ɕ": "tɕ",

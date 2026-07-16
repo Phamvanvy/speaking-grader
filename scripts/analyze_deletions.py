@@ -280,7 +280,7 @@ def decoder_probe(words: list[dict]) -> dict:
         return {"available": False, "reason": f"model load failed: {e}"}
     # Precompute which token ids are blank/silence.
     blank_ids = {i for i, tok in id_to_label.items()
-                 if wb._resolve_ipa(tok, wb._SILENCE_TOKENS) == ""}
+                 if wb._resolve_ipa(tok, wb._SILENCE_TOKENS) == ()}
     nonblank_cols = [i for i in id_to_label if i not in blank_ids]
 
     collapse_w, normal_w = [], []     # per-window stats

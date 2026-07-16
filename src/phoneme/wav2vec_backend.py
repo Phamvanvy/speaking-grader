@@ -133,18 +133,117 @@ _SILENCE_TOKENS: frozenset[str] = frozenset(
 )
 
 
-def _resolve_ipa(token: str, silence_tokens: frozenset[str]) -> str:
-    """Quy 1 token của model về ký hiệu IPA, '' nếu là silence/blank.
+# ──────────────────────────────────────────────────────────────────────────────
+# Model-specific label → IPA maps (cho model KHÔNG output IPA eSpeak)
+# ──────────────────────────────────────────────────────────────────────────────
 
-    - Token nằm trong silence set → '' (bị bỏ qua, tạo khoảng lặng tự nhiên).
+# slplab/wav2vec2-xls-r-300m_phone-mfa_korean output nhãn phone romanized (MFA
+# Korean), KHÔNG phải IPA eSpeak → cần map về CÙNG không gian IPA mà profile KO
+# sinh ra (xem phoneme_set_ko.KOREAN_IPA_PHONEMES). Một token có thể nở thành
+# NHIỀU phoneme: token ghép bán nguyên âm (iA=/ja/, oA=/wa/…) tách thành 2 vì
+# profile KO tách glide+vowel. Doubling = âm căng (GG=k͈), h hậu tố = bật hơi
+# (Kh=kʰ); chữ thường k/p/t = coda stop (trung hoà → k/t/p như JONG_TO_IPA).
+# Model NÀY có token tense → khi bench nên đặt TOEIC_PHONEME_KO_TENSE_FOLD=0 để
+# thực sự chấm được contrast căng/thường (espeak không làm được).
+_KO_PHONE_MFA_TO_IPA: dict[str, tuple[str, ...]] = {
+    # Obstruent: lenis / tense / aspirated
+    "G": ("k",),   "GG": ("k͈",),  "Kh": ("kʰ",),   "k": ("k",),
+    "D": ("t",),   "DD": ("t͈",),  "Th": ("tʰ",),   "t": ("t",),
+    "B": ("p",),   "BB": ("p͈",),  "Ph": ("pʰ",),   "p": ("p",),
+    "J": ("tɕ",),  "JJ": ("t͈ɕ",), "CHh": ("tɕʰ",),
+    "S": ("s",),   "SS": ("s͈",),
+    "H": ("h",),
+    # Sonorant (ㄹ: onset R=[ɾ], coda L=[l])
+    "M": ("m",), "N": ("n",), "NG": ("ŋ",), "L": ("l",), "R": ("ɾ",),
+    # Nguyên âm đơn
+    "A": ("a",), "E": ("e",), "EO": ("ʌ",), "EU": ("ɯ",),
+    "I": ("i",), "O": ("o",), "U": ("u",),
+    # Bán nguyên âm + nguyên âm → tách 2 phoneme (khớp JUNG_TO_IPA)
+    "iA": ("j", "a"), "iE": ("j", "e"), "iEO": ("j", "ʌ"),
+    "iO": ("j", "o"), "iU": ("j", "u"),
+    "oA": ("w", "a"), "oE": ("w", "e"),
+    "uEO": ("w", "ʌ"), "uI": ("w", "i"),
+    "euI": ("ɯ", "i"),
+    # Silence / special (nở thành rỗng → bỏ qua)
+    "[PAD]": (), "[UNK]": (), "|": (),
+}
+
+# slplab/wav2vec2-XLSR-300m_KoreanPhonene_spoken_by_foreigners output nhãn JAMO
+# tiếng Hàn (train trên người nước ngoài nói tiếng Hàn = đúng đối tượng học viên).
+# Probe thực tế (2026-07-16): model emit compatibility jamo (ㄱ ㅏ ㅛ…) là chính,
+# KHÔNG tách bán nguyên âm (ㅛ=1 token=/jo/ → nở 2), và MẤT vị trí ở compat jamo
+# (ㄹ onset/coda cùng ký tự). Vocab còn có conjoining jongseong (ᆨ ᆯ…) GIỮ vị trí
+# coda → map riêng để lấy /l/ đúng khi model emit dạng có vị trí. Compat ㄹ mặc
+# định onset [ɾ] (coda ㄹ dạng compat sẽ lệch l — trần đã biết của model này).
+# Compat ㅇ = coda /ŋ/ (onset ㅇ câm, acoustic model không emit).
+_KO_FOREIGNERS_JAMO_TO_IPA: dict[str, tuple[str, ...]] = {
+    # ── Conjoining choseong (onset, U+1100…) ──
+    "ᄀ": ("k",), "ᄂ": ("n",), "ᄃ": ("t",), "ᄄ": ("t͈",), "ᄅ": ("ɾ",),
+    "ᄆ": ("m",), "ᄇ": ("p",), "ᄈ": ("p͈",), "ᄉ": ("s",), "ᄊ": ("s͈",),
+    "ᄌ": ("tɕ",), "ᄍ": ("t͈ɕ",), "ᄏ": ("kʰ",), "ᄑ": ("pʰ",), "ᄒ": ("h",),
+    # ── Conjoining jungseong (nguyên âm, U+1161…; glide tách 2) ──
+    "ᅡ": ("a",), "ᅢ": ("e",), "ᅥ": ("ʌ",), "ᅦ": ("e",), "ᅧ": ("j", "ʌ"),
+    "ᅩ": ("o",), "ᅫ": ("w", "e"), "ᅭ": ("j", "o"), "ᅮ": ("u",), "ᅯ": ("w", "ʌ"),
+    "ᅱ": ("w", "i"), "ᅳ": ("ɯ",), "ᅵ": ("i",),
+    # ── Conjoining jongseong (coda, U+11A8…; GIỮ vị trí → ㄹ=l đúng) ──
+    "ᆨ": ("k",), "ᆫ": ("n",), "ᆮ": ("t",), "ᆯ": ("l",), "ᆷ": ("m",), "ᆸ": ("p",),
+    # ── Compatibility jamo — phụ âm (vị trí mất → default onset; ㅇ=coda ŋ) ──
+    "ㄱ": ("k",), "ㄲ": ("k͈",), "ㄴ": ("n",), "ㄵ": ("n",), "ㄷ": ("t",),
+    "ㄸ": ("t͈",), "ㄹ": ("ɾ",), "ㄺ": ("k",), "ㄻ": ("m",), "ㄼ": ("l",),
+    "ㅁ": ("m",), "ㅂ": ("p",), "ㅃ": ("p͈",), "ㅄ": ("p",), "ㅅ": ("s",),
+    "ㅆ": ("s͈",), "ㅇ": ("ŋ",), "ㅈ": ("tɕ",), "ㅉ": ("t͈ɕ",), "ㅊ": ("tɕʰ",),
+    "ㅋ": ("kʰ",), "ㅌ": ("tʰ",), "ㅍ": ("pʰ",), "ㅎ": ("h",),
+    # ── Compatibility jamo — nguyên âm (glide tách 2) ──
+    "ㅏ": ("a",), "ㅐ": ("e",), "ㅑ": ("j", "a"), "ㅒ": ("j", "e"),
+    "ㅓ": ("ʌ",), "ㅔ": ("e",), "ㅕ": ("j", "ʌ"), "ㅖ": ("j", "e"),
+    "ㅗ": ("o",), "ㅘ": ("w", "a"), "ㅙ": ("w", "e"), "ㅚ": ("w", "e"),
+    "ㅛ": ("j", "o"), "ㅜ": ("u",), "ㅝ": ("w", "ʌ"), "ㅞ": ("w", "e"),
+    "ㅟ": ("w", "i"), "ㅠ": ("j", "u"), "ㅡ": ("ɯ",), "ㅢ": ("ɯ", "i"),
+    "ㅣ": ("i",),
+    # Silence / special
+    "<pad>": (), "<unk>": (), "|": (),
+}
+
+# model_id → bảng label→IPA. Model KHÔNG có mặt ở đây = output IPA eSpeak trực
+# tiếp (đường mặc định, EN + KO dùng chung xlsr-espeak) → không map, giữ nguyên
+# hành vi cũ bit-for-bit.
+_MODEL_LABEL_MAPS: dict[str, dict[str, tuple[str, ...]]] = {
+    "slplab/wav2vec2-xls-r-300m_phone-mfa_korean": _KO_PHONE_MFA_TO_IPA,
+    "slplab/wav2vec2-XLSR-300m_KoreanPhonene_spoken_by_foreigners": (
+        _KO_FOREIGNERS_JAMO_TO_IPA
+    ),
+}
+
+
+def _label_map_for_model(model_id: str) -> dict[str, tuple[str, ...]] | None:
+    """Bảng label→IPA riêng của model, None nếu model output IPA eSpeak sẵn."""
+    return _MODEL_LABEL_MAPS.get(model_id)
+
+
+def _resolve_ipa(
+    token: str,
+    silence_tokens: frozenset[str],
+    label_map: dict[str, tuple[str, ...]] | None = None,
+) -> tuple[str, ...]:
+    """Quy 1 token của model về CHUỖI ký hiệu IPA (rỗng nếu silence/blank).
+
+    Trả tuple để 1 token có thể nở thành nhiều phoneme (vd nhãn phone-mfa `iA`
+    → /j a/). Model espeak mặc định: mỗi token → đúng 1 IPA (1-tuple) → segment
+    hạ nguồn không đổi.
+
+    - Token nằm trong silence set → () (bị bỏ qua, tạo khoảng lặng tự nhiên).
+    - `label_map` != None (model không phải espeak): tra bảng; token lạ → ().
     - Token là nhãn ARPAbet (vd 'AA', 'TH') → map qua WAV2VEC_LABEL_TO_IPA.
     - Còn lại: coi token đã là IPA (model espeak) → trả nguyên token.
     """
     if token in silence_tokens:
-        return ""
+        return ()
+    if label_map is not None:
+        return label_map.get(token, ())
     if token in WAV2VEC_LABEL_TO_IPA:
-        return WAV2VEC_LABEL_TO_IPA[token]
-    return token.strip()
+        return (WAV2VEC_LABEL_TO_IPA[token],)
+    t = token.strip()
+    return (t,) if t else ()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -168,15 +267,14 @@ def _ipa_token_groups(
     # Lazy import: giữ wav2vec_backend importable độc lập không kéo chuỗi ipa/g2p.
     from .ipa import normalize_ipa
 
+    label_map = _label_map_for_model(model_id)
     groups: dict[str, set[int]] = {}
     for idx, token in id_to_token.items():
-        ipa = _resolve_ipa(token, _SILENCE_TOKENS)
-        if not ipa:
-            continue
-        key = normalize_ipa(ipa)
-        if not key:
-            continue
-        groups.setdefault(key, set()).add(idx)
+        for ipa in _resolve_ipa(token, _SILENCE_TOKENS, label_map):
+            key = normalize_ipa(ipa)
+            if not key:
+                continue
+            groups.setdefault(key, set()).add(idx)
     frozen = {k: frozenset(v) for k, v in groups.items()}
     with _ipa_group_lock:
         _ipa_group_cache[model_id] = frozen
@@ -239,7 +337,9 @@ class FramePosteriors:
             argmax_prob=float(window[best, argmax_id]),
             # Token blank/silence thắng tại frame mass cao nhất = chữ ký CTC collapse
             # (âm có mass nhưng bị nhả blank). _resolve_ipa quy token về "" cho silence.
-            argmax_is_silence=_resolve_ipa(argmax_token, _SILENCE_TOKENS) == "",
+            argmax_is_silence=_resolve_ipa(
+                argmax_token, _SILENCE_TOKENS, _label_map_for_model(self.model_id)
+            ) == (),
         )
 
 
@@ -446,6 +546,7 @@ def _ctc_decode_segments(
     frame_duration: float,      # giây mỗi frame
     audio_duration: float,
     confidence_threshold: float = PHONEME_CONFIDENCE_THRESHOLD,
+    label_to_ipa: dict[str, tuple[str, ...]] | None = None,
 ) -> list[PhonemeSegment]:
     """CTC greedy decode: frame-level argmax → phoneme segments.
 
@@ -466,19 +567,36 @@ def _ctc_decode_segments(
         # Kết thúc 1 run khi đổi id hoặc hết frame.
         if i == n or pred_ids[i] != pred_ids[run_start]:
             token = id_to_label.get(int(pred_ids[run_start]), "")
-            ipa = _resolve_ipa(token, _SILENCE_TOKENS)
-            if ipa:
+            ipas = _resolve_ipa(token, _SILENCE_TOKENS, label_to_ipa)
+            if ipas:
                 avg_conf = float(pred_probs[run_start:i].mean())
                 if avg_conf >= confidence_threshold:
                     start_time = run_start * frame_duration
                     end_time = min(i * frame_duration, audio_duration)
-                    segments.append(PhonemeSegment(
-                        phoneme=ipa,
-                        start=round(start_time, 3),
-                        end=round(end_time, 3),
-                        confidence=round(avg_conf, 4),
-                        backend="wav2vec",
-                    ))
+                    conf = round(avg_conf, 4)
+                    if len(ipas) == 1:
+                        # Đường mặc định (mỗi token espeak = 1 IPA) — segment y hệt cũ.
+                        segments.append(PhonemeSegment(
+                            phoneme=ipas[0],
+                            start=round(start_time, 3),
+                            end=round(end_time, 3),
+                            confidence=conf,
+                            backend="wav2vec",
+                        ))
+                    else:
+                        # Token nở >1 phoneme (nhãn ghép, vd phone-mfa iA=/j a/):
+                        # chia đều span cho từng phoneme, giữ nguyên confidence.
+                        step = (end_time - start_time) / len(ipas)
+                        for j, ph in enumerate(ipas):
+                            seg_start = start_time + j * step
+                            seg_end = end_time if j == len(ipas) - 1 else start_time + (j + 1) * step
+                            segments.append(PhonemeSegment(
+                                phoneme=ph,
+                                start=round(seg_start, 3),
+                                end=round(seg_end, 3),
+                                confidence=conf,
+                                backend="wav2vec",
+                            ))
             run_start = i
 
     return segments
@@ -508,6 +626,8 @@ class Wav2VecPhonemePredictor:
         self.min_phoneme_duration = min_phoneme_duration
         self.confidence_threshold = confidence_threshold
         self._available: bool | None = None
+        # None cho model espeak (đường mặc định); bảng riêng cho model slplab.
+        self._label_map = _label_map_for_model(model_id)
 
     @property
     def is_available(self) -> bool:
@@ -608,6 +728,7 @@ class Wav2VecPhonemePredictor:
             frame_duration=frame_duration,
             audio_duration=audio_duration,
             confidence_threshold=self.confidence_threshold,
+            label_to_ipa=self._label_map,
         )
         posteriors = FramePosteriors(
             probs=prob_numpy,

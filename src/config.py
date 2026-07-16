@@ -110,7 +110,10 @@ class Config:
     # Acoustic model cho tiếng Hàn — mặc định dùng CHUNG xlsr-espeak (đa ngôn ngữ,
     # emit IPA); bench M2 quyết định có đổi sang model Korean-phone riêng không.
     # Model cache key theo model_id:device nên EN/KO coexist không tốn gì thêm.
-    phoneme_wav2vec_model_ko: str = "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
+    # Bench 2026-07-16 (data/bench/ko/BENCH_REPORT.md): phone-mfa thắng rõ espeak
+    # trên cả TTS lẫn người thật (native acc 0.99/0.96 vs 0.89/0.87, false-error
+    # ~10×/3× ít hơn, chấm được âm căng).
+    phoneme_wav2vec_model_ko: str = "slplab/wav2vec2-xls-r-300m_phone-mfa_korean"
     phoneme_device: str = "cpu"
     phoneme_confidence_threshold: float = 0.1
     phoneme_min_duration_sec: float = 0.1
@@ -435,9 +438,9 @@ def load_config() -> Config:
         phoneme_wav2vec_model_ko=(
             os.getenv(
                 "TOEIC_PHONEME_WAV2VEC_MODEL_KO",
-                "facebook/wav2vec2-xlsr-53-espeak-cv-ft",
+                "slplab/wav2vec2-xls-r-300m_phone-mfa_korean",
             )
-            or "facebook/wav2vec2-xlsr-53-espeak-cv-ft"
+            or "slplab/wav2vec2-xls-r-300m_phone-mfa_korean"
         ),
         # 'cpu' | 'cuda' | 'cuda:N'. Đặt 'cuda:1' để wav2vec chạy GPU thứ 2, tách
         # khỏi Whisper (WHISPER_DEVICE=cuda:0) → tận dụng 2 card song song khi chấm batch.
