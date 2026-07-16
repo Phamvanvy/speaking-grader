@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 
+from ..rubrics.base import exam_score_field
 from ..schema import CompletionLevel, SpeakingResult
 
 # --- Quy đổi điểm tiêu chí (0-3) → điểm TOEIC Speaking (0-200) -----------------
@@ -128,7 +129,9 @@ def compute_exam_overall(
     'estimated_ielts_band'); phần tử None / thiếu điểm (câu bỏ qua, lỗi) được loại.
     Trả None nếu không câu nào có điểm. TOEIC làm tròn bội 10; IELTS làm tròn 0.5.
     """
-    field = "estimated_ielts_band" if exam == "ielts" else "estimated_toeic_score"
+    # Field theo registry EXAM_SCORE (nguồn duy nhất) — topik đọc đúng
+    # estimated_topik_score khi M3 thêm công thức, thay vì nhầm field TOEIC.
+    field = exam_score_field(exam)
     vals = [
         float(s[field])
         for s in per_question_scores

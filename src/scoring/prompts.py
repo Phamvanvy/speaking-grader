@@ -36,7 +36,24 @@ def _build_system_prompt(qt: QuestionType, feedback_lang: str) -> str:
     # Khác biệt theo kỳ thi: văn phong giám khảo + thang điểm + khối "FINAL SCORE".
     # Phần còn lại của prompt (evidence rules, task completion, ngôn ngữ) dùng chung.
     is_ielts = qt.exam == Exam.IELTS.value
-    exam_label = "IELTS" if is_ielts else "TOEIC"
+    is_topik = qt.exam == Exam.TOPIK.value
+    exam_label = (
+        "IELTS" if is_ielts
+        else "TOPIK Speaking (한국어 말하기 평가)" if is_topik
+        else "TOEIC"
+    )
+    # TOPIK (M1): thí sinh nói TIẾNG HÀN — nói rõ cho LLM để không đánh giá theo
+    # chuẩn tiếng Anh. Persona/scale block đầy đủ + estimated_topik_score đến ở M3;
+    # tạm dùng khối final-score chung nhánh else (LLM chỉ chấm per-criterion).
+    korean_note = (
+        "\nLANGUAGE OF THE RESPONSE (important): the candidate is speaking KOREAN. "
+        "The transcript is in Korean (Hangul). Judge vocabulary, grammar, register "
+        "(높임말), and naturalness as a Korean speaking examiner would. Phoneme "
+        "symbols in the pronunciation data are IPA for Korean sounds (e.g. tense "
+        "consonants /p͈ t͈ k͈/, vowels /ɯ ʌ/).\n"
+        if is_topik
+        else ""
+    )
     if is_ielts:
         scale_label = "band 0-9 (steps of 0.5)"
         final_score_block = (
@@ -69,7 +86,7 @@ def _build_system_prompt(qt: QuestionType, feedback_lang: str) -> str:
 
     return f"""You are an experienced {exam_label} Speaking examiner. Score one spoken \
 response for the task type: {qt.label}.
-
+{korean_note}
 TASK GUIDANCE:
 {qt.guidance}
 
@@ -296,7 +313,11 @@ def _build_user_prompt(
             "actions, setting). A description that does not match the picture must "
             "lower content_relevance / relevance.\n\n"
         )
-    exam_label = "IELTS" if qt.exam == Exam.IELTS.value else "TOEIC"
+    exam_label = (
+        "IELTS" if qt.exam == Exam.IELTS.value
+        else "TOPIK (Korean)" if qt.exam == Exam.TOPIK.value
+        else "TOEIC"
+    )
     return (
         f"Score the following {exam_label} Speaking response. All numeric metrics "
         "are pre-computed and objective.\n\n"

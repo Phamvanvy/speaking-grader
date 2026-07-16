@@ -80,6 +80,13 @@ _NEAR_PAIRS_KO: Final[dict[frozenset[str], float]] = dict([
     _near("ɯ", "i", 0.60),
     _near("e", "i", 0.70),
     _near("o", "u", 0.75),
+    # Bench M2 (native TTS, 2026-07-16) — artifact recognizer trên audio ĐÚNG:
+    # i nghe thành glide j ở hiatus (있어요 → j iː...); nasal đầu từ nghe thành
+    # stop cùng chỗ (물→bul, 니→di) — denasalization đầu từ là hiện tượng phát âm
+    # THẬT của tiếng Hàn, không phải lỗi học viên.
+    _near("i", "j", 0.80),
+    _near("m", "b", 0.75),
+    _near("n", "d", 0.75),
 ])
 
 # Lỗi học viên THẬT có similarity thấp cần bảo vệ khỏi noise gate — RỖNG ở v1,
@@ -175,8 +182,10 @@ def deletion_severity_ko(
 
     - Glide j/w: low (recognizer hay gộp vào nguyên âm kế — giống /w/ bản EN).
     - h: low (ㅎ giữa 2 âm hữu thanh yếu/tan trong khẩu ngữ — 전화 [저놔]).
-    - Nguyên âm: high nếu là ÂM TIẾT chính đầu... tiếng Hàn không có stress —
-      mọi nguyên âm là nhân âm tiết → thiếu = âm tiết sập → high.
+    - Nguyên âm: low — bench M2 (48 clip native, 2026-07-16): model nuốt nguyên
+      âm hàng loạt trên chính audio bản xứ (ɯ/ʌ del ×10 mỗi loại) → deletion
+      nguyên âm là recognizer-prone với model này (cùng policy _RECOGNIZER_PRONE
+      bản EN). Lỗi nguyên âm THẬT của học viên vẫn hiện qua SUBSTITUTION.
     - Phụ âm onset: high (như EN — nuốt onset là lỗi nặng).
     - Phụ âm coda: stop (p t k) low (unreleased); sonorant (n m ŋ l) medium
       (thiếu batchim mũi là lỗi thật đáng nhắc).
@@ -185,7 +194,7 @@ def deletion_severity_ko(
     if p in ("j", "w", "h"):
         return "low"
     if p in _VOWELS_KO:
-        return "high"
+        return "low"
     if is_onset:
         return "high"
     if p in _CODA_STOPS_KO:

@@ -58,6 +58,16 @@ _DOUBLE_CODA_SPLIT: Final[dict[str, tuple[str, str]]] = {
 # ㅎ hoá bật hơi (điều 12-1): lenis + ㅎ (2 chiều) → aspirated.
 _ASPIRATE: Final[dict[str, str]] = {"ㄱ": "ㅋ", "ㄷ": "ㅌ", "ㅂ": "ㅍ", "ㅈ": "ㅊ"}
 
+# Coda (NGUYÊN GỐC, chưa neutralize) + onset ㅎ → onset bật hơi. Giữ danh tính
+# gốc vì ㅈ+ㅎ→ㅊ (맞히다→마치다) chứ KHÔNG neutralize trước (ㅈ→ㄷ→ㅌ sai);
+# ㅅ/ㅆ vẫn qua ㄷ→ㅌ (못하다→모타다). Nasal/liquid không có dạng bật hơi → vắng.
+_ASPIRATE_CODA: Final[dict[str, str]] = {
+    "ㄱ": "ㅋ", "ㄲ": "ㅋ", "ㅋ": "ㅋ",
+    "ㄷ": "ㅌ", "ㅅ": "ㅌ", "ㅆ": "ㅌ", "ㅌ": "ㅌ",
+    "ㅈ": "ㅊ", "ㅊ": "ㅊ",
+    "ㅂ": "ㅍ", "ㅍ": "ㅍ",
+}
+
 # Tensification sau coda tắc (điều 23): lenis onset → tense.
 _TENSE: Final[dict[str, str]] = {"ㄱ": "ㄲ", "ㄷ": "ㄸ", "ㅂ": "ㅃ", "ㅅ": "ㅆ", "ㅈ": "ㅉ"}
 
@@ -110,13 +120,21 @@ def _h_rules(sylls: list[Syllable]) -> None:
             elif onset == "ㅇ":
                 cur[2] = keep  # ㅎ tan; ㄴ/ㄹ còn lại sẽ liaison ở pass sau
         elif onset == "ㅎ":
-            neutral = _NEUTRAL_SINGLE.get(jong, "")
-            if jong in _DOUBLE_CODA_KEEP:
-                neutral = _NEUTRAL_SINGLE.get(_DOUBLE_CODA_KEEP[jong], "")
-            if neutral in _OBSTRUENT_CODA or neutral == "ㄷ":
-                mapped = {"ㄱ": "ㅋ", "ㄷ": "ㅌ", "ㅂ": "ㅍ"}[neutral]
-                nxt[0] = mapped
-                cur[2] = ""
+            # Coda đôi: phụ âm ĐẦU ở lại, phụ âm SAU hoá bật hơi (điều 12-1 chú:
+            # ㄺ+ㅎ→ㄹ+ㅋ 밝히다→발키다, ㄵ+ㅎ→ㄴ+ㅊ 앉히다→안치다). Coda đơn: giữ
+            # danh tính GỐC khi tra bảng (ㅈ→ㅊ 맞히다→마치다, ㅅ→ㅌ 못하다→모타다).
+            # jong ㄶ/ㅀ không tới được nhánh này (đã vào nhánh ㅎ-coda ở trên).
+            if jong in _DOUBLE_CODA_SPLIT:
+                stay, move = _DOUBLE_CODA_SPLIT[jong]
+                asp = _ASPIRATE_CODA.get(move)
+                if asp:
+                    nxt[0] = asp
+                    cur[2] = stay
+            else:
+                asp = _ASPIRATE_CODA.get(jong)
+                if asp:
+                    nxt[0] = asp
+                    cur[2] = ""
 
 
 def _liaison(sylls: list[Syllable]) -> None:

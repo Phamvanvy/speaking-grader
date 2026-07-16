@@ -67,6 +67,11 @@ GOLDEN_PHONOLOGY = {
     "입학": "이팍",
     "못하다": "모타다",
     "놓는": "논는",
+    # điều 12-1 chú: coda giữ danh tính gốc (ㅈ→ㅊ) + coda đôi giữ phụ âm đầu
+    "맞히다": "마치다",
+    "밝히다": "발키다",
+    "앉히다": "안치다",
+    "넓히다": "널피다",
     # điều 13/14 liaison (kể cả coda đôi + ㅆ)
     "옷이": "오시",
     "있어요": "이써요",
@@ -113,7 +118,16 @@ def test_word_to_ipa_basic():
     assert word_to_ipa_ko("안녕하세요") == [
         "a", "n", "n", "j", "ʌ", "ŋ", "h", "a", "s", "e", "j", "o",
     ]
-    # tensification giữ tense symbol; coda giữ 7 âm chuẩn
+
+
+def test_word_to_ipa_tense_fold(monkeypatch):
+    """Tense-fold: default ON (model mặc định không có token tense — vocab check
+    2026-07-16); tắt fold thì reference giữ tense symbol cho model có tense."""
+    from src.phoneme.ipa.ko import phoneme_set_ko
+
+    monkeypatch.setattr(phoneme_set_ko, "KO_TENSE_FOLD", True)
+    assert word_to_ipa_ko("학교") == ["h", "a", "k", "k", "j", "o"]
+    monkeypatch.setattr(phoneme_set_ko, "KO_TENSE_FOLD", False)
     assert word_to_ipa_ko("학교") == ["h", "a", "k", "k͈", "j", "o"]
 
 
@@ -163,9 +177,10 @@ def test_deletion_severity_batchim():
     assert deletion_severity_ko("k", is_onset=False) == "low"
     # coda mũi thiếu là lỗi thật đáng nhắc
     assert deletion_severity_ko("n", is_onset=False) == "medium"
-    # onset + nguyên âm nặng
+    # onset nặng; nguyên âm del = recognizer-prone (bench M2 2026-07-16 — model
+    # nuốt nguyên âm trên chính audio native; lỗi thật hiện qua substitution)
     assert deletion_severity_ko("k", is_onset=True) == "high"
-    assert deletion_severity_ko("a") == "high"
+    assert deletion_severity_ko("a") == "low"
 
 
 # ── LangProfile ko ───────────────────────────────────────────────────────────

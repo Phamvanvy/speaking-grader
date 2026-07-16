@@ -66,12 +66,39 @@ _WORD_KO_OVERRIDES: Final[dict[str, str]] = {
 }
 
 
+def _validate_word_ko_overrides() -> None:
+    """Fail-fast lúc import (pattern _validate_word_ipa_overrides bản EN): surface
+    form phải decompose được VÀ chỉ chứa coda đã neutralize (tra được JONG_TO_IPA)
+    — không thì override lỗi chỉ lộ lúc runtime dưới dạng từ bị drop âm thầm."""
+    for word, surface in _WORD_KO_OVERRIDES.items():
+        for cho, jung, jong in decompose_word(surface):
+            if cho not in CHO_TO_IPA or jung not in JUNG_TO_IPA or (
+                jong and jong not in JONG_TO_IPA
+            ):
+                raise ValueError(
+                    f"_WORD_KO_OVERRIDES[{word!r}] = {surface!r}: âm tiết có jamo "
+                    f"không hợp lệ ở dạng mặt ({cho!r}/{jung!r}/{jong!r}) — surface "
+                    "form phải là dạng ĐÃ PHÁT ÂM (coda thuộc 7 âm chuẩn)."
+                )
+
+
+_validate_word_ko_overrides()
+
+
 def _syllables_to_ipa(sylls: list[list[str]]) -> list[str]:
     """jamo (đã qua phonology) → flat IPA list. Coda lạ (chưa neutralize hết) sẽ
-    KeyError — fail lộ sớm thay vì lặng lẽ sinh reference sai."""
+    KeyError — fail lộ sớm thay vì lặng lẽ sinh reference sai.
+
+    Tense-fold (xem phoneme_set_ko.KO_TENSE_FOLD): đọc module attribute TẠI CALL
+    TIME (không bind lúc import) để test/bench monkeypatch được.
+    """
+    from . import phoneme_set_ko as _ps
+
+    fold = _ps.KO_TENSE_FOLD
     out: list[str] = []
     for cho, jung, jong in sylls:
-        out.extend(CHO_TO_IPA[cho])
+        for sym in CHO_TO_IPA[cho]:
+            out.append(_ps._TENSE_TO_PLAIN.get(sym, sym) if fold else sym)
         out.extend(JUNG_TO_IPA[jung])
         if jong:
             out.extend(JONG_TO_IPA[jong])

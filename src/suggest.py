@@ -22,22 +22,38 @@ logger = logging.getLogger("toeic.suggest")
 
 def default_target_band(exam: str) -> str:
     """Mức nhắm tới mặc định khi client không gửi target_band."""
-    return "9.0" if exam == Exam.IELTS.value else "TOEIC mức cao nhất (~200)"
+    if exam == Exam.IELTS.value:
+        return "9.0"
+    if exam == Exam.TOPIK.value:
+        return "TOPIK 말하기 mức cao nhất (~200)"
+    return "TOEIC mức cao nhất (~200)"
 
 
 def _build_suggest_system_prompt(
     qt: QuestionType, target_band: str, feedback_lang: str
 ) -> str:
     is_ielts = qt.exam == Exam.IELTS.value
-    exam_label = "IELTS" if is_ielts else "TOEIC"
+    is_topik = qt.exam == Exam.TOPIK.value
+    exam_label = (
+        "IELTS" if is_ielts
+        else "TOPIK Speaking (한국어 말하기)" if is_topik
+        else "TOEIC"
+    )
     examiner_role = (
         "an expert IELTS Speaking examiner and tutor"
         if is_ielts
+        else "an expert TOPIK Speaking (Korean) examiner and tutor"
+        if is_topik
         else "an expert TOEIC Speaking coach"
     )
     target_label = (
-        f"IELTS band {target_band}" if is_ielts else f"a top-scoring TOEIC response ({target_band})"
+        f"IELTS band {target_band}" if is_ielts
+        else f"a top-scoring TOPIK Speaking response ({target_band})" if is_topik
+        else f"a top-scoring TOEIC response ({target_band})"
     )
+    # Bài mẫu viết bằng NGÔN NGỮ NÓI của kỳ thi (topik → tiếng Hàn), không phải
+    # feedback_lang (feedback_lang chỉ áp cho highlights/outline).
+    answer_language = "KOREAN (한국어)" if is_topik else "ENGLISH"
     language_name = resolve_language_name(feedback_lang)
 
     return (
@@ -50,9 +66,9 @@ def _build_suggest_system_prompt(
         "SCORING SCALE (calibrate the quality to the target level):\n"
         f"{qt.scale_description}\n\n"
         "REQUIREMENTS for the model answer:\n"
-        "- Write the `answer` in natural SPOKEN English (as a strong test-taker "
-        "would actually speak it), not formal written prose. Use natural discourse "
-        "markers, but stay coherent and well-organized.\n"
+        f"- Write the `answer` in natural SPOKEN {answer_language} (as a strong "
+        "test-taker would actually speak it), not formal written prose. Use natural "
+        "discourse markers, but stay coherent and well-organized.\n"
         "- Match the expected length/duration of this task type (cover all cue-card "
         "points / describe the picture fully / develop ideas with reasons and "
         "examples as the task demands).\n"
@@ -63,8 +79,8 @@ def _build_suggest_system_prompt(
         "techniques) the learner can borrow.\n"
         "- Provide a short `outline` (key points / opening-body-closing) for longer "
         "monologue tasks; it may be empty for short answers.\n"
-        f"- Write `answer` in ENGLISH. Write `highlights` and `outline` in "
-        f"{language_name}.\n"
+        f"- Write `answer` in {answer_language}. Write `highlights` and `outline` "
+        f"in {language_name}.\n"
         f"- Echo the target level in `target_band` (e.g. '{target_band}')."
     )
 

@@ -68,6 +68,8 @@ def _dtw_align(
     if not predicted or not reference:
         return []
     profile = profile or get_profile("en")
+    # Hoist ra local: vòng lặp O(n·m) — khỏi tra attribute mỗi cell.
+    similarity = profile.phoneme_similarity
 
     n, m = len(predicted), len(reference)
 
@@ -80,7 +82,7 @@ def _dtw_align(
     for i in range(1, n + 1):
         for j in range(1, m + 1):
             sub = cost[i - 1][j - 1] + (
-                1.0 - profile.phoneme_similarity(predicted[i - 1], reference[j - 1])
+                1.0 - similarity(predicted[i - 1], reference[j - 1])
             )
             up = cost[i - 1][j] + _DTW_GAP_COST      # insertion (predicted i, no reference)
             left = cost[i][j - 1] + _DTW_GAP_COST    # deletion (reference j, no predicted)

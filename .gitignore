@@ -1,4 +1,5 @@
 .env
+.env.scale
 .gitnexus/
 # Cache model ASR/phoneme (HuggingFace + torch hub), bind-mount từ docker-compose.
 .model_cache/

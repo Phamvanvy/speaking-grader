@@ -1,0 +1,12 @@
+# Override "nhiều user / boot perf": chỉ đổi env_file sang .env.scale (backend
+# openrouter + batch_concurrency cao hơn) — mọi thứ khác (volumes, GPU
+# reservation, ports) giữ nguyên từ docker-compose.yml.
+#
+# Kích hoạt:
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --force-recreate
+# Quay lại cấu hình thường (backend local):
+#   docker compose up -d --force-recreate
+services:
+  grader:
+    env_file:
+      - .env.scale

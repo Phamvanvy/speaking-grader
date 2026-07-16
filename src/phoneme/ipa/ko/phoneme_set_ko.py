@@ -16,7 +16,23 @@ Coda stop KHÔNG mang dấu unreleased (k̚ → k): vocab model không có diacr
 
 from __future__ import annotations
 
+import os
 from typing import Final
+
+# Tense-fold: vocab của model mặc định (xlsr-53-espeak-cv-ft, kiểm 2026-07-16)
+# KHÔNG có token tense (p͈ t͈ k͈ s͈ t͈ɕ) → model không bao giờ emit được → âm căng
+# trong reference chỉ sinh substitution OAN trên audio đọc đúng. Fold tense→plain
+# Ở NGUỒN G2P (reference-side; predicted-side không bao giờ có tense với model
+# này). Default ON theo bằng chứng vocab; đặt TOEIC_PHONEME_KO_TENSE_FOLD=0 khi
+# đổi TOEIC_PHONEME_WAV2VEC_MODEL_KO sang model Korean-phone có tense (bench M2).
+# Tradeoff đã chấp nhận trong plan: lỗi học viên tense→plain tạm không chấm được.
+KO_TENSE_FOLD: bool = (
+    os.getenv("TOEIC_PHONEME_KO_TENSE_FOLD", "1") or "1"
+).strip().lower() in {"1", "true", "yes", "on"}
+
+_TENSE_TO_PLAIN: Final[dict[str, str]] = {
+    "p͈": "p", "t͈": "t", "k͈": "k", "s͈": "s", "t͈ɕ": "tɕ",
+}
 
 # ── jamo → IPA ────────────────────────────────────────────────────────────────
 
@@ -72,6 +88,10 @@ _IPA_EQUIV_KO: Final[dict[str, str]] = {
     # 하고→...; audio TTS bản xứ). Alias nhãn thuần, không phải tuning.
     "ts": "tɕ",
     "tsʰ": "tɕʰ",
+    # Bench M2 (48 clip native, 2026-07-16): model emit ɔ cho ㅓ một cách hệ thống
+    # (6 sub oan med/high + nhiều low) → nhãn của model cho ʌ. Hệ quả đã chấp
+    # nhận: contrast ㅓ/ㅗ KHÔNG chấm được với model này (ghi trong bench report).
+    "ɔ": "ʌ",
     "ɕ": "s",       # ㅅ trước /i/ — allophone, không phải lỗi
     "ɭ": "l",
     "ɹ": "ɾ",
@@ -85,12 +105,18 @@ _IPA_EQUIV_KO: Final[dict[str, str]] = {
 
 
 def normalize_ipa_ko(symbol: str) -> str:
-    """Chuẩn hoá 1 symbol IPA tiếng Hàn (strip stress/length marks + fold equiv).
+    """Chuẩn hoá 1 symbol IPA tiếng Hàn (strip stress/length/tone marks + fold equiv).
 
     Deterministic thuần bảng — KHÔNG đụng tense/aspirated (phân biệt có nghĩa).
+    Chữ số + dấu chấm là tone/stress marker kiểu espeak dính vào token ("u5",
+    "i.5" — bench M2 2026-07-16) → strip.
     """
     s = symbol.strip().replace("ˈ", "").replace("ˌ", "").replace("ː", "")
+    s = s.translate(_TONE_MARK_STRIP)
     return _IPA_EQUIV_KO.get(s, s)
+
+
+_TONE_MARK_STRIP: Final[dict[int, None]] = str.maketrans("", "", "0123456789.")
 
 
 def is_vowel_ko(symbol: str) -> bool:

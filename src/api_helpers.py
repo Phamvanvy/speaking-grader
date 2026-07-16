@@ -15,7 +15,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from .rubrics import EXAM_REGISTRIES, resolve_question_type
-from .rubrics.base import QuestionType, exam_score_field
+from .rubrics.base import QuestionType, exam_language, exam_score_field
 from .tts import MAX_TEXT_LEN as _TTS_MAX_TEXT
 
 logger = logging.getLogger("toeic.api")
@@ -71,8 +71,6 @@ def _ensure_exam_lang_enabled(exam: str, config) -> None:
     Gate Ở ĐÂY (request level) chứ không trong core: pipeline lang=ko chưa qua
     bench M2 thì không nhận request — default OFF theo văn hoá flag của repo.
     """
-    from .rubrics.base import exam_language
-
     if exam_language(exam) == "ko" and not getattr(config, "lang_ko_enabled", False):
         raise HTTPException(
             status_code=400,

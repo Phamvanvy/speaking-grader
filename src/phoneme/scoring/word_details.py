@@ -367,13 +367,15 @@ def _fit_word_segments(
     if not n or not m:
         return None
     profile = profile or get_profile("en")
+    # Hoist ra local: bảng O(n·m) + traceback — khỏi tra attribute mỗi cell.
+    similarity = profile.phoneme_similarity
     dp = [[0.0] * (m + 1) for _ in range(n + 1)]
     dp[0] = [j * _REANCHOR_GAP_COST for j in range(m + 1)]
     for i in range(1, n + 1):
         # dp[i][0] = 0: bỏ predicted prefix miễn phí (fitting)
         for j in range(1, m + 1):
             sub = dp[i - 1][j - 1] + (
-                1.0 - profile.phoneme_similarity(predicted[i - 1], reference[j - 1])
+                1.0 - similarity(predicted[i - 1], reference[j - 1])
             )
             dp[i][j] = min(sub, dp[i - 1][j] + _REANCHOR_GAP_COST,
                            dp[i][j - 1] + _REANCHOR_GAP_COST)
@@ -387,7 +389,7 @@ def _fit_word_segments(
     i, j = best_i, m
     while j > 0:
         if i > 0 and dp[i][j] == dp[i - 1][j - 1] + (
-            1.0 - profile.phoneme_similarity(predicted[i - 1], reference[j - 1])
+            1.0 - similarity(predicted[i - 1], reference[j - 1])
         ):
             matched.append(i - 1)
             i, j = i - 1, j - 1

@@ -682,6 +682,9 @@ async def suggest(
     Chỉ cho dạng câu MỞ. `read_aloud` bị chặn (bài mẫu chính là reference script).
     """
     exam = _validate_exam(exam)
+    # Gate như các endpoint chấm: suggest cho topik khi flag off sẽ sinh bài mẫu
+    # TIẾNG ANH cho đề tiếng Hàn (prompt suggest chưa Koreanize — M3).
+    _ensure_exam_lang_enabled(exam, _BASE_CONFIG)
     qt = _resolve(question_type, exam)
     if qt.key == "read_aloud":
         raise HTTPException(
@@ -731,6 +734,8 @@ async def exam_import(
     chấm) — server KHÔNG lưu file ảnh.
     """
     exam = _validate_exam(exam)
+    # Flag off thì import đề topik cũng chặn — nhất quán với các endpoint chấm.
+    _ensure_exam_lang_enabled(exam, _BASE_CONFIG)
     suffix = Path(file.filename or "").suffix.lower()
     file_bytes = await file.read()
     try:
