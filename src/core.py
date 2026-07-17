@@ -92,6 +92,7 @@ def grade_response(
     save: bool = True,
     accent: str = "default",
     lang: str | None = None,
+    phoneme_strict: bool = False,
 ) -> dict[str, Any]:
     """Chạy toàn bộ pipeline cho 1 audio và trả về dict kết quả (build_output).
 
@@ -114,6 +115,12 @@ def grade_response(
     - lang: ngôn ngữ NÓI đang chấm ("en" | "ko"...). None = suy từ qt.exam
       (exam_language). Quyết định ASR language + LangProfile (G2P/similarity).
       KHÁC config.feedback_lang (ngôn ngữ lời nhận xét).
+    - phoneme_strict: chấm phoneme CHẶT (popup luyện 1 từ): tắt các lớp leniency
+      thiết kế cho câu dài/nói tự do — L1 (nuốt phụ âm cuối + trung hoà sub
+      conf thấp), coverage gate, drift cap, collapse gate. GIỮ các guard thuần
+      về recognizer (noise gate, confidence knee, s-cluster, multiref, boundary
+      refine) vì đó là nhiễu model, không phải leniency với người học.
+      False (mặc định) = mọi đường chấm hiện hành không đổi bit-for-bit.
     """
     lang = lang or exam_language(qt.exam)
     # LangProfile: bộ hàm G2P/similarity/tokenizer theo ngôn ngữ đang chấm.
@@ -204,6 +211,12 @@ def grade_response(
             # vi→ko (M5) flag RIÊNG default OFF + bảng src/phoneme/l1/vi_ko.py.
             _is_ko = lang == "ko"
             _l1_ko = _is_ko and config.phoneme_l1_ko_enabled
+            # phoneme_strict (popup luyện 1 từ): các gate dưới đây tha lỗi THẬT
+            # trên phát âm chủ động 1 từ (tín hiệu âm học sạch, mục đích là bắt
+            # lỗi) nên tắt hết; guard nhiễu recognizer (noise gate/knee/s-cluster)
+            # giữ nguyên — xem docstring.
+            if phoneme_strict:
+                _l1_ko = False
             phoneme_analyzer = HybridPhonemeAnalyzer(
                 wav2vec_model=(
                     config.phoneme_wav2vec_model_ko
@@ -213,7 +226,9 @@ def grade_response(
                 device=config.phoneme_device,
                 max_words=config.phoneme_max_words,
                 confidence_knee=config.phoneme_confidence_knee,
-                l1_enabled=(config.phoneme_l1_enabled and not _is_ko) or _l1_ko,
+                l1_enabled=(
+                    (config.phoneme_l1_enabled and not _is_ko) or _l1_ko
+                ) and not phoneme_strict,
                 l1_profile=get_l1_profile("vi", "ko") if _l1_ko else None,
                 l1_min_confidence=config.phoneme_l1_min_confidence,
                 low_conf_floor=config.phoneme_l1_low_conf_floor,
@@ -223,7 +238,9 @@ def grade_response(
                 connected_speech_enabled=(
                     config.phoneme_connected_speech_enabled and not _is_ko
                 ),
-                coverage_gate_enabled=config.phoneme_coverage_gate_enabled,
+                coverage_gate_enabled=(
+                    config.phoneme_coverage_gate_enabled and not phoneme_strict
+                ),
                 coverage_gate_cap=config.phoneme_coverage_gate_cap,
                 coverage_gate_max_len=config.phoneme_coverage_gate_max_len,
                 # whisperx word "probability" là alignment score (thang thấp hơn
@@ -234,7 +251,9 @@ def grade_response(
                     if asr_run.backend_used == "whisperx"
                     else config.phoneme_coverage_gate_min_asr_prob
                 ),
-                drift_cap_enabled=config.phoneme_drift_cap_enabled,
+                drift_cap_enabled=(
+                    config.phoneme_drift_cap_enabled and not phoneme_strict
+                ),
                 drift_sub_cap=config.phoneme_drift_sub_cap,
                 drift_window_pad=config.phoneme_drift_window_pad,
                 deletion_evidence_enabled=config.phoneme_deletion_evidence_enabled,
@@ -243,7 +262,9 @@ def grade_response(
                 ),
                 boundary_refine_enabled=config.phoneme_boundary_refine_enabled,
                 s_cluster_enabled=config.phoneme_s_cluster_enabled and not _is_ko,
-                collapse_gate_enabled=config.phoneme_collapse_gate_enabled,
+                collapse_gate_enabled=(
+                    config.phoneme_collapse_gate_enabled and not phoneme_strict
+                ),
                 profile=lang_profile,
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS

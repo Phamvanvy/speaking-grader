@@ -276,8 +276,17 @@ def _build_user_prompt(
     phoneme_result: PhonemeResult | None = None,
     has_image: bool = False,
     provided_info: str | None = None,
+    feedback_lang: str = "vi",
 ) -> str:
+    # Ngôn ngữ nhận xét được nhắc ở BA chỗ: khối OUTPUT LANGUAGE trong system
+    # prompt, field `output_language` trong payload, và khối reminder ở CUỐI
+    # user prompt (sát điểm model bắt đầu sinh JSON). Model local nén nặng
+    # (vd Q2) hay bỏ rơi instruction nằm cuối một system prompt dài rồi sinh
+    # tiếng Anh theo quán tính của transcript — recency là thứ chúng bám tốt
+    # nhất nên reminder cuối cùng là lớp quyết định.
+    language_name = resolve_language_name(feedback_lang)
     payload: dict = {
+        "output_language": language_name,
         "task_prompt": prompt_text,
         "reference_script": reference_script if qt.uses_reference_script else None,
         "transcript": transcription.text,
@@ -331,9 +340,22 @@ def _build_user_prompt(
         else "TOPIK (Korean)" if qt.exam == Exam.TOPIK.value
         else "TOEIC"
     )
+    # KHÔNG dùng '{' '}' trong reminder: test parse payload bằng raw_decode từ
+    # dấu '{' đầu tiên và text sau JSON phải là prose thuần.
+    lang_reminder = (
+        "\n\nIMPORTANT LANGUAGE REQUIREMENT (applies to the JSON you are about "
+        "to write): every human-readable string — each criterion's "
+        "`justification`, every entry in `suggestions`, `score_rationale`, and "
+        f"`summary_feedback` — MUST be written in {language_name}. Do not use "
+        "any other language for those fields, regardless of the language of "
+        "this prompt or of the transcript. Machine fields stay in English: the "
+        "`criterion` keys and the task_completion / content_relevance enum "
+        "values (very_low/low/medium/high)."
+    )
     return (
         f"Score the following {exam_label} Speaking response. All numeric metrics "
         "are pre-computed and objective.\n\n"
         + image_note
         + json.dumps(payload, ensure_ascii=False, indent=2)
+        + lang_reminder
     )

@@ -350,7 +350,24 @@ def _transcribe_whisperx(
                     vad_method="silero",
                 )
                 _whisperx_model_cache[model_key] = model
-    result = model.transcribe(audio, batch_size=16, language=language)
+    try:
+        result = model.transcribe(audio, batch_size=16, language=language)
+    except IndexError:
+        # Silero VAD không tìm thấy đoạn nói nào (clip quá ngắn/nhỏ tiếng — hay
+        # gặp ở popup luyện 1 từ) → whisperx đưa list VAD-segment RỖNG vào
+        # transformers pipeline và nổ IndexError (inputs[0]). Coi là "không nghe
+        # thấy gì": trả transcript rỗng để tầng trên xử lý (reliability skip hết
+        # → UI báo "chưa nghe rõ"), thay vì 500 cả request.
+        logger.warning(
+            "WhisperX: VAD không tìm thấy đoạn nói nào trong %s — trả transcript rỗng.",
+            audio_path,
+        )
+        return Transcription(
+            text="",
+            words=[],
+            language=language or "",
+            duration=float(len(audio)) / 16000.0,
+        )
 
     detected_lang = result.get("language") or language
     align_key = (detected_lang, device)

@@ -292,6 +292,10 @@ async function gradePracticeAttempt(blob, mime) {
         fd.append('text', d.word);
         fd.append('mode', 'mock_test');   // ép bật phoneme analysis
         fd.append('no_ai', 'true');       // 1 từ không cần LLM chấm — chỉ cần phoneme
+        // Chấm CHẶT: 1 từ luyện chủ động không cần các lớp leniency của câu dài
+        // (L1 nuốt phụ âm cuối, coverage/drift/collapse gate) — backend tắt chúng
+        // khi strict=true, lỗi thật không còn bị ẩn thành chip xanh.
+        fd.append('strict', 'true');
         fd.append('accent', currentAccent);
         // Từ tiếng Hàn: phải chấm bằng pipeline ko (G2P 표준발음법 + model acoustic
         // Hàn) — exam=topik là cách backend suy lang. Thiếu dòng này sẽ chấm bằng

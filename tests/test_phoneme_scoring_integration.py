@@ -122,17 +122,8 @@ class TestPhonemeInUserPrompt:
             phoneme_result=phoneme,
         )
 
-        # Extract JSON from the prompt
-        json_part = prompt.split("json.dumps")[0]  # find JSON section
-        # Actually parse the JSON from the prompt
-        payload_str = prompt[prompt.index("Score the following"):].replace(
-            "Score the following TOEIC Speaking response. All numeric metrics are "
-            "pre-computed and objective.\n\n",
-            "",
-        )
-        # Find start of JSON object
-        json_start = prompt.index("{")
-        payload = json.loads(prompt[json_start:])
+        # Parse object JSON đầu tiên; raw_decode bỏ qua language reminder sau JSON.
+        payload, _ = json.JSONDecoder().raw_decode(prompt, prompt.index("{"))
 
         assert "phoneme_data" in payload, "phoneme_data must be in payload"
         assert payload["phoneme_data"]["backend_used"] == "wav2vec"
@@ -178,7 +169,7 @@ class TestPhonemeInUserPrompt:
             gating=self._build_gating(),
             phoneme_result=phoneme,
         )
-        payload = json.loads(prompt[prompt.index("{"):])
+        payload, _ = json.JSONDecoder().raw_decode(prompt, prompt.index("{"))
         score_block = payload["phoneme_data"]["score"]
         # Allowlist: summary + errors có; per-word + penalty metadata KHÔNG.
         assert "errors" in score_block
@@ -208,8 +199,7 @@ class TestPhonemeInUserPrompt:
             phoneme_result=None,
         )
 
-        json_start = prompt.index("{")
-        payload = json.loads(prompt[json_start:])
+        payload, _ = json.JSONDecoder().raw_decode(prompt, prompt.index("{"))
 
         assert "phoneme_data" not in payload, "phoneme_data must be absent when None"
 
@@ -336,8 +326,9 @@ class TestScoreFunctionAcceptsPhonemeResult:
             # Verify _build_user_prompt was called (indirectly via the message content)
             call_args = mock_client.messages.parse.call_args
             user_content = call_args.kwargs["messages"][0]["content"]
-            payload_str = user_content[user_content.index("{"):]
-            payload = json.loads(payload_str)
+            payload, _ = json.JSONDecoder().raw_decode(
+                user_content, user_content.index("{")
+            )
             assert "phoneme_data" in payload
 
 class TestDropInvalidCorrections:

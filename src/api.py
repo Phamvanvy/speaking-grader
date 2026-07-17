@@ -210,6 +210,7 @@ def _grade_bytes(
     user_requested_review: bool,
     provided_info: str | None = None,
     accent: str = "default",
+    phoneme_strict: bool = False,
 ) -> dict:
     """Ghi audio ra file tạm rồi chạy pipeline (HÀM CHẶN — gọi qua threadpool).
 
@@ -251,6 +252,7 @@ def _grade_bytes(
                 question_id=qt.key,
                 save=False,
                 accent=accent,
+                phoneme_strict=phoneme_strict,
             )
 
         score_before_review = None
@@ -394,6 +396,13 @@ async def grade(
     accent: str = Form(
         "default", description="Giọng tham chiếu phát âm: default | gb | us"
     ),
+    strict: bool = Form(
+        False,
+        description=(
+            "Chấm phoneme CHẶT (popup luyện 1 từ): tắt các lớp leniency cho câu "
+            "dài (L1, coverage/drift/collapse gate). Đường chấm thường không đổi."
+        ),
+    ),
     user_id: str | None = Form(
         None, description="ID ẩn danh của user (bật lưu lịch sử khi có)"
     ),
@@ -441,6 +450,7 @@ async def grade(
                 mode=mode,
                 user_requested_review=user_requested_review,
                 accent=accent,
+                phoneme_strict=strict,
             )
         except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
             logger.exception("Lỗi khi chấm")

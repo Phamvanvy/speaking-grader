@@ -65,8 +65,10 @@ def _user_payload(qt_key: str, *, provided_info=None, has_image=False) -> dict:
         has_image=has_image,
         provided_info=provided_info,
     )
-    # Phần JSON nằm sau đoạn note; lấy từ dấu '{' đầu tiên.
-    return json.loads(prompt[prompt.index("{"):])
+    # Phần JSON nằm sau đoạn note; parse object đầu tiên từ dấu '{' đầu tiên
+    # (raw_decode bỏ qua khối language reminder nằm SAU JSON).
+    payload, _ = json.JSONDecoder().raw_decode(prompt, prompt.index("{"))
+    return payload
 
 
 def test_provided_info_included_for_respond_with_info():
@@ -83,6 +85,29 @@ def test_provided_info_omitted_for_types_without_flag():
 def test_provided_info_omitted_when_not_supplied():
     payload = _user_payload("respond_with_info", provided_info=None)
     assert "provided_info" not in payload
+
+
+def test_user_prompt_carries_output_language():
+    # Ba lớp chống model nhỏ trả sai ngôn ngữ: output_language trong payload +
+    # reminder ở CUỐI prompt (sau JSON, sát điểm model bắt đầu sinh).
+    qt = get_question_type("respond_questions")
+    prompt = _build_user_prompt(
+        qt,
+        "What time does the first session start?",
+        None,
+        _transcription(),
+        _features(),
+        _gating(),
+        feedback_lang="vi",
+    )
+    payload, end = json.JSONDecoder().raw_decode(prompt, prompt.index("{"))
+    # resolve_language_name("vi") = "Vietnamese (tiếng Việt)" — kèm tên bản địa.
+    assert payload["output_language"].startswith("Vietnamese")
+    tail = prompt[end:]
+    assert "IMPORTANT LANGUAGE REQUIREMENT" in tail
+    assert "Vietnamese" in tail
+    # Reminder là text thuần sau JSON — không được chứa brace làm hỏng parse.
+    assert "{" not in tail and "}" not in tail
 
 
 def test_system_prompt_contains_criteria_and_guidance():

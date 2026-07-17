@@ -263,3 +263,136 @@ def test_resolve_torch_device_auto_prefers_cuda(monkeypatch):
 
     assert asr._resolve_torch_device("auto", "whisperx") == "cuda"
     assert asr._resolve_torch_device("cuda", "whisperx") == "cuda"
+
+
+def test_grade_bytes_passes_phoneme_strict(monkeypatch):
+    """strict=true từ /grade (popup luyện 1 từ) phải xuống tới grade_response."""
+    cfg = _make_config()
+    qt = get_question_type("read_aloud")
+    calls: list[dict] = []
+
+    def _fake_grade_response(*args, **kwargs):
+        calls.append(kwargs)
+        return _output(confidence=0.9, silence_ratio=0.1, coverage=0.95, score=140)
+
+    monkeypatch.setattr(api, "grade_response", _fake_grade_response)
+
+    api._grade_bytes(
+        b"audio-bytes",
+        ".wav",
+        cfg,
+        qt,
+        reference_script="information",
+        image_b64=None,
+        image_media_type=None,
+        expected_duration_sec=None,
+        prompt="",
+        no_ai=True,
+        mode="mock_test",
+        user_requested_review=False,
+        phoneme_strict=True,
+    )
+    assert calls[0]["phoneme_strict"] is True
+
+    # Không truyền cờ (mọi client hiện hành trừ popup) = False — không đổi đường chấm cũ.
+    calls.clear()
+    _grade(cfg, qt, "mock_test")
+    assert calls[0]["phoneme_strict"] is False
+
+
+def test_grade_response_strict_disables_sentence_leniency(monkeypatch):
+    """phoneme_strict CHỈ tắt leniency câu dài (L1 + coverage/drift/collapse gate);
+    guard nhiễu recognizer (noise gate, knee) giữ nguyên."""
+    import dataclasses
+
+    from src import core
+    from src.asr import ASRRun, Transcription
+
+    captured: list[dict] = []
+
+    class _FakeAnalyzer:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+        def analyze(self, *args, **kwargs):
+            return None  # phoneme là phụ trợ — None được pipeline chấp nhận
+
+    monkeypatch.setattr(core, "HybridPhonemeAnalyzer", _FakeAnalyzer)
+    monkeypatch.setattr(
+        core.asr,
+        "transcribe_with_backend",
+        lambda *a, **k: ASRRun(
+            transcription=Transcription(
+                text="information", words=[], language="en", duration=1.0
+            ),
+            backend_used="whisperx",
+            elapsed_ms=1,
+        ),
+    )
+
+    cfg = dataclasses.replace(
+        _make_config(),
+        phoneme_analysis_enabled=True,
+        phoneme_l1_enabled=True,
+        phoneme_coverage_gate_enabled=True,
+        phoneme_drift_cap_enabled=True,
+        phoneme_collapse_gate_enabled=True,
+    )
+    qt = get_question_type("read_aloud")
+
+    for strict in (False, True):
+        core.grade_response(
+            "audio.wav",
+            cfg,
+            qt,
+            reference_script="information",
+            no_ai=True,
+            phoneme_analysis=True,
+            save=False,
+            phoneme_strict=strict,
+        )
+
+    assert len(captured) == 2
+    default_kwargs, strict_kwargs = captured
+    assert default_kwargs["l1_enabled"] is True
+    assert default_kwargs["coverage_gate_enabled"] is True
+    assert default_kwargs["drift_cap_enabled"] is True
+    assert default_kwargs["collapse_gate_enabled"] is True
+    assert strict_kwargs["l1_enabled"] is False
+    assert strict_kwargs["coverage_gate_enabled"] is False
+    assert strict_kwargs["drift_cap_enabled"] is False
+    assert strict_kwargs["collapse_gate_enabled"] is False
+    # Guard nhiễu recognizer không đổi trong strict.
+    assert (
+        strict_kwargs["recognizer_noise_conf"]
+        == default_kwargs["recognizer_noise_conf"]
+    )
+
+
+def test_whisperx_no_speech_returns_empty_transcription(monkeypatch):
+    """Silero VAD không thấy tiếng nói → whisperx nổ IndexError trên list segment
+    rỗng (clip 1 từ quá ngắn/nhỏ tiếng). Phải trả transcript RỖNG thay vì 500."""
+    import numpy as np
+
+    fake_whisperx = types.SimpleNamespace()
+    monkeypatch.setitem(__import__("sys").modules, "whisperx", fake_whisperx)
+    monkeypatch.setattr(asr, "_resolve_torch_device", lambda d, b: "cpu")
+    monkeypatch.setattr(
+        asr,
+        "_load_audio_for_whisperx",
+        lambda path, mod: np.zeros(16000, dtype=np.float32),
+    )
+
+    class _FakeModel:
+        def transcribe(self, audio, batch_size=16, language="en"):
+            raise IndexError("list index out of range")
+
+    monkeypatch.setitem(
+        asr._whisperx_model_cache, ("base", "cpu", "int8"), _FakeModel()
+    )
+
+    out = asr._transcribe_whisperx("silence.webm", model_size="base", device="cpu")
+
+    assert out.text == ""
+    assert out.words == []
+    assert out.duration == 1.0  # 16000 mẫu / 16kHz

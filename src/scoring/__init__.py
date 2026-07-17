@@ -97,6 +97,7 @@ def score(
         phoneme_result=phoneme_result,
         has_image=bool(image_b64),
         provided_info=provided_info,
+        feedback_lang=config.feedback_lang,
     )
 
     # Gọi backend rồi validate; nếu output rác thì retry 1 lần và raise rõ ràng
