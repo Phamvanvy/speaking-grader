@@ -10,6 +10,7 @@ from collections.abc import Collection, Mapping
 from typing import Final
 
 from ..diagnostics import DRIFT_WINDOW_PAD_SEC, is_within_word_window
+from ..ipa.phoneme_set import BACK_VOWEL_SPLIT_ENABLED
 from ..ipa.profile import LangProfile, get_profile
 from ..l1 import L1Profile
 from ..l1_vietnamese import PenaltyReason
@@ -35,6 +36,39 @@ _SEVERITY_RANK: Final[dict[str, int]] = {"low": 0, "medium": 1, "high": 2}
 # NGUYÊN ÂM kế bên (vd the /ðə/ → /ə/ thành ð→ə). Đó là lỗi NHẬN DẠNG, không phải
 # người đọc → hạ về low. Vẫn giữ lỗi thật th-stopping (ð→d/z) vì predicted là PHỤ ÂM.
 _RECOGNIZER_DROP_CONS: Final[frozenset[str]] = frozenset({"ð", "h"})
+
+# BACK_VOWEL_SPLIT: cặp ɑ↔ɔ (dạng đã normalize khi flag ON — flag OFF cả hai về
+# "ɔ" nên set suy biến 1 phần tử, không bao giờ khớp so sánh bên dưới).
+_BACK_VOWEL_PAIR: Final[frozenset[str]] = frozenset({"ɑ", "ɔ"})
+
+
+def _back_vowel_merger_ok(
+    reference: list[str],
+    ref_word: list[str],
+    ref_idx: int,
+    word: str,
+    profile: LangProfile,
+) -> bool:
+    """ɑ↔ɔ có phải BIẾN THỂ GIỌNG chấp nhận được ở vị trí này không (flag ON)?
+
+    Chấp nhận (ok, không tính lỗi):
+      - Function word (or/for/your...): dạng yếu đọc lệch ɑ/ɔ là bình thường.
+      - KHÔNG đứng trước /r/ cùng từ: cot-caught merger (call/talk/online với
+        ɑ thay ɔː và ngược lại) là giọng Mỹ hợp lệ — bench 2026-07-17 cho thấy
+        đây là phần lớn detection nếu không có rule này.
+    KHÔNG chấp nhận (lỗi thật, sub medium theo near-pair 0.60): trước /r/ cùng
+    từ ở content word — NORTH↔START (store/star, cord/card, port/part) không
+    giọng chuẩn nào gộp, người học đọc lẫn là đọc SAI TỪ.
+    """
+    if (word or "").lower() in profile.function_words:
+        return True
+    nxt = ref_idx + 1
+    pre_r = (
+        nxt < len(reference)
+        and ref_word[nxt] == word
+        and profile.normalize_ipa(reference[nxt]) == "r"
+    )
+    return not pre_r
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -544,6 +578,25 @@ def _align_points(
                 point = PhonemePoint(
                     symbol=ref_ph, status="ok", stress=stress, display_stress=disp,
                     penalty_reason=PenaltyReason.S_CLUSTER_VARIANT.value,
+                    penalty_adjustment=0.0,
+                )
+                penalty = 0.0
+            elif (
+                profile.english_rules_enabled
+                and BACK_VOWEL_SPLIT_ENABLED
+                and frozenset(
+                    {profile.normalize_ipa(ref_ph), profile.normalize_ipa(pred_ph)}
+                ) == _BACK_VOWEL_PAIR
+                and _back_vowel_merger_ok(reference, ref_word, ref_idx, word, profile)
+            ):
+                # BACK_VOWEL_SPLIT: ɑ↔ɔ ngoài vị trí trước-/r/ (cot-caught merger,
+                # function word dạng yếu) = biến thể giọng, không phải lỗi. Trước
+                # /r/ ở content word (store/star) RƠI XUỐNG else → sub medium.
+                # Flag OFF: normalize gộp ɑ→ɔ nên hai âm đã match ở nhánh đầu —
+                # nhánh này không bao giờ chạy (bit-for-bit).
+                point = PhonemePoint(
+                    symbol=ref_ph, status="ok", stress=stress, display_stress=disp,
+                    penalty_reason=PenaltyReason.ACCENT_VARIANT.value,
                     penalty_adjustment=0.0,
                 )
                 penalty = 0.0

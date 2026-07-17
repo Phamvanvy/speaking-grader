@@ -10,6 +10,7 @@ Cung cấp:
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Final, Literal
 
@@ -145,14 +146,34 @@ _APPROXIMANTS = {"r", "l", "w", "j"}
 #     không erase ở đây (nếu erase thì writer/water mất khả năng phân biệt).
 #   - `ɜ → ə`: giữ ɜː khác ə để lỗi thật như bird /bɜːd/ vs /bəd/ không bị bỏ sót
 #     (chỉ vùng KHÔNG nhấn mới khoan dung ɜ↔ə, do phonemes_match quyết định theo stress).
+# TOEIC_PHONEME_BACK_VOWEL_SPLIT: tách ɑ khỏi nhóm gộp back-vowel. Gộp ɑ→ɔ
+# nuốt contrast THẬT (star/store, cot/caught — case 2026-07-17: đọc "star" vào từ
+# "store" vẫn 100% kể cả strict mode, vì mọi tầng so khớp đều qua normalize).
+# Khi ON: ɑ giữ riêng, cặp ɑ↔ɔ chuyển thành near-pair trong similarity (đúng
+# doctrine đầu file: tolerance thuộc phonemes_match/similarity, không thuộc
+# normalize). ɒ/o VẪN gộp về ɔ: chỉ là khác biệt inventory ký hiệu recognizer,
+# CMUdict reference không bao giờ sinh ɒ/o.
+#
+# Đọc env TRỰC TIẾP lúc IMPORT (không qua Config): normalize_ipa là hàm thuần
+# module-level, mọi bảng keyed theo nó (_NEAR_PAIRS, _REAL_ERROR_SUBS,
+# _VOWELS_NORM, by_symbol của word_suggest...) build 1 lần lúc import, và
+# phoneme_similarity có lru_cache — flag runtime sẽ làm bảng/cache lệch nhau.
+# Đổi flag = restart process (cùng mô hình .env như các flag TOEIC_PHONEME_*).
+BACK_VOWEL_SPLIT_ENABLED: Final[bool] = (
+    os.getenv("TOEIC_PHONEME_BACK_VOWEL_SPLIT", "").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+
 _IPA_EQUIV: Final[dict[str, str]] = {
     "ɹ": "r",                 # eSpeak r ↔ CMU r
     "g": "ɡ",                 # ascii g ↔ IPA ɡ
     "ɚ": "ə", "ɝ": "ə",       # r-colored schwa → schwa (giữ ɜ riêng)
     "ʌ": "ə", "ɐ": "ə",       # schwa nhấn/không nhấn
     "ɛ": "e",                 # EH
-    "ɒ": "ɔ", "ɑ": "ɔ", "o": "ɔ",  # back vowels gộp 1 nhóm (cot-caught)
+    "ɒ": "ɔ", "o": "ɔ",       # back vowels gộp 1 nhóm (cot-caught)
     "oʊ": "əʊ",               # OW
+    # ɑ→ɔ: CHỈ khi flag OFF (hành vi cũ bit-for-bit) — xem BACK_VOWEL_SPLIT_ENABLED.
+    **({} if BACK_VOWEL_SPLIT_ENABLED else {"ɑ": "ɔ"}),
 }
 
 

@@ -575,9 +575,10 @@ def _score_deletion(
     Áp cho `r_droppable` (coda ÂM TIẾT: cuối từ HOẶC trước phụ âm trong cùng từ —
     car /kɑr/→/kɑ/, mo(r)ning, Satu(r)day); giữ thêm điều kiện cũ (is_coda & /r/) làm
     fallback cho caller chưa truyền r_droppable. LƯU Ý: đây CHƯA phải "union" đầy đủ
-    GB/US. Các khác biệt hệ thống GB/US còn lại (oʊ↔əʊ, ɒ/ɑ↔ɔ, ɚ/ɝ↔ə, ɛ↔e) đã được
-    normalize_ipa() gộp sẵn nên tự khớp. BATH split (æ↔ɑ) CỐ Ý không gộp (sau normalize
-    thành æ↔ɔ, lẫn với lỗi thật).
+    GB/US. Các khác biệt hệ thống GB/US còn lại (oʊ↔əʊ, ɒ↔ɔ, ɚ/ɝ↔ə, ɛ↔e) đã được
+    normalize_ipa() gộp sẵn nên tự khớp; ɑ↔ɔ gộp CHỈ khi TOEIC_PHONEME_BACK_VOWEL_SPLIT
+    tắt (flag ON: thành near-pair 0.60 — star/store là lỗi thật, xem phoneme_set).
+    BATH split (æ↔ɑ) CỐ Ý không gộp (sau normalize thành æ↔ɔ, lẫn với lỗi thật).
 
     `g2p_uncertain`: IPA của từ lấy từ eSpeak (OOV/tên riêng) → reference tự nó là đoán →
     cap penalty về PHONEME_G2P_UNCERTAIN_CAP (severity "low", vào nhóm hidden-noise).
