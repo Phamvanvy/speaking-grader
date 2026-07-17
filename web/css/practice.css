@@ -145,6 +145,15 @@ button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px 
 .practice-replay.hidden { display: none; }
 
 /* ── Tab "Từ đã lưu" ── */
+.saved-add { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.6rem; }
+.saved-add__input {
+    flex: 1 1 14rem; min-width: 0; font-size: 0.9rem;
+    border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.45rem 0.7rem;
+    background: #f9fafb; color: inherit;
+}
+.saved-add__input:focus { outline: none; border-color: #a5b4fc; background: #fff; }
+.saved-add__msg { color: #16a34a; font-size: 0.85rem; }
+.saved-add__msg.err { color: #dc2626; }
 .saved-list { margin-top: 0.6rem; }
 .saved-row {
     display: flex; align-items: center; gap: 0.7rem;
@@ -203,5 +212,7 @@ body.dark .practice-status { color: #d1d5db; }
 body.dark .practice-replay { background: #273449; border-color: #374151; color: #d1d5db; }
 body.dark .practice-replay:hover { background: #1e3a8a33; }
 body.dark .saved-row { border-bottom-color: #273449; }
+body.dark .saved-add__input { background: #111827; border-color: #374151; color: #f9fafb; }
+body.dark .saved-add__input:focus { border-color: #6366f1; background: #1f2937; }
 body.dark td .practice-open:hover { color: #a5b4fc; }
 body.dark .suggest-note { color: #9ca3af; }

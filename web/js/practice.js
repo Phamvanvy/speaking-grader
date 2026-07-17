@@ -367,6 +367,7 @@ async function togglePracticeBookmark() {
         b.textContent = saved ? '★' : '☆';
         b.classList.toggle('saved', saved);
     });
+    document.dispatchEvent(new CustomEvent('savedwords:changed'));
 }
 
 // ── Delegated listeners (gắn 1 lần, panel dựng lại mỗi render) ──────────
@@ -390,6 +391,8 @@ document.addEventListener('click', e => {
                 b.classList.toggle('saved', saved);
             });
             updatePracticeBookmarkStar();
+            // Tab Từ đã lưu (nếu đang mở) render lại danh sách — saved.js lắng nghe.
+            document.dispatchEvent(new CustomEvent('savedwords:changed'));
         }).catch(err => alert(`Lỗi lưu từ: ${err.message || err}`));
         return;
     }

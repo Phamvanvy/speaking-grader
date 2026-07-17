@@ -80,16 +80,21 @@ function savedRowHtml(w) {
     </div>`;
 }
 
+function renderSavedList(items) {
+    const box = document.getElementById('saved-list');
+    if (!box) return;
+    box.innerHTML = items.length
+        ? items.map(savedRowHtml).join('')
+        : `<div class="saved-empty">Chưa có từ nào. Gõ từ vào ô "Thêm từ" ở trên, hoặc khi xem
+           kết quả chấm bấm ☆ trên bảng lỗi để lưu từ vào đây luyện tập.</div>`;
+}
+
 async function loadSavedWords() {
     const box = document.getElementById('saved-list');
     if (!box) return;
     box.innerHTML = '<div class="saved-empty">Đang tải…</div>';
     try {
-        const items = await SavedWords.refresh();
-        box.innerHTML = items.length
-            ? items.map(savedRowHtml).join('')
-            : `<div class="saved-empty">Chưa có từ nào. Khi xem kết quả chấm, bấm vào từ sai
-               rồi bấm ☆ (hoặc bấm ☆ ngay trên bảng lỗi) để lưu từ vào đây luyện tập.</div>`;
+        renderSavedList(await SavedWords.refresh());
     } catch (err) {
         box.innerHTML = `<div class="saved-empty">Lỗi tải danh sách: ${escapeHtml(String(err.message || err))}</div>`;
     }
@@ -97,6 +102,55 @@ async function loadSavedWords() {
     loadWordSuggestions(false);
 }
 window.loadSavedWords = loadSavedWords;
+
+// ☆ toggle ở bất kỳ đâu (bảng lỗi, hàng gợi ý, popup luyện tập — practice.js
+// dispatch sau khi server xong) → nếu tab Từ đã lưu đang mở thì dựng lại danh
+// sách từ cache (không fetch lại).
+document.addEventListener('savedwords:changed', () => {
+    const tab = document.getElementById('mode-saved');
+    // Refresh từ server (GET nhẹ) thay vì render cache: giữ đúng thứ tự
+    // "mới lưu trước" của server (cache Map append từ mới vào CUỐI).
+    if (tab && !tab.classList.contains('hidden')) {
+        SavedWords.refresh().then(renderSavedList).catch(() => { /* giữ list cũ */ });
+    }
+});
+
+// ── Thêm từ ngoài (form trên danh sách) ─────────────────────────────────
+// Cho phép lưu từ CHƯA từng xuất hiện trong bài chấm: chỉ gửi word, server tự
+// tra IPA (CMUdict). Validate client mirror server (_WORD_RE của src/words.py)
+// để lỗi hiện ngay không tốn round-trip.
+const _ADD_WORD_RE = /^[A-Za-z][A-Za-z'-]{0,39}$/;
+
+async function addSavedWordSubmit(e) {
+    e.preventDefault();
+    const input = document.getElementById('saved-add-input');
+    const msg = document.getElementById('saved-add-msg');
+    const word = (input.value || '').trim().toLowerCase();
+    msg.className = 'saved-add__msg';
+    if (!_ADD_WORD_RE.test(word)) {
+        msg.classList.add('err');
+        msg.textContent = 'Từ chỉ gồm chữ cái tiếng Anh (được phép nháy đơn, gạch nối).';
+        return;
+    }
+    if (SavedWords.has(word)) {
+        msg.textContent = `"${word}" đã có trong danh sách.`;
+        return;
+    }
+    try {
+        await SavedWords.add({ word });
+        input.value = '';
+        msg.textContent = `Đã lưu "${word}".`;
+        renderSavedList(await SavedWords.refresh());
+    } catch (err) {
+        msg.classList.add('err');
+        msg.textContent = `Lỗi lưu từ: ${err.message || err}`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('saved-add-form');
+    if (form) form.addEventListener('submit', addSavedWordSubmit);
+});
 
 // ── Gợi ý luyện âm (API /words/suggestions) ─────────────────────────────
 let suggestLoaded = false;
@@ -123,9 +177,17 @@ function suggestRowHtml(s) {
         .join('');
     const reason = s.reason
         ? `<div class="suggest-row__reason">${escapeHtml(s.reason)}</div>` : '';
+    // ☆/★ lưu từ ngay từ hàng gợi ý — cùng class .word-bookmark + data-practice
+    // như bảng lỗi (render.js) nên click do listener delegated của practice.js
+    // xử lý, và mọi nút cùng data-word tự đồng bộ trạng thái.
+    const saved = window.SavedWords && SavedWords.has(s.word);
+    const star = `<button type="button" class="word-bookmark${saved ? ' saved' : ''}"
+        data-word="${escapeHtml(s.word)}" data-practice="${payload}"
+        title="${saved ? 'Bỏ lưu từ này' : 'Lưu từ để luyện tập'}">${saved ? '★' : '☆'}</button>`;
     return `<div class="saved-row suggest-row">
         <div class="suggest-row__main">
             <span class="saved-row__word">${escapeHtml(s.word)}</span>
+            ${star}
             <span class="saved-row__ipa">${s.ipa ? `/${escapeHtml(s.ipa)}/` : ''}</span>
             <button type="button" class="tts-play" data-word="${escapeHtml(s.word)}" title="Nghe phát âm chuẩn">🔊</button>
             <span class="suggest-row__targets">${targets}</span>

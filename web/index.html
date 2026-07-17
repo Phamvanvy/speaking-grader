@@ -519,6 +519,14 @@
                     <h2>📚 Từ đã lưu</h2>
                     <button class="btn btn-secondary btn-inline" onclick="loadSavedWords()">↻ Tải lại</button>
                 </div>
+                <!-- Thêm từ ngoài (không cần chấm bài): server tra IPA (CMUdict),
+                     submit xử lý ở saved.js addSavedWordSubmit. -->
+                <form id="saved-add-form" class="saved-add" autocomplete="off">
+                    <input type="text" id="saved-add-input" class="saved-add__input" maxlength="40"
+                        placeholder="Thêm từ muốn luyện — vd: environment" spellcheck="false" />
+                    <button type="submit" class="btn btn-secondary btn-inline">＋ Thêm từ</button>
+                    <span class="saved-add__msg" id="saved-add-msg"></span>
+                </form>
                 <div class="saved-list" id="saved-list"></div>
             </div>
             <!-- Gợi ý luyện âm: âm yếu tính từ lịch sử chấm + từ đã lưu (API

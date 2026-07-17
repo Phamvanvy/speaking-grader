@@ -43,6 +43,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import auth, history, word_suggest, words
+from .phoneme.ipa import word_ipa_display
 from .admission import admission_slot, admission_stats
 from .config import Config, load_config
 from .core import grade_response
@@ -1271,6 +1272,16 @@ def words_upsert(
     """Lưu từ mới hoặc cập nhật từ đã có (upsert theo (user_id, word))."""
     user_id = _resolve_read_user_id(authorization, user_id)
     w = _valid_word_or_400(word)
+    # Từ user tự thêm (form "Thêm từ" — chỉ gửi mỗi `word`): tra IPA server-side
+    # để tab Từ đã lưu / popup luyện tập vẫn hiển thị được phiên âm. CHỈ khi
+    # request không mang ipa lẫn last_score — cập nhật điểm từ popup (last_score,
+    # không ipa) không phải trả phí G2P; upsert COALESCE giữ ipa cũ nếu có.
+    if not ipa and last_score is None:
+        try:
+            ipa = word_ipa_display(w) or None
+        except Exception:  # noqa: BLE001 - thiếu IPA không được chặn việc lưu từ
+            logger.exception("Lỗi tra IPA cho từ %r (bỏ qua)", w)
+            ipa = None
     phonemes_obj = None
     if phonemes:
         try:
