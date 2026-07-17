@@ -477,6 +477,62 @@ def _transcribe_whisperx(
     )
 
 
+def warm_asr_backend(
+    backend: str, model_size: str, device: str, language: str = "en"
+) -> None:
+    """Nạp sẵn model ASR vào cache (GPU) lúc startup — KHÔNG transcribe gì.
+
+    Dùng đúng cache + lock của đường request thật: giữ _asr_inference_lock trong
+    lúc nạp nên request đến giữa chừng chỉ chờ lock rồi hit cache, không nạp
+    trùng model (đặc biệt nhánh faster_whisper vốn không có lock nạp riêng).
+    """
+    key = (backend or "faster_whisper").lower()
+    with _asr_inference_lock:
+        if key == "faster_whisper":
+            _get_model(model_size, device)
+        elif key == "whisperx":
+            _warm_whisperx(model_size, device, language)
+        else:
+            # insanely_fast_whisper (pipe cache riêng) và backend lạ: để lazy như cũ.
+            logger.info("Warmup ASR: backend %s không hỗ trợ nạp sẵn — bỏ qua.", key)
+
+
+def _warm_whisperx(model_size: str, device: str, language: str) -> None:
+    """Nạp WhisperX model + align model vào đúng cache mà _transcribe_whisperx dùng."""
+    import whisperx
+
+    device = _resolve_torch_device(device, "whisperx")
+    base, device_index = _split_cuda_device(device)
+    if base == "cuda":
+        _register_cuda_dll_dirs()
+    compute_type = "float16" if base == "cuda" else "int8"
+
+    model_key = (model_size, device, compute_type)
+    with _whisperx_load_lock:
+        if model_key not in _whisperx_model_cache:
+            logger.info(
+                "Đang nạp WhisperX model=%s device=%s index=%d compute_type=%s",
+                model_size,
+                base,
+                device_index,
+                compute_type,
+            )
+            _whisperx_model_cache[model_key] = whisperx.load_model(
+                model_size,
+                device=base,
+                device_index=device_index,
+                compute_type=compute_type,
+                language=language or None,
+                vad_method="silero",
+            )
+        align_key = (language, device)
+        if align_key not in _whisperx_align_cache:
+            _whisperx_align_cache[align_key] = whisperx.load_align_model(
+                language_code=language,
+                device=device,
+            )
+
+
 _FFMPEG_FALLBACK_DIRS = [r"C:\tools\ffmpeg\bin"] if sys.platform == "win32" else []
 
 

@@ -94,15 +94,19 @@ CREATE TABLE IF NOT EXISTS suggestion_cache (
 );
 """
 
-# Từ hợp lệ để lưu/tra: chữ cái + nháy đơn/gạch nối (khớp token hoá reference).
-_WORD_RE = re.compile(r"^[A-Za-z][A-Za-z'-]{0,39}$")
+# Từ/cụm hợp lệ để lưu/tra: chữ cái + nháy đơn/gạch nối, thêm khoảng trắng để
+# lưu được cụm gợi ý từ vựng ('borrow a book') — tối đa 4 từ (chặn nguyên câu).
+_WORD_RE = re.compile(r"^[A-Za-z][A-Za-z' -]{0,39}$")
+_MAX_PHRASE_WORDS = 4
 
 
 def validate_word(word: str) -> str:
-    """Chuẩn hoá + validate từ (lowercase, strip). Raise ValueError nếu không hợp lệ."""
-    w = (word or "").strip().lower()
-    if not _WORD_RE.match(w):
-        raise ValueError("word không hợp lệ (chỉ chữ cái, nháy đơn, gạch nối; ≤40 ký tự).")
+    """Chuẩn hoá + validate từ/cụm (lowercase, gộp khoảng trắng). Raise ValueError nếu không hợp lệ."""
+    w = " ".join((word or "").split()).lower()
+    if not _WORD_RE.match(w) or len(w.split()) > _MAX_PHRASE_WORDS:
+        raise ValueError(
+            "word không hợp lệ (chỉ chữ cái, nháy đơn, gạch nối; ≤40 ký tự, cụm ≤4 từ)."
+        )
     return w
 
 

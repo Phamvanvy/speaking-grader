@@ -505,8 +505,14 @@ def list_records(cfg: Config, user_id: str, limit: int, offset: int) -> dict:
         total = conn.execute(
             "SELECT COUNT(*) FROM history_records WHERE user_id = ?", (user_id,)
         ).fetchone()[0]
+        # has_audio của list = "có audio ở BẤT KỲ đâu" (record hoặc item) — exam/
+        # batch chỉ lưu audio ở item nên audio_path cấp record là NULL; nút ⬇ tải
+        # zip trên hàng lịch sử cần biết tổng thể. (has_audio của get_record vẫn
+        # là cấp record vì detail dùng nó cho <audio src> record-level.)
         rows = conn.execute(
-            f"SELECT {_RECORD_COLS} FROM history_records WHERE user_id = ?"
+            f"SELECT {_RECORD_COLS}, EXISTS(SELECT 1 FROM history_items i"
+            " WHERE i.record_id = history_records.id AND i.audio_path IS NOT NULL)"
+            " AS item_audio FROM history_records WHERE user_id = ?"
             " ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
             (user_id, limit, offset),
         ).fetchall()
@@ -515,7 +521,7 @@ def list_records(cfg: Config, user_id: str, limit: int, offset: int) -> dict:
     records = []
     for row in rows:
         rec = dict(row)
-        rec["has_audio"] = bool(rec.pop("audio_path", None))
+        rec["has_audio"] = bool(rec.pop("audio_path", None)) or bool(rec.pop("item_audio", 0))
         records.append(rec)
     return {
         "user_id": user_id,
@@ -634,6 +640,52 @@ def get_audio_path(
     if not path.is_relative_to(root) or not path.is_file():
         return None
     return path
+
+
+def list_audio_paths(
+    cfg: Config, user_id: str, record_id: str
+) -> list[tuple[str, Path]] | None:
+    """Mọi audio đã lưu của 1 bản ghi: [(tên file trong zip, path tuyệt đối)].
+
+    None nếu bản ghi không tồn tại/sai user; [] nếu bản ghi không có audio.
+    Tên trong zip: "audio.<ext>" cho audio cấp record (single), item thì
+    "<seq+1:02d>-<label>.<ext>" để giữ thứ tự bài và không đụng tên nhau.
+    """
+    user_id = validate_user_id(user_id)
+    conn = _connect(cfg)
+    try:
+        row = conn.execute(
+            "SELECT audio_path FROM history_records WHERE id = ? AND user_id = ?",
+            (record_id, user_id),
+        ).fetchone()
+        if row is None:
+            return None
+        items = conn.execute(
+            "SELECT seq, label, audio_path FROM history_items"
+            " WHERE record_id = ? AND audio_path IS NOT NULL"
+            " ORDER BY seq, created_at",
+            (record_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    root = _audio_root(cfg)
+    out: list[tuple[str, Path]] = []
+
+    def _add(stem: str, rel: str | None) -> None:
+        if not rel:
+            return
+        path = (root / rel).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            return
+        out.append((f"{stem}{path.suffix}", path))
+
+    _add("audio", row["audio_path"])
+    for i, it in enumerate(items):
+        seq = it["seq"] if it["seq"] is not None else i
+        label = re.sub(r'[\\/:*?"<>|\x00-\x1f]', " ", it["label"] or "")
+        label = re.sub(r"\s+", " ", label).strip()
+        _add(f"{int(seq) + 1:02d}-{label or 'bai'}", it["audio_path"])
+    return out
 
 
 def delete_record(cfg: Config, user_id: str, record_id: str) -> bool:

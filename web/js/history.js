@@ -77,6 +77,8 @@ function renderHistoryList(data) {
             <div class="history-score">${escapeHtml(historyScoreText(rec))}</div>
             <div class="history-actions">
                 <button class="btn btn-secondary btn-inline" onclick="openHistoryDetail('${escapeHtml(rec.id)}')">Xem</button>
+                ${rec.has_audio ? `<button class="btn btn-secondary btn-inline" title="Tải tất cả audio của lần chấm này (zip)"
+                    onclick="downloadHistoryAudio('${escapeHtml(rec.id)}')">⬇</button>` : ''}
                 <button class="btn btn-secondary btn-inline history-del" title="Xoá bản ghi này (kèm audio)"
                     onclick="deleteHistoryRecord('${escapeHtml(rec.id)}')">🗑</button>
             </div>
@@ -138,6 +140,21 @@ async function openHistoryDetail(id) {
     } catch (e) {
         el.innerHTML = `<p class="history-empty">⚠️ ${escapeHtml(e.message)}</p>`;
     }
+}
+
+// Tải zip mọi audio của 1 lần chấm. Điều hướng qua <a> nên token đi bằng query
+// (cùng lý do historyAudioUrl bên dưới).
+function downloadHistoryAudio(recordId) {
+    let url = `${apiBase()}/history/${encodeURIComponent(recordId)}/audio.zip`
+        + `?user_id=${encodeURIComponent(getUserId())}`;
+    const token = (typeof authToken === 'function') ? authToken() : null;
+    if (token) url += `&token=${encodeURIComponent(token)}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
 }
 
 function historyAudioUrl(recordId, itemId) {

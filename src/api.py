@@ -28,10 +28,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import dataclasses
+import io
 import json
 import logging
 import os
+import re
 import tempfile
+import zipfile
 from time import perf_counter
 from pathlib import Path
 from uuid import uuid4
@@ -55,6 +58,7 @@ from .rubrics.base import QuestionType, exam_score_field, exam_score_max
 from .scoring import compute_exam_overall
 from .suggest import default_target_band, suggest_answer, word_info as _gen_word_info
 from .tts import TtsUnavailable, synthesize as _tts_synthesize
+from .warmup import start_background_warmup
 from .api_helpers import (
     _VIDEO_SUFFIXES,
     _audio_suffix,
@@ -107,6 +111,16 @@ if _BASE_CONFIG.history_enabled:
         history.sweep_orphans(_BASE_CONFIG)
     except Exception:  # noqa: BLE001
         logger.exception("Lịch sử: sweep_orphans lỗi (bỏ qua).")
+
+
+@app.on_event("startup")
+def _warmup_models_on_startup() -> None:
+    """Nạp sẵn model vào GPU ngay khi server lên (TOEIC_WARMUP_MODELS — xem src/warmup.py).
+
+    Chạy nền nên KHÔNG chặn uvicorn bind port; request đến giữa chừng vẫn được
+    phục vụ (chờ lock nạp model như trước, không lỗi).
+    """
+    start_background_warmup(_BASE_CONFIG)
 
 
 def _history_save(fn, /, *args, **kwargs) -> None:
@@ -1207,6 +1221,38 @@ def history_audio(
     return FileResponse(path, media_type=media)
 
 
+@app.get("/history/{record_id}/audio.zip")
+def history_audio_zip(
+    record_id: str, user_id: str,
+    token: str | None = None,
+    authorization: str | None = Header(None),
+) -> Response:
+    """Zip mọi audio đã lưu của 1 bản ghi (nút ⬇ trên hàng tab Lịch sử).
+
+    Tải qua link <a>/navigation nên không có header Authorization → nhận token
+    qua query như /history/{id}/audio ở trên.
+    """
+    _require_history_enabled()
+    authz = authorization or (f"Bearer {token}" if token else None)
+    user_id = _resolve_read_user_id(authz, user_id)
+    entries = history.list_audio_paths(_BASE_CONFIG, user_id, record_id)
+    if entries is None:
+        raise HTTPException(status_code=404, detail="Không thấy bản ghi lịch sử.")
+    if not entries:
+        raise HTTPException(status_code=404, detail="Bản ghi này không có audio đã lưu.")
+    buf = io.BytesIO()
+    # ZIP_STORED: webm/mp3/... đã nén sẵn, deflate chỉ tốn CPU không nhỏ thêm.
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for name, path in entries:
+            zf.write(path, name)
+    stem = re.sub(r"[^A-Za-z0-9_-]", "", record_id)[:8] or "record"
+    return Response(
+        buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="audio-{stem}.zip"'},
+    )
+
+
 @app.delete("/history/{record_id}")
 def history_delete(
     record_id: str, user_id: str, authorization: str | None = Header(None)
@@ -1284,7 +1330,9 @@ def words_upsert(
     # không ipa) không phải trả phí G2P; upsert COALESCE giữ ipa cũ nếu có.
     if not ipa and last_score is None:
         try:
-            ipa = word_ipa_display(w) or None
+            # Cụm nhiều từ ('borrow a book'): tra IPA từng từ rồi ghép bằng khoảng
+            # trắng; từ nào không tra được thì bỏ qua từ đó (hiển thị phần còn lại).
+            ipa = " ".join(filter(None, (word_ipa_display(t) for t in w.split()))) or None
         except Exception:  # noqa: BLE001 - thiếu IPA không được chặn việc lưu từ
             logger.exception("Lỗi tra IPA cho từ %r (bỏ qua)", w)
             ipa = None

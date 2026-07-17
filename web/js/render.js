@@ -41,19 +41,58 @@ function featureGridHtml(features) {
     `).join('');
 }
 
+// ── ☆ lưu từ ngay trong text gợi ý (tiêu chí vocabulary/grammar...) ─────
+// Từ/cụm được phép lưu qua /words: chữ Latin + nháy đơn/gạch nối/khoảng trắng,
+// ≤40 ký tự và ≤4 từ (chặn nguyên câu ví dụ). Trả về term đã chuẩn hoá, hoặc null.
+function starrableTerm(raw) {
+    const t = String(raw || '').trim().replace(/\s+/g, ' ');
+    if (!/^[A-Za-z][A-Za-z' -]{0,39}$/.test(t)) return null;
+    if (t.split(' ').length > 4) return null;
+    return t;
+}
+// Nút ☆/★ cùng class .word-bookmark + data-practice như bảng lỗi phát âm →
+// click do delegated listener của practice.js xử lý, POST /words tự tra IPA,
+// mọi nút cùng data-word tự đồng bộ trạng thái. phonemes rỗng: gợi ý từ vựng
+// không có snapshot phát âm — popup luyện tập tự chấm điền sau.
+function wordStarHtml(term) {
+    const saved = window.SavedWords && SavedWords.has(term);
+    const payload = escapeHtml(JSON.stringify({ word: term, ipa: null, accuracy: null, phonemes: [] }));
+    return `<button type="button" class="word-bookmark${saved ? ' saved' : ''}" data-word="${escapeHtml(term)}" data-practice="${payload}" title="${saved ? 'Bỏ lưu từ này' : 'Lưu từ để luyện tập'}">${saved ? '★' : '☆'}</button>`;
+}
+// Escape text + gắn ☆ sau mỗi từ/cụm tiếng Anh nằm trong nháy đơn ('bookstore',
+// 'borrow a book'). Nội dung trong nháy KHÔNG cho nháy đơn lồng, và nháy mở/đóng
+// không được dính liền chữ cái (tránh apostrophe trong "don't" bị coi là delimiter);
+// phải qua starrableTerm; không đạt → giữ nguyên text.
+function starredTextHtml(text) {
+    const s = String(text ?? '');
+    const re = /(?<![A-Za-z])['‘]([A-Za-z][A-Za-z -]{0,38}[A-Za-z])['’](?![A-Za-z])/g;
+    let out = '', last = 0, m;
+    while ((m = re.exec(s)) !== null) {
+        out += escapeHtml(s.slice(last, m.index)) + escapeHtml(m[0]);
+        const term = starrableTerm(m[1]);
+        if (term) out += wordStarHtml(term);
+        last = m.index + m[0].length;
+    }
+    return out + escapeHtml(s.slice(last));
+}
+
 // Vocabulary corrections table (said → suggested + reason + example).
 // Renders nothing when there are no corrections (no empty table shell).
 function correctionsHtml(corrections) {
     const items = Array.isArray(corrections) ? corrections : [];
     if (!items.length) return '';
-    const rows = items.map(c => `
+    const rows = items.map(c => {
+        // ☆ cạnh từ đề xuất — c.suggested là term trần (không nháy) nên gắn thẳng.
+        const term = starrableTerm(c.suggested);
+        return `
         <div style="border-top:1px solid #eee;padding:0.4rem 0;font-size:0.88rem;">
             <div><span style="color:#b91c1c;text-decoration:line-through;">${escapeHtml(c.said)}</span>
                  <span style="color:#888;">→</span>
-                 <span style="color:#047857;font-weight:600;">${escapeHtml(c.suggested)}</span></div>
-            ${c.reason ? `<div style="color:#666;">${escapeHtml(c.reason)}</div>` : ''}
+                 <span style="color:#047857;font-weight:600;">${escapeHtml(c.suggested)}</span>${term ? ' ' + wordStarHtml(term) : ''}</div>
+            ${c.reason ? `<div style="color:#666;">${starredTextHtml(c.reason)}</div>` : ''}
             ${c.example ? `<div style="color:#555;font-style:italic;">“${escapeHtml(c.example)}”</div>` : ''}
-        </div>`).join('');
+        </div>`;
+    }).join('');
     return `<div style="margin-top:0.5rem;">
         <div style="font-weight:600;color:#333;font-size:0.85rem;">Word corrections</div>${rows}
     </div>`;
@@ -431,7 +470,8 @@ function scoresBreakdownHtml(scores, exam, phoneme, opts = {}) {
     const criteria = Array.isArray(scores.criteria) ? scores.criteria : [];
     if (criteria.length) {
         html += '<div style="margin-top:1rem;">' + criteria.map(c => {
-            const suggestions = (c.suggestions || []).map(s => `<li>${escapeHtml(s)}</li>`).join('');
+            // ☆ sau các từ/cụm trong nháy đơn ('bookstore', 'borrow a book') để lưu luyện tập.
+            const suggestions = (c.suggestions || []).map(s => `<li>${starredTextHtml(s)}</li>`).join('');
             // Nhận diện tiêu chí phát âm: thử các field id/code khả dĩ trước, rồi
             // mới fallback heuristic chứa "pronun" (criterion có thể là label).
             const key = (c.code || c.id || c.key || c.criterion || '').toString().toLowerCase();

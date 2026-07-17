@@ -119,17 +119,17 @@ document.addEventListener('savedwords:changed', () => {
 // Cho phép lưu từ CHƯA từng xuất hiện trong bài chấm: chỉ gửi word, server tự
 // tra IPA (CMUdict). Validate client mirror server (_WORD_RE của src/words.py)
 // để lỗi hiện ngay không tốn round-trip.
-const _ADD_WORD_RE = /^[A-Za-z][A-Za-z'-]{0,39}$/;
+const _ADD_WORD_RE = /^[A-Za-z][A-Za-z' -]{0,39}$/;
 
 async function addSavedWordSubmit(e) {
     e.preventDefault();
     const input = document.getElementById('saved-add-input');
     const msg = document.getElementById('saved-add-msg');
-    const word = (input.value || '').trim().toLowerCase();
+    const word = (input.value || '').trim().toLowerCase().replace(/\s+/g, ' ');
     msg.className = 'saved-add__msg';
-    if (!_ADD_WORD_RE.test(word)) {
+    if (!_ADD_WORD_RE.test(word) || word.split(' ').length > 4) {
         msg.classList.add('err');
-        msg.textContent = 'Từ chỉ gồm chữ cái tiếng Anh (được phép nháy đơn, gạch nối).';
+        msg.textContent = 'Từ/cụm chỉ gồm chữ cái tiếng Anh (nháy đơn, gạch nối; cụm tối đa 4 từ).';
         return;
     }
     if (SavedWords.has(word)) {

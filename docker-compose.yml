@@ -32,6 +32,10 @@ services:
     environment:
       HF_TOKEN: ""
       TOEIC_PHONEME_ANALYSIS_ENABLED: "true"
+      # Warmup: nạp sẵn Whisper (practice + mock_test) và wav2vec (EN/KO, mọi
+      # GPU trong TOEIC_PHONEME_DEVICES) vào GPU ngay khi container lên, thay vì
+      # đợi request chấm đầu tiên. Chạy nền, không chặn bind port. Xem src/warmup.py.
+      TOEIC_WARMUP_MODELS: "true"
       # Ép các biến môi trường runtime đồng bộ với Dockerfile để chỉ định hướng lưu cache
       HF_HOME: "/root/.cache/huggingface"
       TORCH_HOME: "/root/.cache/torch"
