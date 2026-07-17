@@ -110,6 +110,7 @@ class HybridPhonemeAnalyzer:
         collapse_gate_enabled: bool = False,
         profile: LangProfile | None = None,
         l1_profile: L1Profile | None = None,
+        devices: list[str] | None = None,
     ):
         self.enable_phoneme_analysis = enable_phoneme_analysis
         # LangProfile — bộ hàm G2P/similarity theo NGÔN NGỮ ĐANG CHẤM (không phải
@@ -152,11 +153,14 @@ class HybridPhonemeAnalyzer:
         # mass posterior nhưng argmax=<pad>) — mở rộng coverage gate cho collapse từng
         # phần (xem scoring/word_details._apply_recognizer_collapse_gate). Default OFF.
         self._collapse_gate_enabled = collapse_gate_enabled
+        # devices: danh sách device chạy song song chunk phoneme
+        # (TOEIC_PHONEME_DEVICES) — None/1 device = tuần tự như cũ.
         self._wav2vec = Wav2VecPhonemePredictor(
             model_id=wav2vec_model,
             device=device,
             min_phoneme_duration=min_phoneme_duration,
             confidence_threshold=confidence_threshold,
+            devices=devices,
         )
         # MFA backend stub — sẽ implement ở Phase 2
         self._mfa_available: bool = False

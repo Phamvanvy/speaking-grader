@@ -167,6 +167,7 @@ def grade_response(
         model_size=asr_model or config.whisper_model,
         device=config.whisper_device,
         language=lang,
+        batch_size=config.whisper_batch_size,
     )
     transcription = asr_run.transcription
     step_timings_ms["asr"] = int((time.perf_counter() - step_started) * 1000)
@@ -266,6 +267,12 @@ def grade_response(
                     config.phoneme_collapse_gate_enabled and not phoneme_strict
                 ),
                 profile=lang_profile,
+                # TOEIC_PHONEME_DEVICES (vd "cuda:0,cuda:1"): chia chunk phoneme
+                # song song lên nhiều GPU. Rỗng → None = tuần tự như cũ.
+                devices=(
+                    [d.strip() for d in config.phoneme_devices.split(",") if d.strip()]
+                    or None
+                ),
             )
             # Read Aloud có script mẫu → so phát âm với script. Câu nói tự do (IELTS
             # Speaking, Describe Picture, Respond...) không có script → fallback về

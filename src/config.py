@@ -57,6 +57,9 @@ class Config:
     model: str
     whisper_model: str
     whisper_device: str
+    # Batch size nội bộ của whisperx (số VAD-segment forward cùng lúc). Default
+    # 16 = giá trị hardcode cũ, không đổi behavior. Đặt qua WHISPER_BATCH_SIZE.
+    whisper_batch_size: int = 16
     # "anthropic" (Claude) hoặc "local" (model local, OpenAI-compatible)
     backend: str = "anthropic"
     # Kỳ thi mặc định khi request/CLI không nêu rõ ("toeic" | "ielts"). Validate
@@ -115,6 +118,12 @@ class Config:
     # ~10×/3× ít hơn, chấm được âm căng).
     phoneme_wav2vec_model_ko: str = "slplab/wav2vec2-xls-r-300m_phone-mfa_korean"
     phoneme_device: str = "cpu"
+    # Danh sách device (comma, vd "cuda:0,cuda:1") chạy SONG SONG các chunk
+    # phoneme khi chunking active và bài có ≥2 chunk — chunk chia round-robin,
+    # 1 thread/GPU, kết quả ghép đúng thứ tự nên output như tuần tự (gate bằng
+    # parity bench trước khi bật). Rỗng = OFF = đường tuần tự cũ bit-for-bit.
+    # Đặt qua TOEIC_PHONEME_DEVICES.
+    phoneme_devices: str = ""
     phoneme_confidence_threshold: float = 0.1
     phoneme_min_duration_sec: float = 0.1
     # Số từ tối đa hiển thị trong phoneme word-detail. Cắt theo ranh giới từ để
@@ -386,6 +395,7 @@ def load_config() -> Config:
         # 'cuda:N' để ghim Whisper vào 1 GPU cụ thể (vd WHISPER_DEVICE=cuda:0 còn
         # TOEIC_PHONEME_DEVICE=cuda:1 → ASR và wav2vec ở 2 card khác nhau).
         whisper_device=os.getenv("WHISPER_DEVICE", "auto"),
+        whisper_batch_size=int(os.getenv("WHISPER_BATCH_SIZE", "16") or "16"),
         backend=backend,
         default_exam=default_exam,
         local_base_url=os.getenv("TOEIC_LOCAL_BASE_URL", "http://localhost:8080/v1"),
@@ -450,6 +460,9 @@ def load_config() -> Config:
         # 'cpu' | 'cuda' | 'cuda:N'. Đặt 'cuda:1' để wav2vec chạy GPU thứ 2, tách
         # khỏi Whisper (WHISPER_DEVICE=cuda:0) → tận dụng 2 card song song khi chấm batch.
         phoneme_device=os.getenv("TOEIC_PHONEME_DEVICE", "cpu") or "cpu",
+        # Comma-list device chạy song song chunk phoneme (vd "cuda:0,cuda:1").
+        # Rỗng = tuần tự như cũ. Xem chú thích field phoneme_devices.
+        phoneme_devices=os.getenv("TOEIC_PHONEME_DEVICES", "") or "",
         phoneme_confidence_threshold=float(
             os.getenv("TOEIC_PHONEME_CONFIDENCE_THRESHOLD", "0.1")
         ),

@@ -247,3 +247,141 @@ class TestPredictChunked:
         )
         assert called["chunked"] is False
         assert segments == [] and warning is not None
+
+
+# ── Parallel chunk trên nhiều device (TOEIC_PHONEME_DEVICES) ─────────────────
+
+class TestPredictChunkedParallel:
+    VOCAB = {0: "<pad>", 1: "l", 2: "k"}
+
+    def _mk_predictor(self, monkeypatch, devices=("cpu", "cuda:9"),
+                      fail_device=None):
+        """Predictor với _forward_decode mock: ghi lại (giây_chunk, device) mỗi
+        call; fail_device != None → raise RuntimeError khi worker đó chạy."""
+        predictor = Wav2VecPhonemePredictor(
+            model_id="mock", device="cpu", devices=list(devices)
+        )
+        calls: list[tuple[int, str | None]] = []
+
+        def fake_forward(waveform, feature_extractor, model, id_to_label,
+                         torch, device=None):
+            if fail_device is not None and device == fail_device:
+                raise RuntimeError("boom")
+            calls.append((round(len(waveform) / 16000), device))
+            n_frames = max(1, int(len(waveform) / 16000 / FRAME))
+            segs = [PhonemeSegment(phoneme="l", start=0.1, end=0.2,
+                                   confidence=0.9, backend="wav2vec")]
+            return segs, _posteriors(self.VOCAB, n_frames, "mock")
+
+        monkeypatch.setattr(predictor, "_forward_decode", fake_forward)
+        # Worker lấy model per-device qua module-level _get_wav2vec_model — stub
+        # để không tải model thật.
+        monkeypatch.setattr(
+            "src.phoneme.wav2vec_backend._get_wav2vec_model",
+            lambda model_id, device="cpu": (None, None, self.VOCAB),
+        )
+        return predictor, calls
+
+    # 5 spans: span thứ 2 quá ngắn (< _MIN_CHUNK_SEC) → 4 job hợp lệ, mỗi job
+    # một độ dài riêng để nhận diện job qua độ dài waveform trong mock.
+    SPANS = [(0.0, 1.0), (1.2, 1.21), (2.0, 4.0), (5.0, 8.0), (9.0, 13.0)]
+
+    def test_parallel_merge_matches_sequential(self, monkeypatch):
+        """Output parallel == sequential từng segment + từng chunk offset."""
+        predictor, _calls = self._mk_predictor(monkeypatch)
+        waveform = np.zeros(16000 * 14, dtype=np.float32)
+        seq_segments, seq_post = predictor._predict_chunked(
+            waveform, self.SPANS, None, None, self.VOCAB, None
+        )
+        jobs = predictor._chunk_jobs(waveform, self.SPANS)
+        par_segments, par_post = predictor._predict_chunked_parallel(
+            waveform, jobs, self.VOCAB, None, ["cpu", "cuda:9"]
+        )
+        assert (
+            [(s.phoneme, s.start, s.end) for s in par_segments]
+            == [(s.phoneme, s.start, s.end) for s in seq_segments]
+        )
+        assert (
+            [t for t, _p in par_post.chunks]
+            == [t for t, _p in seq_post.chunks]
+        )
+
+    def test_round_robin_assignment(self, monkeypatch):
+        """Chunk i → devices[i % n], tất định (nhận diện job qua độ dài)."""
+        predictor, calls = self._mk_predictor(monkeypatch)
+        waveform = np.zeros(16000 * 14, dtype=np.float32)
+        jobs = predictor._chunk_jobs(waveform, self.SPANS)
+        predictor._predict_chunked_parallel(
+            waveform, jobs, self.VOCAB, None, ["cpu", "cuda:9"]
+        )
+        # Job hợp lệ dài 1s, 2s, 3s, 4s → round-robin cpu, cuda:9, cpu, cuda:9.
+        assert sorted(calls) == [
+            (1, "cpu"), (2, "cuda:9"), (3, "cpu"), (4, "cuda:9"),
+        ]
+
+    def test_worker_error_reraises(self, monkeypatch):
+        """Worker raise → _predict_chunked_parallel re-raise (caller fallback)."""
+        predictor, _calls = self._mk_predictor(monkeypatch, fail_device="cuda:9")
+        waveform = np.zeros(16000 * 14, dtype=np.float32)
+        jobs = predictor._chunk_jobs(waveform, self.SPANS)
+        with pytest.raises(RuntimeError):
+            predictor._predict_chunked_parallel(
+                waveform, jobs, self.VOCAB, None, ["cpu", "cuda:9"]
+            )
+
+    # ── dispatch qua predict_with_posteriors ─────────────────────────────────
+
+    def _run_predict(self, monkeypatch, tmp_path, predictor, spans):
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"fake")
+        monkeypatch.setattr(
+            "src.phoneme.wav2vec_backend._load_audio",
+            lambda p, sr: np.zeros(16000 * 14, dtype=np.float32),
+        )
+        predictor._available = True
+        return predictor.predict_with_posteriors(str(audio), chunk_spans=spans)
+
+    def test_no_devices_never_calls_parallel(self, monkeypatch, tmp_path):
+        """Flag OFF (devices rỗng) → không đụng đường parallel (bit-for-bit)."""
+        predictor, _calls = self._mk_predictor(monkeypatch, devices=())
+        called = {"parallel": False}
+        monkeypatch.setattr(
+            predictor, "_predict_chunked_parallel",
+            lambda *a, **k: called.__setitem__("parallel", True),
+        )
+        segments, warning, post = self._run_predict(
+            monkeypatch, tmp_path, predictor, self.SPANS
+        )
+        assert called["parallel"] is False
+        assert warning is None and len(post.chunks) == 4
+
+    def test_single_chunk_stays_sequential(self, monkeypatch, tmp_path):
+        """1 chunk hợp lệ → không parallel (không có gì để chia)."""
+        predictor, _calls = self._mk_predictor(monkeypatch)
+        called = {"parallel": False}
+        monkeypatch.setattr(
+            predictor, "_predict_chunked_parallel",
+            lambda *a, **k: called.__setitem__("parallel", True),
+        )
+        segments, warning, post = self._run_predict(
+            monkeypatch, tmp_path, predictor, [(0.0, 2.0)]
+        )
+        assert called["parallel"] is False
+        assert warning is None and len(post.chunks) == 1
+
+    def test_parallel_failure_falls_back_sequential(self, monkeypatch, tmp_path):
+        """Parallel nổ giữa chừng → kết quả VẪN trả về từ đường tuần tự."""
+        predictor, _calls = self._mk_predictor(monkeypatch)
+
+        def boom(*a, **k):
+            raise RuntimeError("gpu mất điện")
+
+        monkeypatch.setattr(predictor, "_predict_chunked_parallel", boom)
+        segments, warning, post = self._run_predict(
+            monkeypatch, tmp_path, predictor, self.SPANS
+        )
+        assert warning is None
+        assert len(post.chunks) == 4
+        assert [(s.start, s.end) for s in segments] == [
+            (0.1, 0.2), (2.1, 2.2), (5.1, 5.2), (9.1, 9.2),
+        ]

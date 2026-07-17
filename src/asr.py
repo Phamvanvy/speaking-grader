@@ -257,6 +257,7 @@ def transcribe_with_backend(
     model_size: str = "base",
     device: str = "cpu",
     language: str = "en",
+    batch_size: int = 16,
 ) -> ASRRun:
     """Chạy ASR theo backend được chỉ định và trả metadata runtime.
 
@@ -276,7 +277,11 @@ def transcribe_with_backend(
             out = transcribe(audio_path, model_size=model_size, device=device, language=language)
         elif key == "whisperx":
             out = _transcribe_whisperx(
-                audio_path, model_size=model_size, device=device, language=language
+                audio_path,
+                model_size=model_size,
+                device=device,
+                language=language,
+                batch_size=batch_size,
             )
         elif key == "insanely_fast_whisper":
             out = _transcribe_insanely_fast_whisper(
@@ -297,6 +302,7 @@ def _transcribe_whisperx(
     model_size: str = "base",
     device: str = "cpu",
     language: str = "en",
+    batch_size: int = 16,
 ) -> Transcription:
     """ASR bằng WhisperX (kèm alignment từ).
 
@@ -351,7 +357,7 @@ def _transcribe_whisperx(
                 )
                 _whisperx_model_cache[model_key] = model
     try:
-        result = model.transcribe(audio, batch_size=16, language=language)
+        result = model.transcribe(audio, batch_size=batch_size, language=language)
     except IndexError:
         # Silero VAD không tìm thấy đoạn nói nào (clip quá ngắn/nhỏ tiếng — hay
         # gặp ở popup luyện 1 từ) → whisperx đưa list VAD-segment RỖNG vào

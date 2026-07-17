@@ -28,9 +28,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 
@@ -448,6 +449,11 @@ def _load_audio(audio_path: str, target_sr: int = WAV2VEC_SAMPLE_RATE) -> np.nda
 _model_cache: dict[str, tuple[Any, Any, dict[int, str]]] = {}
 _model_lock = threading.Lock()
 
+# (model_id, device) load hỏng khi preload cho parallel chunk (vd cuda:1 hết
+# VRAM vì llama-server chiếm) — nhớ để không retry load (1-2 phút) mỗi request;
+# device hỏng bị loại khỏi danh sách parallel, rớt về đường tuần tự.
+_failed_parallel_loads: set[tuple[str, str]] = set()
+
 
 def _load_id_to_token(model_id: str, model: Any) -> dict[int, str]:
     """Lấy map id → token (IPA) của model, KHÔNG cần tokenizer/phonemizer.
@@ -620,11 +626,19 @@ class Wav2VecPhonemePredictor:
         device: str = "cpu",
         min_phoneme_duration: float = MIN_PHONEME_DURATION_SEC,
         confidence_threshold: float = PHONEME_CONFIDENCE_THRESHOLD,
+        devices: Sequence[str] | None = None,
     ):
         self.model_id = model_id
         self.device = device
         self.min_phoneme_duration = min_phoneme_duration
         self.confidence_threshold = confidence_threshold
+        # Danh sách device chạy SONG SONG các chunk (TOEIC_PHONEME_DEVICES).
+        # Rỗng/1 device = đường tuần tự cũ. Device chính luôn đứng đầu để
+        # round-robin ưu tiên model đã nạp sẵn.
+        _devs = [d.strip() for d in (devices or []) if d and d.strip()]
+        if _devs and device not in _devs:
+            _devs = [device, *_devs]
+        self.devices: list[str] = _devs
         self._available: bool | None = None
         # None cho model espeak (đường mặc định); bảng riêng cho model slplab.
         self._label_map = _label_map_for_model(model_id)
@@ -685,22 +699,28 @@ class Wav2VecPhonemePredictor:
         model: Any,
         id_to_label: dict[int, str],
         torch: Any,
+        device: str | None = None,
     ) -> tuple[list[PhonemeSegment], FramePosteriors]:
         """Một forward pass wav2vec trên waveform → (segments, posteriors).
 
         Lõi dùng chung cho cả predict single-pass lẫn per-chunk — đúng trình tự
         ops của bản single-pass cũ (feature extract → cast dtype → forward →
         softmax → CTC greedy decode) để hành vi không đổi.
+
+        device: ghi đè device đích cho input (parallel chunk chạy trên device
+        khác self.device). None = self.device (mọi caller cũ bit-for-bit).
+        KHÔNG mutate self.device — các worker thread gọi đồng thời.
         """
         audio_duration = len(waveform) / WAV2VEC_SAMPLE_RATE
+        target_device = device or self.device
 
         inputs = feature_extractor(
             waveform, sampling_rate=WAV2VEC_SAMPLE_RATE, return_tensors="pt"
         )
         input_values = inputs.input_values
 
-        if _is_cuda_device(self.device) and torch.cuda.is_available():
-            input_values = input_values.to(self.device)
+        if _is_cuda_device(target_device) and torch.cuda.is_available():
+            input_values = input_values.to(target_device)
 
         # Cast input theo dtype thật của model (float16 trên CUDA, float32 CPU).
         model_dtype = next(model.parameters()).dtype
@@ -742,37 +762,37 @@ class Wav2VecPhonemePredictor:
     # tối thiểu ~25ms sample; chunk gần rỗng không mang thông tin phoneme.
     _MIN_CHUNK_SEC: float = 0.05
 
-    def _predict_chunked(
+    def _chunk_jobs(
         self,
         waveform: np.ndarray,
         chunk_spans: list[tuple[float, float]],
-        feature_extractor: Any,
-        model: Any,
-        id_to_label: dict[int, str],
-        torch: Any,
-    ) -> tuple[list[PhonemeSegment], ChunkedFramePosteriors]:
-        """Predict theo từng chunk span (giây, thời gian tuyệt đối) rồi ghép:
-        segment times CỘNG offset chunk_start; posteriors gói ChunkedFramePosteriors
-        (cùng interface evidence_stats). Spans không hợp lệ/quá ngắn bị bỏ qua.
+    ) -> list[tuple[float, int, int]]:
+        """Span (giây) → job (t0, s0, s1) mẫu — đúng phép clamp + bỏ chunk quá
+        ngắn của đường tuần tự (dùng chung cho cả sequential lẫn parallel để
+        hai đường thấy CÙNG một danh sách chunk).
         """
         n_samples = len(waveform)
-        segments: list[PhonemeSegment] = []
-        chunk_posts: list[tuple[float, FramePosteriors]] = []
+        jobs: list[tuple[float, int, int]] = []
         for span_start, span_end in chunk_spans:
             s0 = max(0, int(span_start * WAV2VEC_SAMPLE_RATE))
             s1 = min(n_samples, int(span_end * WAV2VEC_SAMPLE_RATE))
             if (s1 - s0) < self._MIN_CHUNK_SEC * WAV2VEC_SAMPLE_RATE:
                 continue
-            t0 = s0 / WAV2VEC_SAMPLE_RATE  # offset thật sau clamp
-            chunk_started = time.perf_counter()
-            chunk_segments, chunk_post = self._forward_decode(
-                waveform[s0:s1], feature_extractor, model, id_to_label, torch
-            )
-            logger.debug(
-                "wav2vec chunk [%.2f-%.2f]s: %d segments, %d frames, %.2fs",
-                t0, s1 / WAV2VEC_SAMPLE_RATE, len(chunk_segments),
-                chunk_post.probs.shape[0], time.perf_counter() - chunk_started,
-            )
+            jobs.append((s0 / WAV2VEC_SAMPLE_RATE, s0, s1))  # offset thật sau clamp
+        return jobs
+
+    def _merge_chunk_results(
+        self,
+        jobs: list[tuple[float, int, int]],
+        results: list[tuple[list[PhonemeSegment], FramePosteriors]],
+    ) -> tuple[list[PhonemeSegment], ChunkedFramePosteriors]:
+        """Ghép kết quả per-chunk THEO THỨ TỰ job gốc: segment times cộng offset
+        chunk_start; posteriors gói ChunkedFramePosteriors (cùng interface
+        evidence_stats). Cùng phép round như đường tuần tự cũ.
+        """
+        segments: list[PhonemeSegment] = []
+        chunk_posts: list[tuple[float, FramePosteriors]] = []
+        for (t0, _s0, _s1), (chunk_segments, chunk_post) in zip(jobs, results):
             for seg in chunk_segments:
                 segments.append(PhonemeSegment(
                     phoneme=seg.phoneme,
@@ -783,6 +803,114 @@ class Wav2VecPhonemePredictor:
                 ))
             chunk_posts.append((t0, chunk_post))
         return segments, ChunkedFramePosteriors(chunks=tuple(chunk_posts))
+
+    def _predict_chunked(
+        self,
+        waveform: np.ndarray,
+        chunk_spans: list[tuple[float, float]],
+        feature_extractor: Any,
+        model: Any,
+        id_to_label: dict[int, str],
+        torch: Any,
+    ) -> tuple[list[PhonemeSegment], ChunkedFramePosteriors]:
+        """Predict theo từng chunk span (giây, thời gian tuyệt đối) rồi ghép —
+        tuần tự trên self.device. Spans không hợp lệ/quá ngắn bị bỏ qua.
+        """
+        jobs = self._chunk_jobs(waveform, chunk_spans)
+        results: list[tuple[list[PhonemeSegment], FramePosteriors]] = []
+        for t0, s0, s1 in jobs:
+            chunk_started = time.perf_counter()
+            chunk_segments, chunk_post = self._forward_decode(
+                waveform[s0:s1], feature_extractor, model, id_to_label, torch
+            )
+            logger.debug(
+                "wav2vec chunk [%.2f-%.2f]s: %d segments, %d frames, %.2fs",
+                t0, s1 / WAV2VEC_SAMPLE_RATE, len(chunk_segments),
+                chunk_post.probs.shape[0], time.perf_counter() - chunk_started,
+            )
+            results.append((chunk_segments, chunk_post))
+        return self._merge_chunk_results(jobs, results)
+
+    def _resolve_parallel_devices(self) -> list[str]:
+        """Danh sách device dùng được cho parallel chunk (≥2, model đã preload).
+
+        Preload model cho từng device NGOÀI worker thread — device load hỏng
+        (thiếu VRAM vì process khác chiếm...) bị nhớ vào _failed_parallel_loads
+        để không tốn 1-2 phút retry mỗi request. <2 device dùng được → [] (đường
+        tuần tự).
+        """
+        if len(self.devices) < 2:
+            return []
+        usable: list[str] = []
+        for dev in self.devices:
+            if (self.model_id, dev) in _failed_parallel_loads:
+                continue
+            try:
+                _get_wav2vec_model(self.model_id, dev)
+                usable.append(dev)
+            except (RuntimeError, OSError) as e:
+                logger.warning(
+                    "Phoneme parallel: loại device %s cho model %s (%s) — "
+                    "không retry trong process này.",
+                    dev, self.model_id, e,
+                )
+                _failed_parallel_loads.add((self.model_id, dev))
+        return usable if len(usable) >= 2 else []
+
+    def _predict_chunked_parallel(
+        self,
+        waveform: np.ndarray,
+        jobs: list[tuple[float, int, int]],
+        id_to_label: dict[int, str],
+        torch: Any,
+        devices: list[str],
+    ) -> tuple[list[PhonemeSegment], ChunkedFramePosteriors]:
+        """Như _predict_chunked nhưng chia chunk round-robin lên nhiều device,
+        1 thread/device (mỗi thread loop tuần tự phần chunk của mình — không
+        oversubscribe GPU). Kết quả ghép theo index job gốc nên downstream thấy
+        đúng thứ tự như đường tuần tự; per-chunk forward là phép tính độc lập
+        nên output bit-for-bit với tuần tự trên GPU cùng kiến trúc (gate bằng
+        parity bench trước khi bật flag).
+        """
+        results: list[tuple[list[PhonemeSegment], FramePosteriors] | None] = (
+            [None] * len(jobs)
+        )
+
+        def _worker(dev: str, idxs: list[int]) -> None:
+            fe, mdl, _tok = _get_wav2vec_model(self.model_id, dev)
+            for i in idxs:
+                t0, s0, s1 = jobs[i]
+                chunk_started = time.perf_counter()
+                results[i] = self._forward_decode(
+                    waveform[s0:s1], fe, mdl, id_to_label, torch, device=dev
+                )
+                logger.debug(
+                    "wav2vec chunk∥%s [%.2f-%.2f]s: %.2fs",
+                    dev, t0, s1 / WAV2VEC_SAMPLE_RATE,
+                    time.perf_counter() - chunk_started,
+                )
+
+        assign = [
+            (dev, [i for i in range(len(jobs)) if i % len(devices) == k])
+            for k, dev in enumerate(devices)
+        ]
+        started = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=len(devices)) as ex:
+            futures = [ex.submit(_worker, dev, idxs) for dev, idxs in assign if idxs]
+            for fut in futures:
+                fut.result()  # re-raise lỗi worker → caller fallback tuần tự
+        logger.info(
+            "wav2vec parallel: %d chunks trên %s, %.2fs",
+            len(jobs), ",".join(devices), time.perf_counter() - started,
+        )
+        if any(r is None for r in results):
+            # Không được xảy ra (fut.result() đã re-raise) — nhưng nếu thiếu thì
+            # merge sẽ lệch hàng jobs↔results, thà nổ để caller fallback tuần tự.
+            raise RuntimeError("parallel chunk thiếu kết quả")
+        return self._merge_chunk_results(
+            jobs,
+            [r for r in results if r is not None],  # narrow type, đủ phần tử
+        )
 
     def predict_with_posteriors(
         self,
@@ -832,14 +960,37 @@ class Wav2VecPhonemePredictor:
             if chunk_spans:
                 # Chunked: forward từng span rồi ghép (fix suy giảm trên audio
                 # dài). Load audio MỘT lần ở trên; times cộng offset trong helper.
-                segments, posteriors = self._predict_chunked(
-                    waveform, chunk_spans, feature_extractor, model,
-                    id_to_label, torch,
+                # ≥2 device (TOEIC_PHONEME_DEVICES) + ≥2 chunk → chia chunk
+                # round-robin lên các GPU; lỗi giữa chừng rớt về tuần tự (worker
+                # không mutate state nên chạy lại từ đầu an toàn).
+                jobs = self._chunk_jobs(waveform, chunk_spans)
+                par_devices = (
+                    self._resolve_parallel_devices() if len(jobs) >= 2 else []
                 )
+                mode = f"chunked×{len(jobs)}"
+                if par_devices:
+                    try:
+                        segments, posteriors = self._predict_chunked_parallel(
+                            waveform, jobs, id_to_label, torch, par_devices,
+                        )
+                        mode = f"chunked×{len(jobs)}∥{len(par_devices)}gpu"
+                    except RuntimeError as e:
+                        logger.warning(
+                            "Parallel phoneme lỗi (%s) — fallback tuần tự trên %s.",
+                            e, self.device,
+                        )
+                        segments, posteriors = self._predict_chunked(
+                            waveform, chunk_spans, feature_extractor, model,
+                            id_to_label, torch,
+                        )
+                else:
+                    segments, posteriors = self._predict_chunked(
+                        waveform, chunk_spans, feature_extractor, model,
+                        id_to_label, torch,
+                    )
                 num_frames = sum(
                     p.probs.shape[0] for _t, p in posteriors.chunks
                 )
-                mode = f"chunked×{len(posteriors.chunks)}"
             else:
                 # Single-pass (đường cũ) — giữ lại posteriors cho deletion-
                 # evidence probe (SHADOW): ma trận đã ở CPU sẵn, không vứt đi.

@@ -181,7 +181,17 @@ OUTPUT LANGUAGE (important):
 - Keep machine fields unchanged and in English: the `criterion` field must stay \
 the lowercase English key (e.g. "pronunciation", "intonation_stress"), and the \
 enum values for task_completion / content_relevance (very_low/low/medium/high) \
-stay as-is. Only the explanatory prose is translated."""
+stay as-is. Only the explanatory prose is translated.
+
+LANGUAGE VALIDATION (critical):
+Before producing the final JSON, verify every human-readable string.
+If any sentence contains a Chinese, Japanese, Korean, Cyrillic, or other
+non-Latin word that is not part of the candidate transcript:
+- rewrite that sentence;
+- replace the word with natural {language_name};
+- if you do not know the correct {language_name} expression, replace it with the English term instead.
+
+The final JSON MUST contain no Chinese, Japanese, Korean, Cyrillic, or other unexpected foreign words."""
 
 
 #: Số lỗi phoneme tối đa nhúng vào prompt (đã sort theo severity high→low). Khớp cap
