@@ -10,6 +10,7 @@ import functools
 from typing import Final
 
 from .phoneme_set import (
+    BACK_VOWEL_SPLIT_ENABLED,
     FUNCTION_WORDS,
     _APPROXIMANTS,
     _FRICATIVES,
@@ -70,6 +71,11 @@ _NEAR_PAIRS: Final[dict[frozenset[str], float]] = dict([
     _near("ə", "uː", 0.70),
     _near("iː", "eɪ", 0.60),
     _near("ɔ", "əʊ", 0.55),   # thought ↔ go (back, hơi gần)
+    # BACK_VOWEL_SPLIT: ɑ tách khỏi ɔ trong normalize → cặp thành sub thật ở đây.
+    # 0.60 → severity "medium": HIỆN với người học (popup strict bắt được star/store)
+    # nhưng penalty vừa phải (0.4·conf) cho giọng Mỹ cot-caught-merged ở câu dài.
+    # Flag OFF: KHÔNG thêm — hai symbol cùng normalize về ɔ, key suy biến 1 phần tử.
+    *([_near("ɑ", "ɔ", 0.60)] if BACK_VOWEL_SPLIT_ENABLED else []),
 ])
 
 
