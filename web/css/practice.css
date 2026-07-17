@@ -10,6 +10,8 @@ td .practice-open:hover { text-decoration: underline; color: #4338ca; }
 .word-bookmark {
     border: none; background: none; cursor: pointer;
     font-size: 0.95rem; padding: 0 0.15rem; color: #9ca3af; vertical-align: middle;
+    line-height: 0;
+    margin-bottom: 2px;
 }
 .word-bookmark.saved { color: #f59e0b; }
 .word-bookmark:hover { transform: scale(1.2); }
