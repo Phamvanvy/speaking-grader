@@ -314,8 +314,14 @@ async function gradePracticeAttempt(blob, mime) {
             throw new Error('Server không trả kết quả phoneme — thử lại.');
         }
         if (w.skip_reason || (w.phonemes || []).every(p => p.status === 'skipped')) {
+            // Cho user biết máy nghe thành gì (transcript Whisper) — "chưa nghe rõ"
+            // suông không actionable; nghe thành từ khác ≠ không nghe thấy gì.
+            const heard = (data.transcript || '').trim();
+            const heardShort = heard.length > 60 ? `${heard.slice(0, 57)}…` : heard;
             status.className = 'practice-status err';
-            status.textContent = 'Chưa nghe rõ — hãy nói to, rõ và thử lại.';
+            status.textContent = heardShort
+                ? `Chưa nghe rõ — máy nghe thành “${heardShort}”. Hãy nói to, rõ và thử lại.`
+                : 'Chưa nghe rõ — không thấy tiếng nói. Hãy nói to, rõ và thử lại.';
             return;
         }
         const pct = practicePct(w.phonemes);

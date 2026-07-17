@@ -254,6 +254,12 @@ def _grade_bytes(
                 save=False,
                 accent=accent,
                 phoneme_strict=phoneme_strict,
+                # Popup luyện 1 từ (strict): bias Whisper về chính từ đang luyện —
+                # clip 1 từ không ngữ cảnh hay bị nghe sai → reliability skip oan
+                # ("Chưa nghe rõ"). Chỉ strict mode; đường chấm thường không đổi.
+                asr_initial_prompt=(
+                    reference_script if phoneme_strict and reference_script else None
+                ),
             )
 
         score_before_review = None

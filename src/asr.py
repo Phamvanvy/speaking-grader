@@ -207,8 +207,13 @@ def transcribe(
     model_size: str = "base",
     device: str = "cpu",
     language: str = "en",
+    initial_prompt: str | None = None,
 ) -> Transcription:
-    """Chuyển 1 file audio thành Transcription (có word timestamps)."""
+    """Chuyển 1 file audio thành Transcription (có word timestamps).
+
+    initial_prompt: văn bản bias decoder Whisper (vd từ đang luyện ở popup 1 từ —
+    clip ~1s không có ngữ cảnh LM nên rất hay nghe sai; xem transcribe_with_backend).
+    """
     model = _get_model(model_size, device)
 
     segments, info = model.transcribe(
@@ -216,6 +221,7 @@ def transcribe(
         language=language,
         word_timestamps=True,
         vad_filter=True,  # lọc khoảng lặng dài để timestamps sạch hơn
+        initial_prompt=initial_prompt,
     )
 
     words: list[Word] = []
@@ -258,6 +264,7 @@ def transcribe_with_backend(
     device: str = "cpu",
     language: str = "en",
     batch_size: int = 16,
+    initial_prompt: str | None = None,
 ) -> ASRRun:
     """Chạy ASR theo backend được chỉ định và trả metadata runtime.
 
@@ -265,6 +272,12 @@ def transcribe_with_backend(
     - whisperx: cần cài thêm whisperx + dependencies alignment.
     - insanely_fast_whisper: để dành fast lane; hiện chưa có adapter Python ổn
       định trong project này nên sẽ raise RuntimeError để caller fallback.
+
+    initial_prompt: bias decoder Whisper về phía văn bản này (popup luyện 1 từ
+    truyền chính từ đang luyện — clip 1 từ ~1s không có ngữ cảnh nên Whisper rất
+    hay nghe sai → reliability skip oan "chưa nghe rõ"). Bias KHÔNG tự bịa ra từ
+    khi im lặng: VAD (silero/vad_filter) đã chặn clip không có tiếng nói trước
+    khi decoder chạy. insanely_fast_whisper không hỗ trợ → bỏ qua (log debug).
     """
     started = time.perf_counter()
     key = (backend or "faster_whisper").lower()
@@ -274,7 +287,13 @@ def transcribe_with_backend(
     # đã xong ASR vẫn chồng lấn ở luồng khác.
     with _asr_inference_lock:
         if key == "faster_whisper":
-            out = transcribe(audio_path, model_size=model_size, device=device, language=language)
+            out = transcribe(
+                audio_path,
+                model_size=model_size,
+                device=device,
+                language=language,
+                initial_prompt=initial_prompt,
+            )
         elif key == "whisperx":
             out = _transcribe_whisperx(
                 audio_path,
@@ -282,8 +301,13 @@ def transcribe_with_backend(
                 device=device,
                 language=language,
                 batch_size=batch_size,
+                initial_prompt=initial_prompt,
             )
         elif key == "insanely_fast_whisper":
+            if initial_prompt:
+                logger.debug(
+                    "insanely_fast_whisper không hỗ trợ initial_prompt — bỏ qua."
+                )
             out = _transcribe_insanely_fast_whisper(
                 audio_path,
                 model_size=model_size,
@@ -303,6 +327,7 @@ def _transcribe_whisperx(
     device: str = "cpu",
     language: str = "en",
     batch_size: int = 16,
+    initial_prompt: str | None = None,
 ) -> Transcription:
     """ASR bằng WhisperX (kèm alignment từ).
 
@@ -356,24 +381,40 @@ def _transcribe_whisperx(
                     vad_method="silero",
                 )
                 _whisperx_model_cache[model_key] = model
+    # WhisperX chỉ nhận initial_prompt qua asr_options lúc load_model, nhưng
+    # generate đọc self.options MỖI lần gọi — mutate tạm rồi restore (finally),
+    # đúng pattern chính whisperx dùng cho suppress_numerals trong transcribe().
+    # An toàn luồng vì mọi inference đã serialize dưới _asr_inference_lock.
+    prev_options = None
+    if initial_prompt:
+        from dataclasses import replace as _dc_replace
+
+        prev_options = model.options
+        model.options = _dc_replace(model.options, initial_prompt=initial_prompt)
     try:
-        result = model.transcribe(audio, batch_size=batch_size, language=language)
-    except IndexError:
-        # Silero VAD không tìm thấy đoạn nói nào (clip quá ngắn/nhỏ tiếng — hay
-        # gặp ở popup luyện 1 từ) → whisperx đưa list VAD-segment RỖNG vào
-        # transformers pipeline và nổ IndexError (inputs[0]). Coi là "không nghe
-        # thấy gì": trả transcript rỗng để tầng trên xử lý (reliability skip hết
-        # → UI báo "chưa nghe rõ"), thay vì 500 cả request.
-        logger.warning(
-            "WhisperX: VAD không tìm thấy đoạn nói nào trong %s — trả transcript rỗng.",
-            audio_path,
-        )
-        return Transcription(
-            text="",
-            words=[],
-            language=language or "",
-            duration=float(len(audio)) / 16000.0,
-        )
+        try:
+            result = model.transcribe(audio, batch_size=batch_size, language=language)
+        except IndexError:
+            # Silero VAD không tìm thấy đoạn nói nào (clip quá ngắn/nhỏ tiếng — hay
+            # gặp ở popup luyện 1 từ) → whisperx đưa list VAD-segment RỖNG vào
+            # transformers pipeline và nổ IndexError (inputs[0]). Coi là "không nghe
+            # thấy gì": trả transcript rỗng để tầng trên xử lý (reliability skip hết
+            # → UI báo "chưa nghe rõ"), thay vì 500 cả request.
+            logger.warning(
+                "WhisperX: VAD không tìm thấy đoạn nói nào trong %s — trả transcript rỗng.",
+                audio_path,
+            )
+            return Transcription(
+                text="",
+                words=[],
+                language=language or "",
+                duration=float(len(audio)) / 16000.0,
+            )
+    finally:
+        # Restore cả khi transcribe raise / return sớm — model cache dùng chung,
+        # để dính initial_prompt sẽ bias mọi request sau.
+        if prev_options is not None:
+            model.options = prev_options
 
     detected_lang = result.get("language") or language
     align_key = (detected_lang, device)

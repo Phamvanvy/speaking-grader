@@ -93,6 +93,7 @@ def grade_response(
     accent: str = "default",
     lang: str | None = None,
     phoneme_strict: bool = False,
+    asr_initial_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Chạy toàn bộ pipeline cho 1 audio và trả về dict kết quả (build_output).
 
@@ -121,6 +122,9 @@ def grade_response(
       về recognizer (noise gate, confidence knee, s-cluster, multiref, boundary
       refine) vì đó là nhiễu model, không phải leniency với người học.
       False (mặc định) = mọi đường chấm hiện hành không đổi bit-for-bit.
+    - asr_initial_prompt: bias decoder Whisper (popup luyện 1 từ truyền chính từ
+      đang luyện — clip 1 từ không ngữ cảnh Whisper rất hay nghe sai → reliability
+      skip oan). None (mặc định) = ASR như cũ.
     """
     lang = lang or exam_language(qt.exam)
     # LangProfile: bộ hàm G2P/similarity/tokenizer theo ngôn ngữ đang chấm.
@@ -168,6 +172,7 @@ def grade_response(
         device=config.whisper_device,
         language=lang,
         batch_size=config.whisper_batch_size,
+        initial_prompt=asr_initial_prompt,
     )
     transcription = asr_run.transcription
     step_timings_ms["asr"] = int((time.perf_counter() - step_started) * 1000)
