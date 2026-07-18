@@ -15,8 +15,8 @@
     <!-- styles.css đã tách theo nhóm. THỨ TỰ QUAN TRỌNG (cascade): base → components
          → theme-dark → phoneme, giữ đúng trình tự gốc của styles.css. -->
     <link rel="stylesheet" href="/css/base.css?v=accent-default-1">
-    <link rel="stylesheet" href="/css/components.css?v=accent-default-1">
-    <link rel="stylesheet" href="/css/theme-dark.css?v=accent-default-1">
+    <link rel="stylesheet" href="/css/components.css?v=review-1">
+    <link rel="stylesheet" href="/css/theme-dark.css?v=review-1">
     <link rel="stylesheet" href="/css/phoneme.css?v=accent-default-1">
     <link rel="stylesheet" href="/css/exam.css?v=exam-4">
     <link rel="stylesheet" href="/css/history.css?v=history-1">
@@ -528,6 +528,20 @@
                     <h2>📚 Từ đã lưu</h2>
                     <button class="btn btn-secondary btn-inline" onclick="loadSavedWords()">↻ Tải lại</button>
                 </div>
+                <!-- Nhắc ôn định kỳ: toast hiện N từ (ưu tiên yếu/lâu chưa ôn) — logic ở
+                     review-toast.js, chỉnh xong tự lưu localStorage + re-arm timer. -->
+                <details class="review-settings" id="review-toast-settings">
+                    <summary>⚙ Nhắc ôn từ định kỳ</summary>
+                    <label class="review-settings__row">
+                        <input type="checkbox" id="rt-enabled"> Hiện toast ôn lại từ đã lưu
+                    </label>
+                    <label class="review-settings__row">Số từ mỗi lần
+                        <input type="number" id="rt-count" min="1" max="10" step="1"></label>
+                    <label class="review-settings__row">Tự ẩn sau (giây)
+                        <input type="number" id="rt-hide" min="5" max="120" step="5"></label>
+                    <label class="review-settings__row">Lặp lại mỗi (phút)
+                        <input type="number" id="rt-interval" min="1" max="120" step="1"></label>
+                </details>
                 <!-- Thêm từ ngoài (không cần chấm bài): server tra IPA (CMUdict),
                      submit xử lý ở saved.js addSavedWordSubmit. -->
                 <form id="saved-add-form" class="saved-add" autocomplete="off">
@@ -577,6 +591,9 @@
     <script src="/js/phoneme-tips.js?v=practice-1"></script>
     <script src="/js/saved.js?v=addwords-1"></script>
     <script src="/js/practice.js?v=phrase-1"></script>
+    <!-- Toast nhắc ôn từ đã lưu: đọc window.SavedWords + tái dùng handler .practice-open
+         (practice.js) & .tts-play (playback.js) lúc runtime → nạp sau cả hai. -->
+    <script src="/js/review-toast.js?v=review-1"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
     <script src="/js/exam.js?v=exam-9"></script>

@@ -361,3 +361,117 @@
     margin: 0;
     padding-left: 1.2rem;
 }
+
+/* ── Toast nhắc ôn từ đã lưu (review-toast.js) ───────────────────────── */
+.review-toast {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    z-index: 90;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+    padding: 0.85rem 1rem 1rem;
+    animation: rt-slide-in 0.25s ease;
+}
+
+@keyframes rt-slide-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.review-toast__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+
+.review-toast__title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #333;
+}
+
+.review-toast__close {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    color: #9ca3af;
+    padding: 0.2rem;
+}
+
+.review-toast__close:hover { color: #4b5563; }
+
+.review-toast__row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+}
+
+.review-toast__word {
+    font-weight: 600;
+    cursor: pointer;
+    color: #4f46e5;
+}
+
+.review-toast__word:hover { text-decoration: underline; }
+
+.review-toast__ipa {
+    flex: 1;
+    font-size: 0.85rem;
+    color: #6b7280;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.review-toast .tts-play {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0.15rem;
+}
+
+@media (max-width: 640px) {
+    .review-toast {
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        width: auto;
+        max-width: none;
+    }
+}
+
+/* ── Khối cài đặt nhắc ôn (trong tab Từ đã lưu) ──────────────────────── */
+.review-settings {
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+}
+
+.review-settings > summary {
+    cursor: pointer;
+    color: #4b5563;
+    font-weight: 500;
+    user-select: none;
+}
+
+.review-settings__row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.55rem;
+    color: #4b5563;
+}
+
+.review-settings__row input[type="number"] {
+    width: 4.5em;
+    margin-left: auto;
+}

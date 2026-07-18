@@ -14,7 +14,7 @@
  * PRECACHE_URLS bên dưới VÀ bump CACHE_NAME.
  */
 
-const CACHE_NAME = "sg-shell-v1";
+const CACHE_NAME = "sg-shell-v2";
 
 // Path KHÔNG kèm ?v= — lúc fetch runtime sẽ match lại bằng ignoreSearch.
 const PRECACHE_URLS = [
@@ -49,6 +49,7 @@ const PRECACHE_URLS = [
   "/js/phoneme-tips.js",
   "/js/saved.js",
   "/js/practice.js",
+  "/js/review-toast.js",
   "/js/exam.js",
   "/js/router.js",
   "/vendor/alpine.min.js",

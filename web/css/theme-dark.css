@@ -188,3 +188,16 @@ body.dark .suggest-band {
 body.dark .suggest-section h4 {
     color: #94a3b8;
 }
+
+/* ── Toast nhắc ôn từ đã lưu (dark) ──────────────────────────────────── */
+body.dark .review-toast {
+    background: #1e293b;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+body.dark .review-toast__title { color: #f1f5f9; }
+body.dark .review-toast__ipa { color: #94a3b8; }
+body.dark .review-toast__word { color: #a5b4fc; }
+
+body.dark .review-settings > summary,
+body.dark .review-settings__row { color: #cbd5e1; }
