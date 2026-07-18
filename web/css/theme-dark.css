@@ -192,12 +192,29 @@ body.dark .suggest-section h4 {
 /* ── Toast nhắc ôn từ đã lưu (dark) ──────────────────────────────────── */
 body.dark .review-toast {
     background: #1e293b;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    border-color: #4338ca;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.6);
 }
 
-body.dark .review-toast__title { color: #f1f5f9; }
+/* Header giữ nền gradient indigo (nổi bật ở cả 2 theme) — chỉ chỉnh phần thân. */
 body.dark .review-toast__ipa { color: #94a3b8; }
 body.dark .review-toast__word { color: #a5b4fc; }
 
-body.dark .review-settings > summary,
+/* ── Khối cài đặt nhắc ôn (dark) ─────────────────────────────────────── */
+body.dark .review-settings {
+    background: #1e1b4b;
+    border-color: #4338ca;
+    border-left-color: #6366f1;
+}
+body.dark .review-settings > summary { color: #c7d2fe; }
 body.dark .review-settings__row { color: #cbd5e1; }
+
+/* ── Phân trang Từ đã lưu (dark) ─────────────────────────────────────── */
+body.dark .saved-pager { color: #94a3b8; border-top-color: #334155; }
+body.dark .saved-pager__btn,
+body.dark .saved-pager__select {
+    background: #0f172a;
+    border-color: #334155;
+    color: #cbd5e1;
+}
+body.dark .saved-pager__btn:hover:not(:disabled) { background: #1e293b; }

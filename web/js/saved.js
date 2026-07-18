@@ -69,6 +69,11 @@ function savedRowHtml(w) {
     // từ payload cũ (không phonemes) → fallback chuỗi w.ipa (nay backend cũng kèm nhấn).
     const ipaStr = (typeof ipaStressString === 'function' && (w.phonemes || []).length)
         ? ipaStressString(w.phonemes) : (w.ipa || '');
+    // Nút tắt/bật nhắc ôn (per-word) — trạng thái do review-toast.js quản lý; để CUỐI hàng.
+    const muted = !!(window.ReviewToast && ReviewToast.isMuted(w.word));
+    const muteBtn = `<button type="button" class="btn btn-secondary btn-inline review-mute-toggle${muted ? ' muted' : ''}"
+        data-word="${escapeHtml(w.word)}"
+        title="${muted ? 'Đã tắt nhắc ôn — bấm để bật lại' : 'Đang nhắc ôn — bấm để tắt nhắc từ này'}">${muted ? '🔕' : '🔔'}</button>`;
     return `<div class="saved-row">
         <span class="saved-row__word">${escapeHtml(w.word)}</span>
         <span class="saved-row__ipa">${ipaStr ? `/${escapeHtml(ipaStr)}/` : ''}</span>
@@ -77,17 +82,79 @@ function savedRowHtml(w) {
         <span class="saved-row__meta">${when}</span>
         <button type="button" class="btn btn-secondary btn-inline practice-open" data-practice="${payload}">🎙️ Luyện tập</button>
         <button type="button" class="btn btn-secondary btn-inline saved-delete" data-word="${escapeHtml(w.word)}" title="Bỏ lưu">🗑</button>
+        ${muteBtn}
     </div>`;
 }
 
+// ── Phân trang danh sách (mặc định 10 từ mới nhất) ──────────────────────
+const SAVED_PAGESIZE_KEY = 'speaking-grader-saved-pagesize';
+const SAVED_PAGE_OPTIONS = [10, 20, 50, 0];   // 0 = tất cả
+let _savedItems = [];   // toàn bộ đã sort mới→cũ (giữ để prev/next re-slice không fetch lại)
+let _savedPage = 0;
+
+function savedPageSize() {
+    const v = parseInt(localStorage.getItem(SAVED_PAGESIZE_KEY), 10);
+    return SAVED_PAGE_OPTIONS.includes(v) ? v : 10;
+}
+
+function savedPagerHtml(total, pageCount, size) {
+    const opts = SAVED_PAGE_OPTIONS
+        .map(o => `<option value="${o}"${o === size ? ' selected' : ''}>${o === 0 ? 'Tất cả' : o}</option>`)
+        .join('');
+    const nav = pageCount > 1
+        ? `<span class="saved-pager__nav">
+             <button type="button" class="saved-pager__btn" data-page="prev"${_savedPage <= 0 ? ' disabled' : ''} aria-label="Trang trước">‹</button>
+             <span class="saved-pager__pos">Trang ${_savedPage + 1}/${pageCount}</span>
+             <button type="button" class="saved-pager__btn" data-page="next"${_savedPage >= pageCount - 1 ? ' disabled' : ''} aria-label="Trang sau">›</button>
+           </span>` : '';
+    return `<div class="saved-pager">
+        <label class="saved-pager__size">Hiện <select class="saved-pager__select">${opts}</select> từ mới nhất</label>
+        ${nav}
+        <span class="saved-pager__total">${total} từ</span>
+    </div>`;
+}
+
+// Nhận danh sách đầy đủ → sort mới→cũ, reset về trang đầu (từ mới nhất), rồi render.
 function renderSavedList(items) {
+    _savedItems = (items || []).slice().sort((a, b) => {
+        const ta = a.saved_at ? Date.parse(a.saved_at) : 0;
+        const tb = b.saved_at ? Date.parse(b.saved_at) : 0;
+        return tb - ta;   // mới nhất trước
+    });
+    _savedPage = 0;
+    renderSavedPage();
+}
+
+function renderSavedPage() {
     const box = document.getElementById('saved-list');
     if (!box) return;
-    box.innerHTML = items.length
-        ? items.map(savedRowHtml).join('')
-        : `<div class="saved-empty">Chưa có từ nào. Gõ từ vào ô "Thêm từ" ở trên, hoặc khi xem
+    if (!_savedItems.length) {
+        box.innerHTML = `<div class="saved-empty">Chưa có từ nào. Gõ từ vào ô "Thêm từ" ở trên, hoặc khi xem
            kết quả chấm bấm ☆ trên bảng lỗi để lưu từ vào đây luyện tập.</div>`;
+        return;
+    }
+    const size = savedPageSize();
+    const total = _savedItems.length;
+    const pageCount = size ? Math.ceil(total / size) : 1;
+    _savedPage = Math.min(Math.max(_savedPage, 0), pageCount - 1);
+    const slice = size ? _savedItems.slice(_savedPage * size, _savedPage * size + size) : _savedItems;
+    box.innerHTML = slice.map(savedRowHtml).join('') + savedPagerHtml(total, pageCount, size);
 }
+
+// Điều khiển phân trang (delegated — footer dựng lại mỗi lần render).
+document.addEventListener('click', e => {
+    const btn = e.target instanceof Element ? e.target.closest('.saved-pager__btn') : null;
+    if (!btn || btn.disabled) return;
+    _savedPage += btn.dataset.page === 'next' ? 1 : -1;
+    renderSavedPage();
+});
+document.addEventListener('change', e => {
+    const sel = e.target instanceof Element ? e.target.closest('.saved-pager__select') : null;
+    if (!sel) return;
+    localStorage.setItem(SAVED_PAGESIZE_KEY, sel.value);
+    _savedPage = 0;
+    renderSavedPage();
+});
 
 async function loadSavedWords() {
     const box = document.getElementById('saved-list');

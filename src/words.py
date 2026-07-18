@@ -5,7 +5,7 @@ cách ly mềm theo user_id); mỗi hàm mở connection MỚI, WAL + busy_timeo
 transaction ngắn qua `with conn:`; schema versioning bằng PRAGMA user_version.
 DB file RIÊNG (data/words.db) để không đụng versioning của history.db.
 
-5 bảng:
+6 bảng:
 - saved_words: từ user bookmark từ bảng lỗi phát âm (kèm IPA + snapshot phonemes
   + điểm), PK (user_id, word) — lưu lại từ đã có thì update điểm/thời điểm.
 - word_info_cache: định nghĩa EN + ví dụ + nghĩa tiếng Việt do LLM sinh, key
@@ -19,6 +19,8 @@ DB file RIÊNG (data/words.db) để không đụng versioning của history.db.
 - suggestion_cache: danh sách từ luyện tập do LLM chọn cho 1 phoneme, key
   (phoneme, lang), USER-AGNOSTIC (cá nhân hoá làm sau khi đọc cache). TTL +
   cache_version do src/word_suggest.py quyết định khi đọc.
+- user_settings: KV per-user (PK (user_id, key)) cho tuỳ chọn client cần đồng bộ
+  đa thiết bị — value là blob JSON opaque với server (vd key 'review_toast').
 """
 
 from __future__ import annotations
@@ -34,7 +36,7 @@ from .history import validate_user_id  # noqa: F401 - re-export cho api.py
 
 logger = logging.getLogger("toeic.words")
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 # Giữ tối đa N từ mỗi user (xoá từ lưu cũ nhất khi vượt) — chống phình vô hạn.
 MAX_WORDS_PER_USER = 500
@@ -92,7 +94,18 @@ CREATE TABLE IF NOT EXISTS suggestion_cache (
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   PRIMARY KEY (phoneme, lang)
 );
+
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id    TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (user_id, key)
+);
 """
+
+# Giới hạn để bảng settings không bị lạm dụng làm kho dữ liệu tuỳ ý.
+MAX_SETTING_VALUE_LEN = 4096
 
 # Từ/cụm hợp lệ để lưu/tra: chữ cái + nháy đơn/gạch nối, thêm khoảng trắng để
 # lưu được cụm gợi ý từ vựng ('borrow a book') — tối đa 4 từ (chặn nguyên câu).
@@ -261,6 +274,42 @@ def delete_word(cfg: Config, user_id: str, word: str) -> bool:
                 (user_id, word),
             )
         return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ── User settings (KV per-user, đồng bộ đa thiết bị) ─────────────────────
+
+
+def get_setting(cfg: Config, user_id: str, key: str) -> str | None:
+    """Đọc blob JSON (opaque) của 1 tuỳ chọn; None nếu chưa lưu."""
+    conn = _connect(cfg)
+    try:
+        row = conn.execute(
+            "SELECT value FROM user_settings WHERE user_id = ? AND key = ?",
+            (user_id, key),
+        ).fetchone()
+        return row["value"] if row else None
+    finally:
+        conn.close()
+
+
+def set_setting(cfg: Config, user_id: str, key: str, value: str) -> None:
+    """Ghi đè blob JSON của 1 tuỳ chọn (upsert theo (user_id, key))."""
+    if len(value) > MAX_SETTING_VALUE_LEN:
+        raise ValueError(f"value quá dài (>{MAX_SETTING_VALUE_LEN} ký tự).")
+    conn = _connect(cfg)
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO user_settings (user_id, key, value, updated_at)
+                VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                ON CONFLICT(user_id, key) DO UPDATE SET
+                    value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (user_id, key, value),
+            )
     finally:
         conn.close()
 

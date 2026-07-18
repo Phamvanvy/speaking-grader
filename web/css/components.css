@@ -365,54 +365,72 @@
 /* ── Toast nhắc ôn từ đã lưu (review-toast.js) ───────────────────────── */
 .review-toast {
     position: fixed;
-    right: 16px;
-    bottom: 16px;
-    width: 320px;
+    top: 4.75rem;   /* dưới hàng icon (theme/feedback/📚) và tab đổi mode */
+    right: 1rem;
+    width: 340px;
     max-width: calc(100vw - 32px);
     z-index: 90;
     background: white;
-    border-radius: 12px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
-    padding: 0.85rem 1rem 1rem;
-    animation: rt-slide-in 0.25s ease;
+    border: 1px solid #c7d2fe;
+    border-radius: 14px;
+    box-shadow: 0 12px 34px rgba(79, 70, 229, 0.32);
+    overflow: hidden;
+    animation: rt-slide-in 0.32s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes rt-slide-in {
-    from { opacity: 0; transform: translateY(12px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from { opacity: 0; transform: translateY(-14px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .review-toast__head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 0.5rem;
+    padding: 0.65rem 0.9rem;
+    background: linear-gradient(90deg, #6366f1, #4f46e5);
+    color: white;
 }
 
 .review-toast__title {
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: #333;
+    font-weight: 700;
+    font-size: 1rem;
+    color: white;
+    letter-spacing: 0.01em;
 }
 
 .review-toast__close {
     border: none;
     background: transparent;
     cursor: pointer;
-    font-size: 1rem;
+    font-size: 1.05rem;
     line-height: 1;
-    color: #9ca3af;
+    color: rgba(255, 255, 255, 0.85);
     padding: 0.2rem;
 }
 
-.review-toast__close:hover { color: #4b5563; }
+.review-toast__close:hover { color: white; }
+
+.review-toast__list { padding: 0.4rem 0.9rem 0.8rem; }
 
 .review-toast__row {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.3rem 0;
+    padding: 0.35rem 0;
 }
+
+.review-toast__mute {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0.15rem;
+    opacity: 0.7;
+}
+
+.review-toast__mute:hover { opacity: 1; }
 
 .review-toast__word {
     font-weight: 600;
@@ -442,26 +460,46 @@
 
 @media (max-width: 640px) {
     .review-toast {
+        top: 4.5rem;
         left: 12px;
         right: 12px;
-        bottom: 12px;
         width: auto;
         max-width: none;
     }
 }
 
-/* ── Khối cài đặt nhắc ôn (trong tab Từ đã lưu) ──────────────────────── */
+/* ── Khối cài đặt nhắc ôn (trong tab Từ đã lưu) — nổi bật, dạng thẻ accent ── */
 .review-settings {
-    margin-bottom: 1rem;
-    font-size: 0.9rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.92rem;
+    border: 1px solid #c7d2fe;
+    border-left: 4px solid #4f46e5;
+    background: #eef2ff;
+    border-radius: 10px;
+    padding: 0.7rem 1rem;
 }
 
 .review-settings > summary {
     cursor: pointer;
-    color: #4b5563;
-    font-weight: 500;
+    color: #4338ca;
+    font-weight: 700;
+    font-size: 0.98rem;
     user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
 }
+
+.review-settings > summary::-webkit-details-marker { display: none; }
+.review-settings > summary::after {
+    content: '▸';
+    margin-left: auto;
+    font-size: 0.85rem;
+    transition: transform 0.15s;
+}
+.review-settings[open] > summary { margin-bottom: 0.6rem; }
+.review-settings[open] > summary::after { transform: rotate(90deg); }
 
 .review-settings__row {
     display: flex;
@@ -475,3 +513,48 @@
     width: 4.5em;
     margin-left: auto;
 }
+
+/* ── Nút tắt/bật nhắc trong hàng Từ đã lưu ───────────────────────────── */
+.review-mute-toggle.muted { opacity: 0.85; }
+
+/* ── Phân trang danh sách Từ đã lưu ──────────────────────────────────── */
+.saved-pager {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #eee;
+    font-size: 0.86rem;
+    color: #6b7280;
+}
+
+.saved-pager__nav {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.saved-pager__btn {
+    border: 1px solid #e5e7eb;
+    background: white;
+    border-radius: 6px;
+    cursor: pointer;
+    padding: 0.1rem 0.55rem;
+    font-size: 1rem;
+    line-height: 1.2;
+    color: #4b5563;
+}
+
+.saved-pager__btn:hover:not(:disabled) { background: #f3f4f6; }
+.saved-pager__btn:disabled { opacity: 0.4; cursor: default; }
+
+.saved-pager__select {
+    margin: 0 0.15rem;
+    padding: 0.1rem 0.3rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+}
+
+.saved-pager__total { margin-left: auto; }

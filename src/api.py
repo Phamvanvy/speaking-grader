@@ -1395,6 +1395,51 @@ def words_delete(
     return {"deleted": True}
 
 
+# Tuỳ chọn client cần đồng bộ đa thiết bị (vd nhắc ôn từ định kỳ). Blob JSON
+# opaque với server; allowlist key để bảng không thành kho dữ liệu tuỳ ý.
+_ALLOWED_SETTING_KEYS = {"review_toast"}
+
+
+@app.get("/settings")
+def settings_get(
+    user_id: str, key: str, authorization: str | None = Header(None)
+) -> dict:
+    """Đọc 1 tuỳ chọn per-user (value là blob JSON đã lưu, hoặc null)."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    if key not in _ALLOWED_SETTING_KEYS:
+        raise HTTPException(status_code=400, detail="key không hợp lệ.")
+    try:
+        return {"key": key, "value": words.get_setting(_BASE_CONFIG, user_id, key)}
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi đọc settings")
+        raise HTTPException(status_code=500, detail=f"Lỗi đọc settings: {e}") from e
+
+
+@app.post("/settings")
+def settings_set(
+    user_id: str = Form(...),
+    key: str = Form(...),
+    value: str = Form(..., description="Blob JSON của tuỳ chọn"),
+    authorization: str | None = Header(None),
+) -> dict:
+    """Ghi đè 1 tuỳ chọn per-user (upsert theo (user_id, key))."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    if key not in _ALLOWED_SETTING_KEYS:
+        raise HTTPException(status_code=400, detail="key không hợp lệ.")
+    try:
+        json.loads(value)   # phải là JSON hợp lệ — chặn rác
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="value phải là JSON hợp lệ.") from e
+    try:
+        words.set_setting(_BASE_CONFIG, user_id, key, value)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi lưu settings")
+        raise HTTPException(status_code=500, detail=f"Lỗi lưu settings: {e}") from e
+    return {"saved": True}
+
+
 @app.get("/word-info")
 async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
     """Định nghĩa EN + ví dụ + nghĩa (feedback_lang) cho 1 từ — cache SQLite,

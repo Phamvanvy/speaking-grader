@@ -26,21 +26,81 @@ function reviewToastSettings() {
         count: clamp(s.count, 1, 10, RT_DEFAULTS.count),
         hideSec: clamp(s.hideSec, 5, 120, RT_DEFAULTS.hideSec),
         intervalMin: clamp(s.intervalMin, 1, 120, RT_DEFAULTS.intervalMin),
+        noMobile: s.noMobile === true,   // default false — không nhắc trên màn nhỏ
     };
 }
 
 function setReviewToastSettings(patch) {
     const next = Object.assign(reviewToastSettings(), patch);
     localStorage.setItem(REVIEW_TOAST_KEY, JSON.stringify(next));
-    applyReviewToastSettings();   // re-arm / stop timer ngay
+    applyReviewToastSettings();       // re-arm / stop timer ngay (đọc bản mới)
+    saveReviewSettingsToServer();     // đồng bộ DB per-user (fire-and-forget)
 }
+
+// Màn nhỏ (điện thoại) — khớp breakpoint CSS .review-toast mobile.
+function isMobileViewport() {
+    return typeof window.matchMedia === 'function'
+        && window.matchMedia('(max-width: 640px)').matches;
+}
+
+// ── Đồng bộ cài đặt với DB (per-user, đa thiết bị) ───────────────────────
+// localStorage là nguồn ĐỒNG BỘ (scheduler đọc tức thì + fallback offline);
+// server là kho BỀN, sync nền: load lúc mở app, ghi khi user đổi.
+const REVIEW_SETTING_SERVER_KEY = 'review_toast';
+
+async function loadReviewSettingsFromServer() {
+    if (typeof apiBase !== 'function' || typeof getUserId !== 'function') return;
+    try {
+        const res = await fetch(
+            `${apiBase()}/settings?key=${REVIEW_SETTING_SERVER_KEY}&user_id=${encodeURIComponent(getUserId())}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data && data.value) {
+            localStorage.setItem(REVIEW_TOAST_KEY, data.value);   // server thắng khi có bản ghi
+            fillReviewSettingsUi();
+            reconcileReviewSchedule();   // KHÔNG re-arm full — giữ lần hiện đầu sau khi mở app
+        }
+    } catch (e) { /* offline/khách vãng lai → dùng localStorage */ }
+}
+
+function saveReviewSettingsToServer() {
+    if (typeof apiBase !== 'function' || typeof getUserId !== 'function') return;
+    const fd = new FormData();
+    fd.append('user_id', getUserId());
+    fd.append('key', REVIEW_SETTING_SERVER_KEY);
+    fd.append('value', localStorage.getItem(REVIEW_TOAST_KEY) || '{}');
+    fetch(`${apiBase()}/settings`, { method: 'POST', body: fd })
+        .catch(() => { /* lưu localStorage vẫn giữ, thử lại lần đổi sau */ });
+}
+
+// ── Danh sách từ TẮT nhắc (per-word, client-side) ────────────────────────
+const REVIEW_MUTED_KEY = 'speaking-grader-review-muted';
+const _mkey = w => (w || '').trim().toLowerCase();
+
+function reviewMutedSet() {
+    try { return new Set(JSON.parse(localStorage.getItem(REVIEW_MUTED_KEY) || '[]')); }
+    catch (e) { return new Set(); }
+}
+function isWordMuted(word) { return reviewMutedSet().has(_mkey(word)); }
+function setWordMuted(word, muted) {
+    const s = reviewMutedSet();
+    if (muted) s.add(_mkey(word)); else s.delete(_mkey(word));
+    localStorage.setItem(REVIEW_MUTED_KEY, JSON.stringify([...s]));
+}
+// API cho saved.js (savedRowHtml đọc trạng thái lúc render).
+window.ReviewToast = {
+    isMuted: isWordMuted,
+    setMuted: setWordMuted,
+    toggleMuted(word) { const m = !isWordMuted(word); setWordMuted(word, m); return m; },
+};
 
 // ── Picker: chọn N từ ưu tiên yếu / lâu chưa ôn ──────────────────────────
 let _lastShownWords = new Set();   // chống lặp trong phiên
 
 function pickReviewWords(n) {
     if (!window.SavedWords || !SavedWords._loaded) return [];
-    let pool = SavedWords.list();
+    const muted = reviewMutedSet();
+    let pool = SavedWords.list().filter(w => !muted.has(_mkey(w.word)));   // bỏ từ đã tắt nhắc
     if (!pool.length) return [];
     // Loại từ của toast trước — chỉ khi còn đủ ≥ n từ khác để hiện.
     const fresh = pool.filter(w => !_lastShownWords.has(w.word));
@@ -111,6 +171,8 @@ function reviewRowHtml(w) {
         <span class="review-toast__ipa">${ipaStr ? `/${escapeHtml(ipaStr)}/` : ''}</span>
         <button type="button" class="tts-play" data-word="${escapeHtml(w.word)}"
             title="Nghe phát âm chuẩn">🔊</button>
+        <button type="button" class="review-toast__mute review-mute-toggle" data-word="${escapeHtml(w.word)}"
+            title="Dừng nhắc ôn từ này">🔕</button>
     </div>`;
 }
 
@@ -142,8 +204,17 @@ let _rtPendingHidden = false;
 
 function scheduleReviewToast(delayMs) {
     clearTimeout(_rtTimer);
+    _rtTimer = null;
     if (!reviewToastSettings().enabled) return;
     _rtTimer = setTimeout(maybeShowReviewToast, delayMs);
+}
+
+// Đối chiếu nhẹ sau khi nạp cài đặt từ server: bật/tắt hoặc mồi lịch nếu cần,
+// nhưng KHÔNG re-arm full interval (tránh huỷ lần hiện đầu ~1.2s sau khi mở app).
+function reconcileReviewSchedule() {
+    const cfg = reviewToastSettings();
+    if (!cfg.enabled) { clearTimeout(_rtTimer); _rtTimer = null; hideReviewToast(); return; }
+    if (!_rtTimer) scheduleReviewToast(cfg.intervalMin * 60000);
 }
 
 function maybeShowReviewToast() {
@@ -152,6 +223,9 @@ function maybeShowReviewToast() {
     const intervalMs = cfg.intervalMin * 60000;
 
     if (document.hidden) { _rtPendingHidden = true; return; }   // hiện lại khi tab quay lại
+
+    // Không nhắc trên điện thoại (màn nhỏ) — theo tuỳ chọn user.
+    if (cfg.noMobile && isMobileViewport()) { scheduleReviewToast(intervalMs); return; }
 
     // Cache chưa load kịp (initial refresh chạy song song) → thử lại nhanh.
     if (!window.SavedWords || !SavedWords._loaded) {
@@ -189,36 +263,75 @@ document.addEventListener('visibilitychange', () => {
     }
 });
 
+// ── Nút tắt/bật nhắc (delegated — dùng chung cho toast và tab Từ đã lưu) ──
+function updateMuteButtons(word, muted) {
+    document.querySelectorAll(`.review-mute-toggle[data-word="${CSS.escape(word)}"]`).forEach(b => {
+        // Trong tab Từ đã lưu: đổi icon/nhãn tại chỗ (không re-fetch).
+        if (b.classList.contains('review-toast__mute')) return;   // nút trên toast bị gỡ cùng row
+        b.classList.toggle('muted', muted);
+        b.textContent = muted ? '🔕' : '🔔';
+        b.title = muted ? 'Đã tắt nhắc ôn — bấm để bật lại' : 'Đang nhắc ôn — bấm để tắt nhắc từ này';
+    });
+}
+
+document.addEventListener('click', e => {
+    const btn = e.target instanceof Element ? e.target.closest('.review-mute-toggle') : null;
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const word = btn.dataset.word || '';
+    const onToast = !!btn.closest('.review-toast');
+    // Trên toast: nút chỉ có nghĩa "dừng nhắc" (mute). Trong tab: toggle.
+    const muted = onToast ? (setWordMuted(word, true), true) : window.ReviewToast.toggleMuted(word);
+    if (onToast) {
+        const row = btn.closest('.review-toast__row');
+        if (row) row.remove();
+        if (_reviewToastEl && !_reviewToastEl.querySelector('.review-toast__row')) hideReviewToast();
+    }
+    updateMuteButtons(word, muted);   // đồng bộ nút bên tab Từ đã lưu (nếu đang mở)
+});
+
 // ── Settings UI trong tab Từ đã lưu (#review-toast-settings, markup tĩnh) ──
-function wireReviewSettingsUi() {
-    const box = document.getElementById('review-toast-settings');
-    if (!box) return;
-    const el = {
+function _rtSettingsEls() {
+    return {
         enabled: document.getElementById('rt-enabled'),
         count: document.getElementById('rt-count'),
         hide: document.getElementById('rt-hide'),
         interval: document.getElementById('rt-interval'),
+        noMobile: document.getElementById('rt-no-mobile'),
     };
-    const fill = () => {
-        const cfg = reviewToastSettings();
-        el.enabled.checked = cfg.enabled;
-        el.count.value = cfg.count;
-        el.hide.value = cfg.hideSec;
-        el.interval.value = cfg.intervalMin;
-    };
-    fill();
+}
+
+function fillReviewSettingsUi() {
+    const el = _rtSettingsEls();
+    if (!el.enabled) return;   // markup chưa có (chưa DOM-ready)
+    const cfg = reviewToastSettings();
+    el.enabled.checked = cfg.enabled;
+    el.count.value = cfg.count;
+    el.hide.value = cfg.hideSec;
+    el.interval.value = cfg.intervalMin;
+    if (el.noMobile) el.noMobile.checked = cfg.noMobile;
+}
+
+function wireReviewSettingsUi() {
+    const box = document.getElementById('review-toast-settings');
+    if (!box) return;
+    fillReviewSettingsUi();
     box.addEventListener('change', () => {
+        const el = _rtSettingsEls();
         setReviewToastSettings({
             enabled: el.enabled.checked,
             count: el.count.value,
             hideSec: el.hide.value,
             intervalMin: el.interval.value,
+            noMobile: el.noMobile ? el.noMobile.checked : false,
         });
-        fill();   // ghi lại giá trị đã clamp để nhập ngoài range tự sửa
+        fillReviewSettingsUi();   // ghi lại giá trị đã clamp để nhập ngoài range tự sửa
     });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     wireReviewSettingsUi();
     scheduleReviewToast(RT_FIRST_DELAY_MS);
+    loadReviewSettingsFromServer();   // đồng bộ DB (nền) — không chặn lần hiện đầu
 });
