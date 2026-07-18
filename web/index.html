@@ -12,12 +12,13 @@
     <link rel="stylesheet" href="/css/phoneme.css?v=accent-default-1">
     <link rel="stylesheet" href="/css/exam.css?v=exam-4">
     <link rel="stylesheet" href="/css/history.css?v=history-1">
-    <link rel="stylesheet" href="/css/practice.css?v=practice-2">
+    <link rel="stylesheet" href="/css/practice.css?v=practice-3">
     <link rel="stylesheet" href="/css/auth.css?v=auth-3">
 </head>
 <body>
     <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
     <a class="feedback-btn" href="https://www.facebook.com/myengbuddy/" target="_blank" rel="noopener" title="Góp ý, báo lỗi hoặc đề xuất cải tiến" aria-label="Góp ý, báo lỗi hoặc đề xuất cải tiến">💬</a>
+    <button class="addwords-btn" id="addwords-btn" title="Thêm từ vựng để luyện tập" aria-label="Thêm từ vựng để luyện tập">📚</button>
     <div class="auth-widget" id="auth-widget"></div>
     <div class="container">
         <h1>🎤 Speaking Grader</h1>
@@ -550,7 +551,7 @@
     <script src="/js/http.js?v=retry-1"></script>
     <script src="/js/state.js?v=topik-1"></script>
     <script src="/js/auth.js?v=auth-4"></script>
-    <script src="/js/render.js?v=topik-1"></script>
+    <script src="/js/render.js?v=phrase-1"></script>
     <script src="/js/playback.js?v=topik-1"></script>
     <script src="/js/recording.js?v=accent-default-1"></script>
     <script src="/js/form.js?v=topik-1"></script>
@@ -566,8 +567,8 @@
          Sau render.js (dùng escapeHtml/toBritishWord runtime), trước exam.js
          (switchMode gọi loadSavedWords). -->
     <script src="/js/phoneme-tips.js?v=practice-1"></script>
-    <script src="/js/saved.js?v=stress-1"></script>
-    <script src="/js/practice.js?v=topik-1"></script>
+    <script src="/js/saved.js?v=addwords-1"></script>
+    <script src="/js/practice.js?v=phrase-1"></script>
     <!-- Thi cả đề: định nghĩa window.examSession TRƯỚC khi Alpine init. Alpine nạp
          cuối cùng (defer) — auto-init sau khi DOM + exam.js đã sẵn sàng. -->
     <script src="/js/exam.js?v=exam-9"></script>

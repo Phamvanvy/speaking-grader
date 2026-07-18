@@ -95,19 +95,26 @@ function practicePhonemesHtml(phonemes, isKo) {
     if (!shown.length) return '';
 
     // Chip có từ ví dụ → kiêm luôn nút nghe (delegated .tts-play của playback.js).
-    const chips = shown.map(p => {
+    // Cụm nhiều từ (phoneme gắn _w): chèn khoảng ngăn giữa các nhóm chip theo từ.
+    let chips = '';
+    let prevW;
+    shown.forEach(p => {
+        if (chips && p._w !== prevW) chips += '<span class="practice-chip-gap"></span>';
+        prevW = p._w;
         const cls = p.status === 'skipped' ? 'skip' : practiceIsBad(p) ? 'bad' : 'ok';
         const info = phonemeTip(p.symbol);
         const sym = `/${escapeHtml(p.symbol)}/`;
-        return info && info.example
+        chips += info && info.example
             ? `<button type="button" class="practice-chip ${cls} tts-play" data-word="${escapeHtml(info.example)}" title="Nghe âm này trong từ “${escapeHtml(info.example)}”">${sym}</button>`
             : `<span class="practice-chip ${cls}">${sym}</span>`;
-    }).join('');
+    });
 
     const bad = shown.filter(practiceIsBad);
     const skipped = shown.filter(p => p.status === 'skipped').length;
     let detail = '';
     if (bad.length) {
+        // Cụm nhiều từ: thẻ lỗi ghi rõ âm sai nằm trong từ nào của cụm.
+        const phraseWords = String(practiceState.data?.word || '').split(' ');
         const cards = bad.map(p => {
             const info = phonemeTip(p.symbol);
             const tts = info && info.example
@@ -116,9 +123,12 @@ function practicePhonemesHtml(phonemes, isKo) {
             const heard = p.status === 'del' ? '∅ thiếu âm' : `/${p.heard ?? '?'}/`;
             const tip = info ? info.tip
                 : 'Nghe mẫu và bắt chước khẩu hình — chú ý vị trí lưỡi và môi.';
+            const inWord = (p._w != null && phraseWords.length > 1 && phraseWords[p._w])
+                ? `<span class="practice-fix__word">trong “${escapeHtml(phraseWords[p._w])}”</span>` : '';
             return `<div class="practice-fix">
                 <div class="practice-fix__row">
                     <span class="practice-fix__target">/${escapeHtml(p.symbol)}/</span>
+                    ${inWord}
                     <span class="practice-fix__label">bạn nói</span>
                     <span class="practice-fix__heard">${escapeHtml(heard)}</span>
                     ${tts}
@@ -309,11 +319,12 @@ async function gradePracticeAttempt(blob, mime) {
             throw new Error(detail);
         }
         const data = await res.json();
-        const w = data?.phoneme?.score?.words?.[0];
-        if (!w || !(w.phonemes || []).length) {
+        const ws = data?.phoneme?.score?.words || [];
+        if (!ws.some(w => (w.phonemes || []).length)) {
             throw new Error('Server không trả kết quả phoneme — thử lại.');
         }
-        if (w.skip_reason || (w.phonemes || []).every(p => p.status === 'skipped')) {
+        const wordSkipped = w => w.skip_reason || (w.phonemes || []).every(p => p.status === 'skipped');
+        if (ws.every(wordSkipped)) {
             // Cho user biết máy nghe thành gì (transcript Whisper) — "chưa nghe rõ"
             // suông không actionable; nghe thành từ khác ≠ không nghe thấy gì.
             const heard = (data.transcript || '').trim();
@@ -324,8 +335,14 @@ async function gradePracticeAttempt(blob, mime) {
                 : 'Chưa nghe rõ — không thấy tiếng nói. Hãy nói to, rõ và thử lại.';
             return;
         }
-        const pct = practicePct(w.phonemes);
-        practiceState.data = { ...d, phonemes: w.phonemes, skip_reason: null };
+        // Cụm nhiều từ: GỘP phoneme của TẤT CẢ các từ (chỉ đọc words[0] như trước
+        // → cụm đã lưu chỉ được chấm từ đầu tiên). _w = chỉ số từ trong cụm để
+        // chip/IPA/thẻ lỗi nhóm theo từ; từ đơn giữ nguyên payload (không gắn _w).
+        const merged = ws.length === 1
+            ? (ws[0].phonemes || [])
+            : ws.flatMap((w, i) => (w.phonemes || []).map(p => ({ ...p, _w: i })));
+        const pct = practicePct(merged);
+        practiceState.data = { ...d, phonemes: merged, skip_reason: null };
         renderPracticeBody();
         status.className = pct >= 80 ? 'practice-status good' : 'practice-status';
         status.textContent = pct >= 80 ? `Tuyệt vời — ${pct}%! 🎉` : `Được ${pct}% — nghe mẫu 🔊 rồi thử lại nhé.`;
@@ -333,7 +350,7 @@ async function gradePracticeAttempt(blob, mime) {
         // server (im lặng, lỗi bỏ qua) — snapshot mới giúp hồ sơ âm yếu
         // (/words/suggestions) phản ánh tiến bộ của user.
         if (window.SavedWords && SavedWords.has(d.word)) {
-            SavedWords.add({ word: d.word, last_score: pct / 100, phonemes: w.phonemes }).catch(() => {});
+            SavedWords.add({ word: d.word, last_score: pct / 100, phonemes: merged }).catch(() => {});
         }
     } catch (err) {
         status.className = 'practice-status err';

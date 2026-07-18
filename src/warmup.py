@@ -49,6 +49,21 @@ def run_warmup(config: Config) -> None:
     Tuần tự (1 thread) là chủ đích: nạp song song nhiều model vài GB lên cùng
     GPU dễ tranh VRAM/đĩa — đúng lý do asr.py serialize bằng lock nạp.
     """
+    # --- GIẢI QUYẾT LẶP LOG / PHÂN CHIA WORKERS ---
+    # Sử dụng file lock ở tầng OS để đảm bảo chỉ CÓ DUY NHẤT 1 WORKER chạy warmup.
+    # Các worker sinh sau xin lock thất bại sẽ return ngay lập tức, tránh nạp đè VRAM.
+    lock_file_path = "/tmp/toeic_model_warmup.lock"
+    try:
+        # Mở file mode 'w' (hoặc 'a'). fcntl chỉ có trên Linux (khớp môi trường Docker)
+        import fcntl
+        f = open(lock_file_path, "w")
+        # Thử lấy lock độc quyền không chặn (Exclusive + Non-blocking)
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (ImportError, OSError):
+        # Nếu không có fcntl (chạy trên Windows ngoài Docker) hoặc file đang bị worker khác giữ lock
+        logger.debug("Worker song song phát hiện warmup đang chạy hoặc đã chạy xong. Bỏ qua.")
+        return
+
     from . import asr
 
     # ASR theo mode (practice / mock_test) — gộp trùng khi 2 mode cùng engine+model.
@@ -68,6 +83,7 @@ def run_warmup(config: Config) -> None:
         )
 
     if not config.phoneme_analysis_enabled:
+        # Giữ file mở và lock cho đến khi app kết thúc hoặc không cần thiết nữa
         return
 
     from .phoneme.wav2vec_backend import _get_wav2vec_model
@@ -79,8 +95,16 @@ def run_warmup(config: Config) -> None:
         devices = [config.phoneme_device, *devices]
 
     model_ids = [config.phoneme_wav2vec_model]
+    
+    # --- GIẢI QUYẾT VẤN ĐỀ VRAM TIẾNG HÀN (KO) ---
+    # Thêm biến kiểm tra flag riêng từ môi trường, mặc định là True nếu không cấu hình bóc tách bớt.
+    warmup_ko_enabled = os.getenv("TOEIC_WARMUP_LANG_KO", "true").strip().lower() in {"1", "true", "yes"}
+    
     if config.lang_ko_enabled:
-        model_ids.append(config.phoneme_wav2vec_model_ko)
+        if warmup_ko_enabled:
+            model_ids.append(config.phoneme_wav2vec_model_ko)
+        else:
+            logger.info("Bỏ qua warmup model tiếng Hàn (TOEIC_WARMUP_LANG_KO=false) để tiết kiệm VRAM.")
 
     for model_id in model_ids:
         for device in devices:

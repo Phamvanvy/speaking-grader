@@ -85,6 +85,8 @@ td .practice-open:hover { text-decoration: underline; color: #4338ca; }
 .practice-chip.ok   { background: #ecfdf5; color: #067647; border-color: #bbf7d0; }
 .practice-chip.bad  { background: #fff7ed; color: #c2410c; border-color: #fed7aa; }
 .practice-chip.skip { background: #f9fafb; color: #9ca3af; border: 1px dashed #d1d5db; }
+/* Khoảng ngăn giữa các từ của cụm (phoneme gắn _w) trong dải chip */
+.practice-chip-gap { flex: none; width: 0.7rem; }
 button.practice-chip { cursor: pointer; }
 button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
 
@@ -99,6 +101,7 @@ button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px 
 }
 .practice-fix__row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .practice-fix__target { font-weight: 700; font-size: 1.12rem; color: #111827; }
+.practice-fix__word { color: #6b7280; font-size: 0.82rem; font-style: italic; }
 .practice-fix__label { color: #9ca3af; font-size: 0.8rem; }
 .practice-fix__heard { font-weight: 700; font-size: 1.05rem; color: #dc2626; }
 .practice-fix__play {
@@ -188,8 +191,40 @@ button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px 
 .suggest-row__reason { grid-area: reason; color: #9ca3af; font-size: 0.82rem; font-style: italic; }
 .suggest-row .practice-open { grid-area: btn; white-space: nowrap; justify-self: end; }
 
+/* ── Nút 📚 góc phải trên + popup thêm nhanh từ vựng ── */
+/* Cùng dáng .feedback-btn (theme-dark.css), đứng bên trái nó. */
+.addwords-btn {
+    position: fixed; top: 1rem; right: 7.4rem;
+    width: 42px; height: 42px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 50%; background: white;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    cursor: pointer; font-size: 1.2rem; line-height: 1; z-index: 100;
+    transition: background 0.2s, transform 0.15s;
+}
+.addwords-btn:hover { transform: scale(1.08); }
+
+.addwords-box { width: min(480px, 100%); }
+.addwords-title { margin: 0; font-size: 1.2rem; }
+.addwords-hint { color: #6b7280; font-size: 0.88rem; margin: 0.4rem 0 0.8rem; }
+.addwords-row { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.45rem; }
+.addwords-row.err .addwords-input { border-color: #dc2626; background: #fef2f2; }
+.addwords-row__del {
+    border: none; background: none; cursor: pointer; color: #9ca3af;
+    font-size: 0.95rem; padding: 0.2rem 0.35rem; border-radius: 6px; line-height: 1;
+}
+.addwords-row__del:hover { color: #dc2626; background: #f3f4f6; }
+#addwords-addrow { margin: 0.1rem 0 0.7rem; }
+.addwords-msg { display: block; min-height: 1.2em; margin-bottom: 0.6rem; }
+.addwords-save { width: 100%; }
+
 /* ── Dark mode ── */
 body.dark .practice-modal { background: #1f2937; }
+body.dark .addwords-btn { background: #1e293b; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
+body.dark .addwords-hint { color: #9ca3af; }
+body.dark .addwords-row.err .addwords-input { border-color: #b91c1c; background: #3b0d0d; }
+body.dark .addwords-row__del:hover { background: #374151; }
+body.dark .practice-fix__word { color: #9ca3af; }
 body.dark .practice-head__word { color: #4ade80; }
 body.dark .practice-ring { background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), #374151 0); }
 body.dark .practice-ring__inner { background: #1f2937; color: #f9fafb; }

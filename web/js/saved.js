@@ -152,6 +152,135 @@ document.addEventListener('DOMContentLoaded', () => {
     if (form) form.addEventListener('submit', addSavedWordSubmit);
 });
 
+// ── Popup thêm nhanh từ vựng (nút 📚 góc phải trên — index.html) ────────
+// Nhiều dòng, mỗi dòng 1 ô nhập từ/cụm tiếng Anh; "Lưu tất cả" → POST /words
+// từng từ (server tự tra IPA như form "Thêm từ"). Dòng lưu xong/trùng thì bỏ
+// khỏi form, dòng không hợp lệ giữ lại + viền đỏ để user sửa.
+
+function addWordsRowHtml() {
+    return `<div class="addwords-row">
+        <input type="text" class="saved-add__input addwords-input" placeholder="ví dụ: bookstore / gain valuable insights"
+            maxlength="40" autocomplete="off" spellcheck="false">
+        <button type="button" class="addwords-row__del" title="Xoá dòng" aria-label="Xoá dòng">✕</button>
+    </div>`;
+}
+
+function ensureAddWordsModal() {
+    let overlay = document.getElementById('addwords-modal');
+    if (overlay) return overlay;
+    overlay = document.createElement('div');
+    overlay.id = 'addwords-modal';
+    overlay.className = 'practice-overlay hidden';
+    overlay.innerHTML = `
+        <div class="practice-modal addwords-box" role="dialog" aria-modal="true" aria-label="Thêm từ vựng">
+            <div class="practice-head">
+                <h3 class="addwords-title">📚 Thêm từ vựng</h3>
+                <span class="practice-head__spacer"></span>
+                <button type="button" class="practice-close" id="addwords-close" title="Đóng" aria-label="Đóng">✕</button>
+            </div>
+            <div class="addwords-hint">Nhập từ hoặc cụm tiếng Anh muốn lưu để luyện tập
+                (cụm tối đa 4 từ). Bấm ＋ để thêm nhiều từ cùng lúc.</div>
+            <form id="addwords-form">
+                <div id="addwords-rows"></div>
+                <button type="button" class="btn btn-secondary btn-inline" id="addwords-addrow">＋ Thêm dòng</button>
+                <div class="saved-add__msg addwords-msg" id="addwords-msg"></div>
+                <button type="submit" class="btn addwords-save" id="addwords-save">Lưu tất cả</button>
+            </form>
+        </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) closeAddWordsPopup(); });
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeAddWordsPopup();
+    });
+    overlay.querySelector('#addwords-close').addEventListener('click', closeAddWordsPopup);
+    overlay.querySelector('#addwords-form').addEventListener('submit', addWordsSubmit);
+    overlay.querySelector('#addwords-addrow').addEventListener('click', () => {
+        const rows = overlay.querySelector('#addwords-rows');
+        rows.insertAdjacentHTML('beforeend', addWordsRowHtml());
+        rows.lastElementChild.querySelector('.addwords-input').focus();
+    });
+    // Xoá dòng (delegated — dòng thêm/xoá động); luôn giữ lại ít nhất 1 dòng.
+    overlay.querySelector('#addwords-rows').addEventListener('click', e => {
+        const del = e.target instanceof Element ? e.target.closest('.addwords-row__del') : null;
+        if (!del) return;
+        const row = del.closest('.addwords-row');
+        const rows = overlay.querySelector('#addwords-rows');
+        if (rows.children.length > 1) row.remove();
+        else { row.classList.remove('err'); row.querySelector('.addwords-input').value = ''; }
+    });
+    return overlay;
+}
+
+function openAddWordsPopup() {
+    const overlay = ensureAddWordsModal();
+    const rows = overlay.querySelector('#addwords-rows');
+    if (!rows.children.length) rows.insertAdjacentHTML('beforeend', addWordsRowHtml());
+    const msg = document.getElementById('addwords-msg');
+    msg.className = 'saved-add__msg addwords-msg';
+    msg.textContent = '';
+    overlay.classList.remove('hidden');
+    rows.querySelector('.addwords-input').focus();
+}
+
+function closeAddWordsPopup() {
+    const overlay = document.getElementById('addwords-modal');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+async function addWordsSubmit(e) {
+    e.preventDefault();
+    const overlay = document.getElementById('addwords-modal');
+    const msg = document.getElementById('addwords-msg');
+    const saveBtn = document.getElementById('addwords-save');
+    msg.className = 'saved-add__msg addwords-msg';
+    msg.textContent = 'Đang lưu…';
+    let saved = 0, dup = 0, bad = 0, failed = 0;
+    saveBtn.disabled = true;
+    try {
+        for (const row of [...overlay.querySelectorAll('.addwords-row')]) {
+            const input = row.querySelector('.addwords-input');
+            const word = (input.value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+            row.classList.remove('err');
+            if (!word) continue;   // dòng trống: bỏ qua, không tính lỗi
+            if (!_ADD_WORD_RE.test(word) || word.split(' ').length > 4) {
+                row.classList.add('err');
+                bad++;
+                continue;
+            }
+            // Trùng danh sách đã lưu HOẶC trùng dòng phía trên vừa lưu xong
+            // (SavedWords.add cập nhật cache ngay) — bỏ dòng, không gọi server.
+            if (SavedWords.has(word)) { dup++; row.remove(); continue; }
+            try {
+                await SavedWords.add({ word });
+                saved++;
+                row.remove();
+            } catch (err) {
+                row.classList.add('err');
+                failed++;
+            }
+        }
+    } finally {
+        saveBtn.disabled = false;
+    }
+    const rowsBox = overlay.querySelector('#addwords-rows');
+    if (!rowsBox.children.length) rowsBox.insertAdjacentHTML('beforeend', addWordsRowHtml());
+    const parts = [];
+    if (saved) parts.push(`đã lưu ${saved} từ`);
+    if (dup) parts.push(`${dup} từ đã có sẵn`);
+    if (bad) parts.push(`${bad} dòng không hợp lệ (chỉ chữ cái tiếng Anh, nháy đơn, gạch nối; cụm ≤4 từ)`);
+    if (failed) parts.push(`${failed} dòng lưu lỗi — thử lại`);
+    const text = parts.length ? parts.join(' · ') : 'Chưa có từ nào để lưu — nhập từ vào ô trên.';
+    msg.textContent = text.charAt(0).toUpperCase() + text.slice(1);
+    if (bad || failed) msg.classList.add('err');
+    // Tab "Từ đã lưu" (nếu đang mở) + các sao ☆ đang hiện tự cập nhật.
+    if (saved) document.dispatchEvent(new CustomEvent('savedwords:changed'));
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('addwords-btn');
+    if (btn) btn.addEventListener('click', openAddWordsPopup);
+});
+
 // ── Gợi ý luyện âm (API /words/suggestions) ─────────────────────────────
 let suggestLoaded = false;
 

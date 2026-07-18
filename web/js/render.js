@@ -113,11 +113,18 @@ function phonemeStress(p) {
 // để popup luyện từ (practice.js) & tab Từ đã lưu (saved.js) TRÙNG trọng âm với
 // Pronunciation detail (cùng đọc display_stress). Bỏ qua _hidden (coda /r/ Anh-Anh).
 function ipaStressString(phonemes) {
-    return (phonemes || []).filter(p => !p._hidden).map(p => {
+    // Cụm nhiều từ (phoneme gắn _w — popup luyện tập gộp các từ của cụm):
+    // ngăn cách các từ bằng khoảng trắng; từ đơn (không _w) giữ nguyên chuỗi liền.
+    let out = '';
+    let prevW;
+    (phonemes || []).filter(p => !p._hidden).forEach(p => {
+        if (out && p._w !== prevW) out += ' ';
+        prevW = p._w;
         const s = phonemeStress(p);
         const mark = s === 'primary' ? 'ˈ' : s === 'secondary' ? 'ˌ' : '';
-        return mark + (p.symbol ?? '');
-    }).join('');
+        out += mark + (p.symbol ?? '');
+    });
+    return out;
 }
 
 // ── British (RP) display transform ────────────────────────────────────
