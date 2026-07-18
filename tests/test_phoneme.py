@@ -411,6 +411,32 @@ class TestComputePhonemeScore:
         assert score.predicted_count > score.reference_count
         assert score.insertion_count >= 1 or score.substitution_count >= 1
 
+    def test_advantage_reducible_variant_scored_ok(self):
+        # "advantages" /ædˈvæntɪdʒɪz/: đọc /əd-/ (Cambridge hợp lệ) → KHÔNG lỗi,
+        # nhưng flatten nguyên âm NHẤN /væn/→/vən/ vẫn bị bắt (guard reducible).
+        from src.phoneme.ipa import text_to_ipa_sequence_with_spans
+
+        ref, spans, stress, _disp = text_to_ipa_sequence_with_spans("advantages")
+        first = ref.index("æ")          # AE0 — âm đầu không nhấn
+        stressed = ref.index("æ", first + 1)  # AE1 — nhân chính
+
+        pred = list(ref)
+        pred[first] = "ə"
+        score = compute_phoneme_score(
+            self._make_segments(pred), ref,
+            reference_spans=spans, reference_stress=stress)
+        assert score is not None
+        assert score.substitution_count == 0
+        assert score.overall_accuracy == 1.0
+
+        pred2 = list(ref)
+        pred2[stressed] = "ə"
+        score2 = compute_phoneme_score(
+            self._make_segments(pred2), ref,
+            reference_spans=spans, reference_stress=stress)
+        assert score2 is not None
+        assert score2.substitution_count >= 1
+
     def test_no_reference(self):
         segs = self._make_segments(["p", "ə", "t"])
         score = compute_phoneme_score(segs, [])
@@ -806,6 +832,18 @@ class TestPhonemesMatch:
         # and /ənd/ → /ænd/: æ↔ə chỉ mở cho function word.
         assert phonemes_match("ə", "æ", word="and")
         assert not phonemes_match("ə", "æ", word="cat", reducible=False)
+
+    def test_word_reducible_variant_advantage(self):
+        # advantage(s) /əd-/ ↔ /æd-/: cả hai đều chuẩn (Cambridge) — CHỈ ở vị trí
+        # rút gọn được. wav2vec nghe ʌ → normalize sẵn có đưa về ə.
+        assert phonemes_match("æ", "ʌ", word="advantages", reducible=True)
+        assert phonemes_match("æ", "ə", word="advantage", reducible=True)
+        assert phonemes_match("æ", "ə", word="advantaged", reducible=True)
+        # Nguyên âm nhấn chính /væn/ đọc thành /vən/ vẫn là lỗi thật.
+        assert not phonemes_match("æ", "ʌ", word="advantages", reducible=False)
+        # Từ ngoài bảng không đổi hành vi (advance, advantageous — backlog).
+        assert not phonemes_match("æ", "ə", word="advance", reducible=True)
+        assert not phonemes_match("æ", "ə", word="advantageous", reducible=True)
 
 
 class TestDeletionSeverity:

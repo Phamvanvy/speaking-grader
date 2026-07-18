@@ -219,6 +219,14 @@ _WORD_VARIANT_PAIRS: Final[dict[str, frozenset[frozenset[str]]]] = {
     "with": frozenset({frozenset({"θ", "ð"})}),
 }
 
+# Biến thể theo từ CHỈ ở vị trí rút gọn được (nguyên âm KHÔNG phải nhân chính) — vd
+# "advantage" /ədˈvæn-/ ↔ /ædˈvæn-/ (Cambridge liệt kê cả hai; CMUdict chỉ có AE0).
+# Guard reducible để KHÔNG tha ə cho nguyên âm nhấn (/væn/ → /vən/ vẫn là lỗi thật).
+_WORD_REDUCIBLE_VARIANT_PAIRS: Final[dict[str, frozenset[frozenset[str]]]] = {
+    w: frozenset({frozenset({"æ", "ə"})})
+    for w in ("advantage", "advantages", "advantaged")
+}
+
 
 def phonemes_match(
     expected: str,
@@ -255,6 +263,10 @@ def phonemes_match(
     in_func = word_key in FUNCTION_WORDS
     if reducible is None:
         reducible = stress is None or in_func
+    # Biến thể theo từ Ở VỊ TRÍ rút gọn được ("advantage" æ↔ə âm đầu) → khớp.
+    variants = _WORD_REDUCIBLE_VARIANT_PAIRS.get(word_key)
+    if reducible and variants and pair in variants:
+        return True
     if reducible and e in _REDUCED_VOWELS and p in _REDUCED_VOWELS:
         return True
     # æ↔ə (strong/weak "and", "a", "an", "at"...) chỉ cho function word.

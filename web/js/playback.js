@@ -77,7 +77,7 @@ let ttsAudio = null;
 // Phải khớp CACHE_VERSION ở src/tts.py. URL /tts được server cache 24h (max-age),
 // nên bump version chỉ ở đĩa server KHÔNG đủ — trình duyệt vẫn phát WAV cũ theo URL cũ.
 // Đưa version vào URL → đổi audio (vd fix mất /s/) là đổi cache-key trình duyệt luôn.
-const TTS_AUDIO_VERSION = 'v4';
+const TTS_AUDIO_VERSION = 'v5';
 
 function playWordTts(word) {
     if (!word) return;

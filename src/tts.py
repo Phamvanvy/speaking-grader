@@ -34,7 +34,12 @@ logger = logging.getLogger("toeic.tts")
 # xấu làm phụ âm đầu (vd "store" → gần như mất /s/) bị đóng băng vĩnh viễn.
 # v4: đổi voice US lessac→amy (lessac nuốt hẳn /s/ đầu cụm s+stop; amy phát rõ) →
 # bỏ cache lessac cũ. Phải giữ khớp TTS_AUDIO_VERSION ở web/js/playback.js.
-CACHE_VERSION = "v4"
+# v5: thêm dấu "." cuối khi text không có dấu câu kết thúc. Không có dấu câu, VITS
+# thiếu "mỏ neo" cuối phát ngôn → từ đơn bị đọc lem: "at" thành /hɛ/ ("he"), "cat"
+# mất /k/, "student" mất /s,t/ (đo bằng Whisper + wav2vec trên 16 từ; thêm "."
+# sửa gần như tất cả). Cách khác đã thử và BỎ: chèn ˈ vào phoneme rồi
+# phoneme_ids_to_audio (ra /aɪ/, tệ hơn), "!" (sửa "at" nhưng làm "stop"/"for" lem).
+CACHE_VERSION = "v5"
 
 # Trần độ dài text TTS (ký tự). Đây là mức từ/cụm ngắn, không phải câu — đủ rộng cho
 # cụm nhiều từ nhưng vẫn chặn lạm dụng. (Endpoint cũng validate; đây là lớp thứ hai.)
@@ -165,6 +170,13 @@ def synthesize(
         raise TtsUnavailable(
             "Chưa có voice TTS tiếng Hàn trên server — dùng giọng đọc của trình duyệt."
         )
+
+    # Bảo đảm có dấu câu KẾT THÚC: từ/cụm trần (không ".!?") bị VITS đọc dạng
+    # "giữa câu" — nguyên âm sụp + artifact /h/ đầu ("at" → nghe thành "he").
+    # Thêm "." cho ngữ điệu hạ tự nhiên. Đặt TRƯỚC khi tính key cache để
+    # "at" và "at." gộp chung một key (cùng một audio).
+    if norm[-1] not in ".!?":
+        norm += "."
 
     canonical = _resolve_accent(accent, config)
     model_path = _voice_path(canonical, config)
