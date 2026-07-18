@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Speaking Grader</title>
+    <!-- PWA: manifest + icon (generate bằng scripts/gen_pwa_icons.py). -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#4f46e5">
+    <link rel="icon" sizes="32x32" href="/icons/favicon-32.png">
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <!-- styles.css đã tách theo nhóm. THỨ TỰ QUAN TRỌNG (cascade): base → components
          → theme-dark → phoneme, giữ đúng trình tự gốc của styles.css. -->
     <link rel="stylesheet" href="/css/base.css?v=accent-default-1">
@@ -577,5 +585,12 @@
          Alpine dựng component). -->
     <script src="/js/router.js?v=router-1"></script>
     <script defer src="/vendor/alpine.min.js?v=exam-1"></script>
+    <!-- PWA: đăng ký service worker (web/sw.js — cache app shell network-first,
+         KHÔNG intercept API). Thêm file CSS/JS mới → cập nhật PRECACHE_URLS trong sw.js. -->
+    <script>
+        if ("serviceWorker" in navigator) {
+            window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js"));
+        }
+    </script>
 </body>
 </html>
