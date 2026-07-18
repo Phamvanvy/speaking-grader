@@ -74,23 +74,69 @@ function savedRowHtml(w) {
     const muteBtn = `<button type="button" class="btn btn-secondary btn-inline review-mute-toggle${muted ? ' muted' : ''}"
         data-word="${escapeHtml(w.word)}"
         title="${muted ? 'Đã tắt nhắc ôn — bấm để bật lại' : 'Đang nhắc ôn — bấm để tắt nhắc từ này'}">${muted ? '🔕' : '🔔'}</button>`;
-    return `<div class="saved-row">
-        <span class="saved-row__word">${escapeHtml(w.word)}</span>
-        <span class="saved-row__ipa">${ipaStr ? `/${escapeHtml(ipaStr)}/` : ''}</span>
-        <button type="button" class="tts-play" data-word="${escapeHtml(w.word)}" title="Nghe phát âm chuẩn">🔊</button>
-        <span class="saved-row__score" title="Điểm luyện gần nhất">${pctText}</span>
-        <span class="saved-row__meta">${when}</span>
-        <button type="button" class="btn btn-secondary btn-inline practice-open" data-practice="${payload}">🎙️ Luyện tập</button>
-        <button type="button" class="btn btn-secondary btn-inline saved-delete" data-word="${escapeHtml(w.word)}" title="Bỏ lưu">🗑</button>
-        ${muteBtn}
-    </div>`;
+    const wordEsc = escapeHtml(w.word);
+    return `<tr class="saved-trow">
+        <td class="saved-td saved-td--word">${wordEsc}</td>
+        <td class="saved-td saved-td--ipa">
+            <span class="saved-row__ipa">${ipaStr ? `/${escapeHtml(ipaStr)}/` : ''}</span>
+            <button type="button" class="tts-play" data-word="${wordEsc}" title="Nghe phát âm chuẩn">🔊</button>
+        </td>
+        <td class="saved-td saved-td--score" title="Điểm luyện gần nhất">${pctText}</td>
+        <td class="saved-td saved-td--date">${when}</td>
+        <td class="saved-td saved-td--remind">${muteBtn}</td>
+        <td class="saved-td saved-td--actions">
+            <button type="button" class="btn btn-secondary btn-inline practice-open" data-practice="${payload}" title="Luyện tập từ này">🎙️</button>
+            <button type="button" class="btn btn-secondary btn-inline saved-delete" data-word="${wordEsc}" title="Bỏ lưu">🗑</button>
+        </td>
+    </tr>`;
+}
+
+// Hàng tiêu đề bảng — các cột có data-sort là bấm được để đổi khoá sắp xếp.
+// Mũi tên ▲/▼ hiện ở cột đang active; dựng lại mỗi lần render nên luôn khớp state.
+function savedHeadHtml() {
+    const cols = [
+        { key: 'word', label: 'Từ' },
+        { key: null, label: 'Phát âm' },
+        { key: 'score', label: 'Điểm' },
+        { key: 'date', label: 'Ngày lưu' },
+        { key: 'remind', label: 'Nhắc' },
+        { key: null, label: '' },
+    ];
+    const cells = cols.map(c => {
+        if (!c.key) return `<th class="saved-th">${c.label}</th>`;
+        const active = _savedSort.key === c.key;
+        // Cột chưa chọn vẫn hiện ↕ (mờ) để lộ rõ là bấm sắp xếp được;
+        // cột đang chọn hiện ▲/▼ đậm theo chiều.
+        const arrow = active ? (_savedSort.dir === 'asc' ? '▲' : '▼') : '↕';
+        const aria = active ? ` aria-sort="${_savedSort.dir === 'asc' ? 'ascending' : 'descending'}"` : '';
+        return `<th class="saved-th saved-th--sortable${active ? ' active' : ''}" data-sort="${c.key}"${aria}
+            title="Bấm để sắp xếp theo ${c.label}">${c.label}<span class="saved-th__arrow">${arrow}</span></th>`;
+    }).join('');
+    return `<thead><tr>${cells}</tr></thead>`;
 }
 
 // ── Phân trang danh sách (mặc định 10 từ mới nhất) ──────────────────────
 const SAVED_PAGESIZE_KEY = 'speaking-grader-saved-pagesize';
+const SAVED_SORT_KEY = 'speaking-grader-saved-sort';
 const SAVED_PAGE_OPTIONS = [10, 20, 50, 0];   // 0 = tất cả
-let _savedItems = [];   // toàn bộ đã sort mới→cũ (giữ để prev/next re-slice không fetch lại)
+let _savedItems = [];   // toàn bộ đã sort (giữ để prev/next re-slice không fetch lại)
 let _savedPage = 0;
+let _savedPageCount = 1;   // số trang của lần render gần nhất (cho nút Trang cuối)
+let _savedFilter = '';  // lọc theo từ khoá tìm kiếm (lowercase)
+
+// Sắp xếp theo cột: key ∈ {remind, date, word, score}, dir ∈ {asc, desc}.
+// Mặc định 'remind'/'desc' = từ đang nhắc trước (mới→cũ) — hành vi cũ.
+const SAVED_SORT_KEYS = ['remind', 'date', 'word', 'score'];
+const SAVED_SORT_DEFAULT_DIR = { remind: 'desc', date: 'desc', score: 'desc', word: 'asc' };
+let _savedSort = _loadSavedSort();
+
+function _loadSavedSort() {
+    try {
+        const s = JSON.parse(localStorage.getItem(SAVED_SORT_KEY) || '');
+        if (s && SAVED_SORT_KEYS.includes(s.key) && (s.dir === 'asc' || s.dir === 'desc')) return s;
+    } catch { /* chưa lưu / hỏng → mặc định */ }
+    return { key: 'remind', dir: 'desc' };
+}
 
 function savedPageSize() {
     const v = parseInt(localStorage.getItem(SAVED_PAGESIZE_KEY), 10);
@@ -101,11 +147,15 @@ function savedPagerHtml(total, pageCount, size) {
     const opts = SAVED_PAGE_OPTIONS
         .map(o => `<option value="${o}"${o === size ? ' selected' : ''}>${o === 0 ? 'Tất cả' : o}</option>`)
         .join('');
+    const atFirst = _savedPage <= 0;
+    const atLast = _savedPage >= pageCount - 1;
     const nav = pageCount > 1
         ? `<span class="saved-pager__nav">
-             <button type="button" class="saved-pager__btn" data-page="prev"${_savedPage <= 0 ? ' disabled' : ''} aria-label="Trang trước">‹</button>
+             <button type="button" class="saved-pager__btn" data-page="first"${atFirst ? ' disabled' : ''} aria-label="Trang đầu" title="Trang đầu">«</button>
+             <button type="button" class="saved-pager__btn" data-page="prev"${atFirst ? ' disabled' : ''} aria-label="Trang trước" title="Trang trước">‹</button>
              <span class="saved-pager__pos">Trang ${_savedPage + 1}/${pageCount}</span>
-             <button type="button" class="saved-pager__btn" data-page="next"${_savedPage >= pageCount - 1 ? ' disabled' : ''} aria-label="Trang sau">›</button>
+             <button type="button" class="saved-pager__btn" data-page="next"${atLast ? ' disabled' : ''} aria-label="Trang sau" title="Trang sau">›</button>
+             <button type="button" class="saved-pager__btn" data-page="last"${atLast ? ' disabled' : ''} aria-label="Trang cuối" title="Trang cuối">»</button>
            </span>` : '';
     return `<div class="saved-pager">
         <label class="saved-pager__size">Hiện <select class="saved-pager__select">${opts}</select> từ mới nhất</label>
@@ -114,16 +164,67 @@ function savedPagerHtml(total, pageCount, size) {
     </div>`;
 }
 
-// Nhận danh sách đầy đủ → sort mới→cũ, reset về trang đầu (từ mới nhất), rồi render.
-function renderSavedList(items) {
-    _savedItems = (items || []).slice().sort((a, b) => {
-        const ta = a.saved_at ? Date.parse(a.saved_at) : 0;
-        const tb = b.saved_at ? Date.parse(b.saved_at) : 0;
-        return tb - ta;   // mới nhất trước
+// Sắp xếp theo cột đang chọn (_savedSort). Mọi khoá tie-break mới→cũ rồi A→Z
+// để thứ tự luôn tất định.
+function _sortSavedItems() {
+    const muted = w => !!(window.ReviewToast && ReviewToast.isMuted(w));
+    const dateVal = w => (w.saved_at ? Date.parse(w.saved_at) : 0);
+    const scoreVal = w => (w.last_score != null ? w.last_score
+        : (w.accuracy != null ? w.accuracy : -1));   // chưa có điểm → dồn cuối
+    const { key, dir } = _savedSort;
+    _savedItems.sort((a, b) => {
+        if (key === 'remind') {
+            const ma = muted(a.word), mb = muted(b.word);
+            // desc: đang nhắc trước; asc: đã tắt nhắc trước. Tie-break mới→cũ.
+            if (ma !== mb) return (ma ? 1 : -1) * (dir === 'asc' ? -1 : 1);
+            return dateVal(b) - dateVal(a);
+        }
+        let base;
+        if (key === 'word') base = a.word.localeCompare(b.word);      // A→Z
+        else if (key === 'score') base = scoreVal(a) - scoreVal(b);   // thấp→cao
+        else base = dateVal(a) - dateVal(b);                          // 'date' cũ→mới
+        if (base === 0) base = dateVal(b) - dateVal(a);               // tie: mới→cũ
+        if (base === 0) base = a.word.localeCompare(b.word);          // tie: A→Z
+        return dir === 'asc' ? base : -base;
     });
+}
+
+// Đặt khoá sắp xếp: cùng cột → đảo chiều; cột khác → chiều mặc định của cột đó.
+// Header dựng lại trong renderSavedPage nên tự cập nhật mũi tên/active.
+function setSavedSort(key) {
+    if (!SAVED_SORT_KEYS.includes(key)) return;
+    _savedSort = _savedSort.key === key
+        ? { key, dir: _savedSort.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: SAVED_SORT_DEFAULT_DIR[key] || 'desc' };
+    localStorage.setItem(SAVED_SORT_KEY, JSON.stringify(_savedSort));
+    _sortSavedItems();
     _savedPage = 0;
     renderSavedPage();
 }
+
+// Đưa danh sách về đầu tầm nhìn (đổi số/trang → xem hàng đầu ngay).
+function _scrollSavedTop() {
+    const box = document.getElementById('saved-list');
+    if (box) box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Nhận danh sách đầy đủ → sort, reset về trang đầu, rồi render.
+function renderSavedList(items) {
+    _savedItems = (items || []).slice();
+    _sortSavedItems();
+    _savedPage = 0;
+    renderSavedPage();
+}
+
+// Toggle tắt/bật nhắc (review-toast.js phát sự kiện) → xếp lại (mute xuống cuối),
+// giữ trang hiện tại. Chỉ khi tab Từ đã lưu đang mở.
+document.addEventListener('reviewmute:changed', () => {
+    const tab = document.getElementById('mode-saved');
+    if (tab && !tab.classList.contains('hidden') && _savedItems.length) {
+        _sortSavedItems();
+        renderSavedPage();
+    }
+});
 
 function renderSavedPage() {
     const box = document.getElementById('saved-list');
@@ -133,20 +234,40 @@ function renderSavedPage() {
            kết quả chấm bấm ☆ trên bảng lỗi để lưu từ vào đây luyện tập.</div>`;
         return;
     }
+    // Lọc theo từ khoá (trên từ; sort/thứ tự giữ nguyên) rồi mới phân trang.
+    const items = _savedFilter
+        ? _savedItems.filter(w => (w.word || '').toLowerCase().includes(_savedFilter))
+        : _savedItems;
+    if (!items.length) {
+        box.innerHTML = `<div class="saved-empty">Không tìm thấy từ nào khớp “${escapeHtml(_savedFilter)}”.</div>`;
+        return;
+    }
     const size = savedPageSize();
-    const total = _savedItems.length;
+    const total = items.length;
     const pageCount = size ? Math.ceil(total / size) : 1;
+    _savedPageCount = pageCount;
     _savedPage = Math.min(Math.max(_savedPage, 0), pageCount - 1);
-    const slice = size ? _savedItems.slice(_savedPage * size, _savedPage * size + size) : _savedItems;
-    box.innerHTML = slice.map(savedRowHtml).join('') + savedPagerHtml(total, pageCount, size);
+    const slice = size ? items.slice(_savedPage * size, _savedPage * size + size) : items;
+    box.innerHTML = `<div class="saved-table-wrap">
+        <table class="saved-table">
+            ${savedHeadHtml()}
+            <tbody>${slice.map(savedRowHtml).join('')}</tbody>
+        </table>
+    </div>` + savedPagerHtml(total, pageCount, size);
 }
 
 // Điều khiển phân trang (delegated — footer dựng lại mỗi lần render).
 document.addEventListener('click', e => {
     const btn = e.target instanceof Element ? e.target.closest('.saved-pager__btn') : null;
     if (!btn || btn.disabled) return;
-    _savedPage += btn.dataset.page === 'next' ? 1 : -1;
+    switch (btn.dataset.page) {
+        case 'first': _savedPage = 0; break;
+        case 'prev':  _savedPage -= 1; break;
+        case 'next':  _savedPage += 1; break;
+        case 'last':  _savedPage = _savedPageCount - 1; break;
+    }
     renderSavedPage();
+    _scrollSavedTop();
 });
 document.addEventListener('change', e => {
     const sel = e.target instanceof Element ? e.target.closest('.saved-pager__select') : null;
@@ -154,6 +275,23 @@ document.addEventListener('change', e => {
     localStorage.setItem(SAVED_PAGESIZE_KEY, sel.value);
     _savedPage = 0;
     renderSavedPage();
+    _scrollSavedTop();
+});
+
+// Ô tìm từ đã lưu (markup tĩnh — lọc client trên danh sách đã nạp).
+document.addEventListener('DOMContentLoaded', () => {
+    const s = document.getElementById('saved-search');
+    if (s) s.addEventListener('input', () => {
+        _savedFilter = (s.value || '').trim().toLowerCase();
+        _savedPage = 0;
+        renderSavedPage();
+    });
+});
+
+// Sắp xếp khi bấm tiêu đề cột (delegated — bảng dựng lại mỗi lần render).
+document.addEventListener('click', e => {
+    const th = e.target instanceof Element ? e.target.closest('.saved-table .saved-th--sortable') : null;
+    if (th) setSavedSort(th.dataset.sort);
 });
 
 async function loadSavedWords() {

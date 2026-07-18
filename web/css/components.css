@@ -550,11 +550,25 @@
 .saved-pager__btn:hover:not(:disabled) { background: #f3f4f6; }
 .saved-pager__btn:disabled { opacity: 0.4; cursor: default; }
 
+/* Giữ cụm "Hiện [N] từ mới nhất" trên MỘT dòng — flex-item bị blockify + co lại
+   sẽ khiến chữ và ô select tự xuống dòng (xấu). nowrap + không co để nó là 1 khối. */
+.saved-pager__size {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+    flex: none;
+}
+
 .saved-pager__select {
-    margin: 0 0.15rem;
-    padding: 0.1rem 0.3rem;
-    border: 1px solid #e5e7eb;
+    padding: 0.15rem 1.4rem 0.15rem 0.5rem;
+    border: 1px solid #d1d5db;
     border-radius: 6px;
+    background: white;
+    color: #374151;
+    font-size: 0.85rem;
+    cursor: pointer;
+    line-height: 1.3;
 }
 
 .saved-pager__total { margin-left: auto; }

@@ -289,6 +289,8 @@ document.addEventListener('click', e => {
         if (_reviewToastEl && !_reviewToastEl.querySelector('.review-toast__row')) hideReviewToast();
     }
     updateMuteButtons(word, muted);   // đồng bộ nút bên tab Từ đã lưu (nếu đang mở)
+    // Báo saved.js xếp lại danh sách (từ tắt nhắc dồn xuống cuối).
+    document.dispatchEvent(new CustomEvent('reviewmute:changed'));
 });
 
 // ── Settings UI trong tab Từ đã lưu (#review-toast-settings, markup tĩnh) ──

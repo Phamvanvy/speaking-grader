@@ -14,7 +14,7 @@
  * PRECACHE_URLS bên dưới VÀ bump CACHE_NAME.
  */
 
-const CACHE_NAME = "sg-shell-v4";
+const CACHE_NAME = "sg-shell-v8";
 
 // Path KHÔNG kèm ?v= — lúc fetch runtime sẽ match lại bằng ignoreSearch.
 const PRECACHE_URLS = [
