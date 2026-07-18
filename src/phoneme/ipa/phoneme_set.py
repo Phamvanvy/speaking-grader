@@ -88,6 +88,14 @@ _WORD_IPA_OVERRIDES: Final[dict[str, list[str]]] = {
     "enhances": ["IH0", "N", "HH", "AE1", "N", "S", "IH0", "Z"],
     "enhancing": ["IH0", "N", "HH", "AE1", "N", "S", "IH0", "NG"],
     "enhancer": ["IH0", "N", "HH", "AE1", "N", "S", "ER0"],
+    # CMUdict xếp entry AH0 (ə) đầu tiên cho họ "market" trong khi citation form
+    # Cambridge/Oxford (cả UK lẫn US) dùng /ɪ/ ở âm tiết -ket-: /ˈmɑːrkɪt/,
+    # /ˈmɑːrkɪtɪŋ/. "marketing" chỉ có DUY NHẤT entry AH0 → bắt buộc override;
+    # pin cả họ từ cho nhất quán. ("supermarket" CMUdict đã là IH0 — không cần.)
+    "market": ["M", "AA1", "R", "K", "IH0", "T"],
+    "markets": ["M", "AA1", "R", "K", "IH0", "T", "S"],
+    "marketing": ["M", "AA1", "R", "K", "IH0", "T", "IH0", "NG"],
+    "marketed": ["M", "AA1", "R", "K", "IH0", "T", "IH0", "D"],
     # Proper nouns not in CMUdict — must stay permanently.
     "vietnamese": ["V", "IY2", "EH0", "T", "N", "AH0", "M", "IY1", "Z"],
     "vietnam": ["V", "IY2", "EH0", "T", "N", "AA1", "M"],

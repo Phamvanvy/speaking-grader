@@ -361,6 +361,22 @@ def _grade_bytes(
     return output
 
 
+# Chữ ký lỗi decode audio (ffmpeg/whisperx/torchaudio) — file ghi âm hỏng hoặc
+# cụt (vd MediaRecorder stop quá sớm → webm chỉ có mẩu header EBML). Đây là lỗi
+# input của client → 400 với message gọn, KHÔNG dump nguyên stderr ffmpeg ra UI.
+_AUDIO_DECODE_ERROR_MARKERS = (
+    "Failed to load audio",
+    "EBML",
+    "Error opening input",
+    "Invalid data found when processing input",
+)
+
+
+def _is_audio_decode_error(e: Exception) -> bool:
+    msg = str(e)
+    return any(marker in msg for marker in _AUDIO_DECODE_ERROR_MARKERS)
+
+
 async def _read_image(image: UploadFile | None) -> tuple[str | None, str | None]:
     """Đọc ảnh (nếu có) → (base64, media_type)."""
     if image is None:
@@ -475,6 +491,11 @@ async def grade(
             )
         except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
             logger.exception("Lỗi khi chấm")
+            if _is_audio_decode_error(e):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Không đọc được file ghi âm (hỏng hoặc quá ngắn) — hãy ghi âm lại.",
+                ) from e
             raise HTTPException(status_code=500, detail=f"Lỗi khi chấm: {e}") from e
     output.setdefault("telemetry", {})["queue_wait_ms"] = queue_wait_ms
 
@@ -627,7 +648,12 @@ async def grade_batch(
                 return {"index": idx, "audio_filename": filename, "result": result}
             except Exception as e:  # noqa: BLE001 - lỗi 1 em không làm hỏng cả lớp
                 logger.exception("Lỗi khi chấm %s", filename)
-                return {"index": idx, "audio_filename": filename, "error": str(e)}
+                detail = (
+                    "Không đọc được file ghi âm (hỏng hoặc quá ngắn)."
+                    if _is_audio_decode_error(e)
+                    else str(e)
+                )
+                return {"index": idx, "audio_filename": filename, "error": detail}
 
     batch_started = perf_counter()
     results = await asyncio.gather(
@@ -875,7 +901,12 @@ async def exam_grade(
                 return {**base, "result": result}
             except Exception as e:  # noqa: BLE001 - 1 câu lỗi không hỏng cả đề
                 logger.exception("Lỗi khi chấm câu %s", qid)
-                return {**base, "error": str(e)}
+                detail = (
+                    "Không đọc được file ghi âm (hỏng hoặc quá ngắn)."
+                    if _is_audio_decode_error(e)
+                    else str(e)
+                )
+                return {**base, "error": detail}
 
     graded = await asyncio.gather(*(_one(qid, d, s, qt) for qid, d, s, qt in items))
     graded.sort(key=lambda r: (r.get("sequence") is None, r.get("sequence") or 0))

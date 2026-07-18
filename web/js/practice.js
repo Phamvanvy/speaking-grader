@@ -291,6 +291,14 @@ async function gradePracticeAttempt(blob, mime) {
     if (!d) return;
     const status = document.getElementById('practice-status');
     const mic = document.getElementById('practice-mic');
+    // Bấm-bấm quá nhanh → MediaRecorder nhả blob cụt (vài chục byte header EBML,
+    // ffmpeg server không decode được). Chặn tại chỗ, khỏi tốn 1 request chấm.
+    // 1 KB an toàn: ~0.2s opus thật đã > 1 KB, còn blob hỏng chỉ vài chục byte.
+    if (!blob || blob.size < 1024) {
+        status.className = 'practice-status err';
+        status.textContent = 'Ghi âm quá ngắn — bấm 🎙️, nói rõ từ, rồi mới bấm dừng.';
+        return;
+    }
     practiceState.grading = true;
     mic.disabled = true;
     status.className = 'practice-status';
