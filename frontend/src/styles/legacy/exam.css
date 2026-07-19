@@ -111,6 +111,18 @@
 .exam-timer.prep { color: #d97706; }
 .exam-timer.recording { color: #dc2626; }
 
+/* Đếm lùi chế độ thủ công — inline cạnh nút ghi âm nên nhỏ hơn bản thi thật */
+.exam-manual-timer-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin: 0.75rem 0;
+}
+.exam-timer-manual { font-size: 2.6rem; }
+.exam-timer-manual.warn { color: #d97706; animation: exam-blink 1s infinite; }
+.exam-timer-manual.timeup { color: #6b7280; }
+
 .exam-status-pill {
     display: inline-block;
     padding: 0.25rem 0.85rem;

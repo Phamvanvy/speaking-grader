@@ -20,6 +20,36 @@ function questionResultInnerHtml(item: any): string {
   );
 }
 
+// Đuôi file suy ra từ MIME cho item dán từ clipboard (ảnh chụp màn hình thường
+// không có tên/đuôi) — server /exam/import dispatch theo suffix.
+const PASTE_EXT: Record<string, string> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+  'image/bmp': '.bmp',
+  'image/gif': '.gif',
+  'application/pdf': '.pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+};
+
+function pickPastedExamFile(dt: DataTransfer | null): File | null {
+  if (!dt) return null;
+  const files: File[] = Array.from(dt.files || []);
+  if (!files.length && dt.items) {
+    for (const it of Array.from(dt.items)) {
+      if (it.kind !== 'file') continue;
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  for (const f of files) {
+    if (/\.(pdf|docx|jpe?g|png|webp|bmp|gif)$/i.test(f.name || '')) return f;
+    const ext = PASTE_EXT[(f.type || '').toLowerCase()];
+    if (ext) return new File([f], `paste${ext}`, { type: f.type });
+  }
+  return null;
+}
+
 export default function ExamTab() {
   const ctrlRef = useRef<ExamController>();
   if (!ctrlRef.current) ctrlRef.current = new ExamController();
@@ -33,6 +63,22 @@ export default function ExamTab() {
   // Nạp bộ đề mẫu khi vào bước setup (thay x-init trên card setup).
   useEffect(() => {
     if (s.step === 'setup') ctrl.loadBuiltinSets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.step]);
+
+  // Ctrl+V ở bước setup: dán ảnh chụp đề hoặc file .pdf/.docx copy từ Explorer.
+  // Paste chỉ có file mới chặn — dán text vẫn để cho input xử lý như thường.
+  useEffect(() => {
+    if (s.step !== 'setup') return;
+    const onPaste = (e: ClipboardEvent) => {
+      if (ctrl.getSnapshot().importing) return;
+      const file = pickPastedExamFile(e.clipboardData);
+      if (!file) return;
+      e.preventDefault();
+      ctrl.importFile(file);
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.step]);
 
@@ -80,6 +126,7 @@ export default function ExamTab() {
             <div className="file-upload-text">
               <span className="icon">📤</span>
               <span>{s.importing ? 'Đang bóc tách đề…' : 'Chọn tài liệu đề (PDF / ảnh / Word)'}</span>
+              {!s.importing && <span className="file-upload-hint">hoặc nhấn Ctrl + V để dán ảnh/file đề</span>}
             </div>
           </label>
           <div style={{ marginTop: '0.75rem' }}>
@@ -333,13 +380,33 @@ export default function ExamTab() {
                 )}
                 {ctrl.current.image_b64 && <img className="exam-runner-img" src={ctrl.imgSrc(ctrl.current)} alt="picture" />}
               </div>
+              {/* Đếm lùi thủ công: hiện khi đang ghi; hết giờ tự dừng nhưng cho ghi lại. */}
+              {s.manualLeft != null && (
+                <div className="exam-manual-timer-wrap">
+                  <div
+                    className={
+                      'exam-timer exam-timer-manual' +
+                      (s.manualTimeUp ? ' timeup' : s.manualLeft <= 10 ? ' warn' : ' recording')
+                    }
+                  >
+                    {s.manualLeft}s
+                  </div>
+                  <span className="exam-hint" style={{ margin: 0 }}>
+                    {s.manualTimeUp ? 'Hết giờ — đã dừng ghi. Bấm "Ghi lại câu này" nếu muốn thử lại.' : `còn lại / ${s.manualTotal}s`}
+                  </span>
+                </div>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                 <button
                   className="btn btn-primary"
                   style={{ width: 'auto', padding: '0.6rem 1.2rem' }}
                   onClick={() => ctrl.toggleRec()}
                 >
-                  {s.recording ? '⏹ Dừng ghi' : '🎙 Ghi âm câu này'}
+                  {s.recording
+                    ? '⏹ Dừng ghi'
+                    : ctrl.current._recBlob
+                      ? '🔁 Ghi lại câu này'
+                      : `🎙 Ghi âm câu này (${ctrl.manualDurationFor(ctrl.current)}s)`}
                 </button>
                 <label
                   className={'btn btn-secondary' + (s.recording ? ' disabled' : '')}

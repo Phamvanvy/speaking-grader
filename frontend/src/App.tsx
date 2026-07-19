@@ -16,10 +16,10 @@ import { TooltipProvider } from './components/ui/tooltip';
 // 4 tab top-level (khớp switchMode legacy) map sang route thật (History API) — giữ
 // đúng path cũ để link/reload hoạt động qua catch-all SPA của FastAPI.
 const TABS = [
-  { to: '/', label: '📝 Chấm bài lẻ / cả lớp', end: true },
   { to: '/exam', label: '📄 Thi cả đề (cá nhân)', end: false },
   { to: '/history', label: '🕘 Lịch sử', end: false },
   { to: '/saved', label: '📚 Từ đã lưu', end: false },
+  { to: '/grade', label: '📝 Chấm bài lẻ / cả lớp', end: false },
 ];
 
 export default function App() {
@@ -65,9 +65,10 @@ export default function App() {
         </nav>
 
         <Routes>
-          <Route path="/" element={<GradingTab />} />
-          {/* Landing mới — cố ý KHÔNG chiếm '/' khi Grading còn đang cutover.
-              Sau cutover: đổi element của '/' sang <HomePage /> và cho Grading path riêng. */}
+          {/* '/' = "Thi cả đề" (luồng chính). Grading chuyển sang path riêng /grade;
+              '/' cũ trỏ Grading nên redirect để bookmark/PWA start_url không gãy. */}
+          <Route path="/" element={<Navigate to="/exam" replace />} />
+          <Route path="/grade" element={<GradingTab />} />
           <Route path="/home" element={<HomePage />} />
           {/* Router legacy dùng path lồng như /exam/toeic/set2/q/3 — bắt hết về ExamTab. */}
           <Route path="/exam/*" element={<ExamTab />} />
@@ -75,7 +76,7 @@ export default function App() {
           <Route path="/saved/*" element={<SavedTab />} />
           {/* Ngoài 4 tab — vào từ widget danh tính góc trên. */}
           <Route path="/account" element={<AccountPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/exam" replace />} />
         </Routes>
       </div>
 

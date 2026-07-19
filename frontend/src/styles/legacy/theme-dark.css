@@ -107,9 +107,18 @@ body.dark .file-upload.has-file {
     background: #052e16;
 }
 
+body.dark .file-upload.dragover {
+    border-color: #6366f1;
+    background: #1e1b4b;
+}
+
 body.dark .file-upload-text,
 body.dark .feature-item .name {
     color: #94a3b8;
+}
+
+body.dark .file-upload-hint {
+    color: #64748b;
 }
 
 body.dark .file-item {

@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import { create } from 'zustand';
 import { toast } from '@/components/ui/sonner';
-import { Volume2, BellOff } from 'lucide-react';
+import { Volume2, BellOff, X } from 'lucide-react';
 import { apiFetch } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
 import { useSavedWords, type SavedWord } from '@/store/savedWords';
@@ -181,26 +181,42 @@ function ReviewToastCard({ words, toastId }: { words: SavedWord[]; toastId: stri
   // `mt-[3.4rem]`: toast neo top-right, chừa chỗ cho .theme-toggle (top 1rem, cao 42px)
   // để rơi ngay DƯỚI nút dark mode thay vì đè lên.
   return (
-    <div className="mt-[3.4rem] w-[272px] max-w-[80vw] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl">
+    <div className="mt-[3.4rem] w-[340px] max-w-[90vw] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl">
       <div className="flex items-center gap-1.5 border-b bg-muted/40 px-3 py-2 text-sm font-semibold">
         <span aria-hidden>📖</span> Ôn lại từ đã lưu
         <span className="ml-auto text-xs font-normal text-muted-foreground">{rows.length} từ</span>
+        {/* Bỏ qua lượt này: chỉ đóng toast, KHÔNG mute từ nào — lần nhắc sau vẫn
+            chạy bình thường (schedule đã đặt ngay sau khi toast hiện). */}
+        <button
+          type="button"
+          className="-mr-1 shrink-0 rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground hover:opacity-100"
+          title="Bỏ qua lượt ôn này"
+          aria-label="Bỏ qua lượt ôn này"
+          onClick={() => toast.dismiss(toastId)}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
       </div>
       <div className="flex flex-col p-1">
         {rows.map((w: SavedWord) => (
-          <div key={w.word} className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
-            <button
-              type="button"
-              className="flex-1 truncate rounded text-left font-medium text-primary hover:underline"
-              title="Bấm để luyện từ này"
-              onClick={() => {
-                openPractice({ word: w.word, ipa: w.ipa ?? null, accuracy: w.accuracy ?? null, phonemes: w.phonemes || [] });
-                toast.dismiss(toastId);
-              }}
-            >
-              {w.word}
-            </button>
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">{reviewIpa(w)}</span>
+          <div key={w.word} className="group flex items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
+            {/* Cụm từ có IPA rất dài: cho cả từ lẫn IPA nằm chung một khối co giãn và
+                được phép wrap. Từ ngắn vẫn nằm 1 dòng; cụm dài đẩy IPA xuống dòng dưới
+                thay vì bóp nút chữ về 0 (bug "s…" / ô trống). */}
+            <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <button
+                type="button"
+                className="max-w-full break-words rounded text-left font-medium text-primary hover:underline"
+                title="Bấm để luyện từ này"
+                onClick={() => {
+                  openPractice({ word: w.word, ipa: w.ipa ?? null, accuracy: w.accuracy ?? null, phonemes: w.phonemes || [] });
+                  toast.dismiss(toastId);
+                }}
+              >
+                {w.word}
+              </button>
+              <span className="max-w-full break-words font-mono text-xs text-muted-foreground">{reviewIpa(w)}</span>
+            </div>
             {/* .tts-play + data-word → delegated playback handler phát mẫu qua /tts. */}
             <button
               type="button"

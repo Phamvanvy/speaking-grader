@@ -3,11 +3,9 @@ import { AuroraText } from '../../components/ui/aurora-text';
 import { InteractiveHoverButton } from '../../components/ui/interactive-hover-button';
 
 /**
- * Landing/hero — dựng ở /home, KHÔNG thay route '/' (vẫn là GradingTab).
- *
- * Lý do tách route: '/' là màn Grading đang trong giai đoạn cutover React↔legacy.
- * Đổi '/' lúc này sẽ kéo theo bookmark, start_url của PWA và nav tab. Sau khi
- * cutover xong chỉ cần đổi một dòng trong App.tsx để flip '/' về đây.
+ * Landing/hero — dựng ở /home. '/' hiện redirect sang /exam ("Thi cả đề" là luồng
+ * chính), Grading nằm ở /grade. Muốn dùng trang này làm landing thật thì đổi
+ * route '/' trong App.tsx sang <HomePage /> — nhưng nhớ start_url PWA cũng trỏ '/'.
  *
  * Trang này CHỈ điều hướng — không gọi API, không hiển thị số liệu. Cố ý: chưa có
  * endpoint thống kê nào, nên mọi con số ở đây sẽ là số bịa.
@@ -18,12 +16,6 @@ import { InteractiveHoverButton } from '../../components/ui/interactive-hover-bu
  */
 
 const ENTRIES = [
-  {
-    to: '/',
-    icon: '📝',
-    title: 'Chấm bài lẻ / cả lớp',
-    desc: 'Nộp một file ghi âm hoặc cả thư mục của lớp, nhận điểm theo từng tiêu chí kèm phân tích phát âm.',
-  },
   {
     to: '/exam',
     icon: '📄',
@@ -42,6 +34,12 @@ const ENTRIES = [
     title: 'Từ đã lưu',
     desc: 'Những từ bạn hay phát âm lệch được gom lại để luyện riêng tới khi chuẩn.',
   },
+  {
+    to: '/grade',
+    icon: '📝',
+    title: 'Chấm bài lẻ / cả lớp',
+    desc: 'Nộp một file ghi âm hoặc cả thư mục của lớp, nhận điểm theo từng tiêu chí kèm phân tích phát âm.',
+  },
 ];
 
 export default function HomePage() {
@@ -56,14 +54,14 @@ export default function HomePage() {
           đúng chỗ bạn đọc lệch.
         </p>
         <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-          <Link to="/">
-            <InteractiveHoverButton>Chấm bài ngay</InteractiveHoverButton>
+          <Link to="/exam">
+            <InteractiveHoverButton>Thi thử cả đề</InteractiveHoverButton>
           </Link>
           <Link
-            to="/exam"
+            to="/grade"
             className="rounded-lg border border-border px-5 py-2.5 text-sm font-medium no-underline transition-colors hover:bg-accent hover:text-accent-foreground"
           >
-            Thi thử cả đề
+            Chấm bài lẻ
           </Link>
         </div>
       </section>

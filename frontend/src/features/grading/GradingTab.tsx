@@ -23,6 +23,40 @@ import {
 } from './recordingsDb';
 import { SuggestPanel } from './SuggestPanel';
 
+const AUDIO_EXT_RE = /\.(wav|mp3|m4a|ogg|oga|flac|webm|weba|mp4|mov|mkv|avi|aac|opus)$/i;
+
+// Kéo-thả từ Explorer: MIME hay rỗng/sai với .m4a/.weba → fallback theo đuôi file.
+function isAudioFile(f: File): boolean {
+  const t = (f.type || '').toLowerCase();
+  if (t.startsWith('audio/') || t.startsWith('video/')) return true;
+  return AUDIO_EXT_RE.test(f.name || '');
+}
+
+// Ảnh dán từ clipboard thường không có tên → đặt tên theo MIME cho server.
+function pickPastedImage(dt: DataTransfer | null): File | null {
+  if (!dt) return null;
+  const files: File[] = Array.from(dt.files || []);
+  if (!files.length && dt.items) {
+    for (const it of Array.from(dt.items)) {
+      if (it.kind !== 'file') continue;
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  for (const f of files) {
+    const t = (f.type || '').toLowerCase();
+    if (!t.startsWith('image/')) continue;
+    if (f.name) return f;
+    const ext = t.split('/')[1] || 'png';
+    return new File([f], `paste.${ext}`, { type: t });
+  }
+  return null;
+}
+
+function filesFromDrop(e: React.DragEvent): File[] {
+  return Array.from(e.dataTransfer?.files || []);
+}
+
 const MODE_NOTES: Record<string, string> = {
   practice:
     'Fast first pass (faster-whisper). Auto-upgrades to the Mock Test pipeline (better ASR + phoneme analysis) when confidence/coverage is low.',
@@ -45,6 +79,7 @@ export default function GradingTab() {
   const [feedbackLang, setFeedbackLang] = useState('');
   const [noAi, setNoAi] = useState(false);
   const [grading, setGrading] = useState(false);
+  const [dragOver, setDragOver] = useState<'audio' | 'image' | null>(null);
 
   // ── results ──
   const [singleData, setSingleData] = useState<any>(null);
@@ -80,6 +115,45 @@ export default function GradingTab() {
   // Nạp bản ghi đã lưu (IndexedDB) khi mở tab.
   useEffect(() => {
     refreshSaved();
+  }, []);
+
+  // Ctrl+V: dán ảnh đề (Describe Picture) hoặc file audio copy từ Explorer.
+  // Chỉ chặn paste khi thật sự có file → dán text vào textarea vẫn như thường.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const dt = e.clipboardData;
+      if (showImage) {
+        const img = pickPastedImage(dt);
+        if (img) {
+          e.preventDefault();
+          setImageFile(img);
+          return;
+        }
+      }
+      const audio = Array.from(dt?.files || []).filter(isAudioFile);
+      if (audio.length) {
+        e.preventDefault();
+        addFiles(audio);
+      }
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [showImage]);
+
+  // Thả file trượt ra ngoài vùng drop → mặc định trình duyệt mở file đó, mất trang.
+  // Chặn ở window (tab này chỉ mount ở /grade nên không ảnh hưởng tab khác).
+  useEffect(() => {
+    const swallow = (e: DragEvent) => e.preventDefault();
+    const onWindowDrop = (e: DragEvent) => {
+      e.preventDefault();
+      setDragOver(null);
+    };
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', onWindowDrop);
+    return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', onWindowDrop);
+    };
   }, []);
 
   // Renderer + playback đọc accent qua module-level → đồng bộ trước mỗi render kết quả.
@@ -316,7 +390,23 @@ export default function GradingTab() {
         </div>
 
         <div className="form-group">
-          <label className={'file-upload' + (files.length ? ' has-file' : '')}>
+          <label
+            className={'file-upload' + (files.length ? ' has-file' : '') + (dragOver === 'audio' ? ' dragover' : '')}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+              setDragOver('audio');
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(null);
+              const dropped = filesFromDrop(e).filter(isAudioFile);
+              if (dropped.length) addFiles(dropped);
+            }}
+          >
             <input
               type="file"
               multiple
@@ -328,7 +418,7 @@ export default function GradingTab() {
             />
             <div className="file-upload-text">
               <span className="icon">📁</span>
-              <span>Click to select audio file(s) — pick several to grade a whole batch</span>
+              <span>Kéo-thả hoặc bấm để chọn file audio — chọn nhiều file để chấm cả loạt</span>
             </div>
           </label>
           <div className="recorder">
@@ -368,11 +458,28 @@ export default function GradingTab() {
 
         {showImage && (
           <div className="form-group" id="image-group">
-            <label className={'file-upload' + (imageFile ? ' has-file' : '')}>
+            <label
+              className={'file-upload' + (imageFile ? ' has-file' : '') + (dragOver === 'image' ? ' dragover' : '')}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'copy';
+                setDragOver('image');
+              }}
+              onDragLeave={(e) => {
+                // dragleave cũng bắn khi con trỏ đi vào phần tử con → chỉ tắt khi rời hẳn label.
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(null);
+                const img = filesFromDrop(e).find((f) => (f.type || '').toLowerCase().startsWith('image/'));
+                if (img) setImageFile(img);
+              }}
+            >
               <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} />
               <div className="file-upload-text">
                 <span className="icon">🖼️</span>
-                <span>Click to upload a picture (optional — for Describe Picture)</span>
+                <span>Kéo-thả ảnh, dán Ctrl+V, hoặc bấm để chọn ảnh (optional — for Describe Picture)</span>
               </div>
             </label>
             {imageFile && (

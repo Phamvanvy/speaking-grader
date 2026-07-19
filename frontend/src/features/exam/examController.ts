@@ -179,6 +179,7 @@ const PUBLIC_FIELDS = [
   'step', 'exam', 'title', 'questions', 'warnings', 'importing', 'error', 'builtinSets', 'builtinSetId',
   'timed', 'order', 'idx', 'phase', 'statusKey', 'secondsLeft', 'countdownNum', 'partName', 'directionsText',
   'fullscreen', 'recording', 'grading', 'result', 'gradedCount', 'gradeTotal',
+  'manualLeft', 'manualTotal', 'manualTimeUp',
 ];
 
 export class ExamController {
@@ -208,6 +209,10 @@ export class ExamController {
     this.result = null;
     this.gradedCount = 0;
     this.gradeTotal = 0;
+    // đếm lùi chế độ thủ công (null = ẩn timer)
+    this.manualLeft = null;
+    this.manualTotal = 0;
+    this.manualTimeUp = false;
     // options chấm (M1: mặc định; M2 nối form dùng chung)
     this.mode = 'practice';
     this.feedbackLang = '';
@@ -216,6 +221,7 @@ export class ExamController {
     this._recorder = null;
     this._chunks = [];
     this._timer = null;
+    this._manualTimer = null;
     this._runToken = 0;
     this._skipResolve = null;
     this._analyser = null;
@@ -435,12 +441,14 @@ export class ExamController {
       this.runAuto();
     } else {
       this.phase = 'manual';
+      this._resetManualTimer();
       this._emit();
     }
   }
 
   nextManual() {
     if (this.recording) this.stopRec();
+    this._resetManualTimer();
     if (this.idx < this.order.length - 1) {
       this.idx++;
       this._emit();
@@ -448,6 +456,7 @@ export class ExamController {
   }
   prevManual() {
     if (this.recording) this.stopRec();
+    this._resetManualTimer();
     if (this.idx > 0) {
       this.idx--;
       this._emit();
@@ -605,10 +614,65 @@ export class ExamController {
     this._emit();
   }
   stopRec() {
+    this._stopManualTimer();
     if (this._recorder && this.recording) this._recorder.stop();
   }
-  toggleRec() {
-    this.recording ? this.stopRec() : this.startRec();
+  async toggleRec() {
+    if (this.recording) {
+      // Người dùng tự dừng → ẩn timer (không phải hết giờ).
+      this._resetManualTimer();
+      this.stopRec();
+      return;
+    }
+    await this.startRec();
+    // Đếm lùi CHỈ cho chế độ thủ công; chế độ bấm giờ đã có _countdown riêng.
+    if (this.recording && !this.timed) this._startManualTimer();
+  }
+
+  // ── đếm lùi chế độ thủ công (không bấm giờ) ──
+  // Hết giờ = dừng ghi + beep như thi thật, nhưng vẫn cho bấm ghi lại câu đó.
+  manualDurationFor(q) {
+    if (!q) return 0;
+    const d = Number(q.expected_duration_sec);
+    if (Number.isFinite(d) && d > 0) return Math.round(d);
+    return timingFor(this.exam, q).resp;
+  }
+  _stopManualTimer() {
+    if (this._manualTimer) {
+      clearInterval(this._manualTimer);
+      this._manualTimer = null;
+    }
+  }
+  // Ẩn timer + xoá cờ hết giờ (đổi câu, import audio, người dùng tự dừng).
+  _resetManualTimer() {
+    this._stopManualTimer();
+    this.manualLeft = null;
+    this.manualTotal = 0;
+    this.manualTimeUp = false;
+  }
+  _startManualTimer() {
+    this._stopManualTimer();
+    const secs = this.manualDurationFor(this.current);
+    if (!secs) return;
+    this.manualTotal = secs;
+    this.manualLeft = secs;
+    this.manualTimeUp = false;
+    this._emit();
+    this._manualTimer = setInterval(() => {
+      if (!this.recording) {
+        this._stopManualTimer();
+        return;
+      }
+      this.manualLeft--;
+      if (this.manualLeft <= 0) {
+        this.manualLeft = 0;
+        this.manualTimeUp = true;
+        this._stopManualTimer();
+        examBeep(660, 250);
+        this.stopRec();
+      }
+      this._emit();
+    }, 1000);
   }
 
   uploadRec(file) {
@@ -616,6 +680,7 @@ export class ExamController {
     const q = this.current;
     if (!q) return;
     if (this.recording) this.stopRec();
+    this._resetManualTimer();
     if (q._recUrl) URL.revokeObjectURL(q._recUrl);
     q._recBlob = file;
     q._recName = file.name || `${q.id}.webm`;
@@ -628,6 +693,7 @@ export class ExamController {
     );
     if (!files.length) return;
     if (this.recording) this.stopRec();
+    this._resetManualTimer();
     let i = this.idx;
     for (const file of files) {
       if (i >= this.order.length) break;
@@ -718,6 +784,7 @@ export class ExamController {
     this._runToken++;
     this._stopTimer();
     if (this.recording) this.stopRec();
+    this._resetManualTimer();
     this.exitFullscreen();
     this.phase = 'idle';
     this.step = 'review';
@@ -853,6 +920,7 @@ export class ExamController {
     this._runToken++;
     this._stopTimer();
     if (this.recording) this.stopRec();
+    this._resetManualTimer();
     this.exitFullscreen();
     this.step = 'setup';
     this.questions = [];

@@ -108,12 +108,26 @@ textarea {
     background: #f0fdf4;
 }
 
+/* Kéo file vào vùng thả — thắng cả :hover và .has-file (đặt sau, cùng độ ưu tiên). */
+.file-upload.dragover {
+    border-color: #4f46e5;
+    background: #eef2ff;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.18);
+}
+
 .file-upload input {
     display: none;
 }
 
 .file-upload-text {
     color: #666;
+}
+
+.file-upload-hint {
+    display: block;
+    margin-top: 0.35rem;
+    font-size: 0.82rem;
+    color: #999;
 }
 
 .file-upload-text .icon {
