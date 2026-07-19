@@ -3,17 +3,14 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath, URL } from 'node:url';
 
-// Build ra web/dist (FastAPI serve từ đó — xem src/api.py). base '/' vì app chạy
-// ở gốc domain sau cutover; giai đoạn dogfood serve qua /beta (route riêng ở FastAPI).
+// Build ra web/dist — FastAPI serve thẳng thư mục đó ở '/' (xem _ROOT_DIR trong
+// src/api.py). App chạy ở gốc domain nên base '/'; VITE_BASE chỉ cần khi muốn
+// serve thử dưới một path con.
 //
-// PWA (M5 — cutover): SW Workbox ĐÃ BẬT. Nó build ra ĐÚNG /sw.js — cùng URL với
-// web/sw.js legacy — nên lần load đầu sau cutover trình duyệt coi là bản cập nhật
-// của SW cũ và thay thế tại chỗ: không có 2 SW tranh scope '/'. Cache legacy
-// ("sg-shell-*") do app xoá lúc khởi động (xem main.tsx), vì cleanupOutdatedCaches
-// chỉ dọn precache của chính Workbox. Xem plan "Service Worker trong giai đoạn
-// coexistence".
-// base: '/' sau cutover; trong migration build dogfood với VITE_BASE=/beta/ để asset
-// + router chạy dưới /beta (FastAPI serve web/dist ở đó, legacy vẫn ở '/').
+// PWA: SW Workbox build ra ĐÚNG /sw.js — cùng URL với sw.js của bản vanilla trước
+// đây — nên trình duyệt của người dùng cũ coi là bản cập nhật và thay thế tại chỗ:
+// không có 2 SW tranh scope '/'. Cache cũ ("sg-shell-*") do app xoá lúc khởi động
+// (xem main.tsx), vì cleanupOutdatedCaches chỉ dọn precache của chính Workbox.
 const BASE = process.env.VITE_BASE ?? '/';
 
 export default defineConfig({
@@ -52,10 +49,7 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  server: {
-    // Cho phép import CSS gốc ở ../web/css (single source of truth trong migration).
-    fs: { allow: ['..'] },
-  },
+  // (không cần server.fs.allow: mọi source — kể cả CSS kế thừa — đã nằm trong frontend/)
   build: {
     outDir: '../web/dist',
     emptyOutDir: true,

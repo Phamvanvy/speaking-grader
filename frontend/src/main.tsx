@@ -4,17 +4,18 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 
-// CSS gốc dùng chung với legacy — import theo ĐÚNG thứ tự cascade của index.html cũ
+// CSS kế thừa từ bản vanilla — import theo ĐÚNG thứ tự cascade của index.html cũ
 // (base → components → theme-dark → phoneme → exam → history → practice → auth).
-// Single source of truth: sửa CSS ở web/css/ áp cho cả legacy lẫn app React.
-import '../../web/css/base.css';
-import '../../web/css/components.css';
-import '../../web/css/theme-dark.css';
-import '../../web/css/phoneme.css';
-import '../../web/css/exam.css';
-import '../../web/css/history.css';
-import '../../web/css/practice.css';
-import '../../web/css/auth.css';
+// Đã chuyển vào frontend/src/styles/legacy/ khi gỡ bản vanilla: giữ ở web/css thì
+// import vượt ra ngoài build context của Docker stage frontend-build → build lỗi.
+import './styles/legacy/base.css';
+import './styles/legacy/components.css';
+import './styles/legacy/theme-dark.css';
+import './styles/legacy/phoneme.css';
+import './styles/legacy/exam.css';
+import './styles/legacy/history.css';
+import './styles/legacy/practice.css';
+import './styles/legacy/auth.css';
 
 // Tailwind + shadcn tokens SAU cùng — layer utility/component nằm trên cascade legacy.
 // preflight tắt (tailwind.config.js) nên KHÔNG reset element M1–M3.

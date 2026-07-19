@@ -2,9 +2,10 @@
 # TOEIC Speaking Grader — image GPU (NVIDIA).
 
 # ── Stage build frontend React (Vite) ──────────────────────────────────────
-# Chuẩn bị cutover (M5): build ra web/dist với base '/' (production). Ở giai đoạn
-# này production '/' VẪN serve legacy (COPY web ./web bên dưới) — dist chỉ để /beta
-# dogfood và sẵn sàng cho lúc flip _WEB_DIR → web/dist. npm ci cache theo package-lock.
+# Frontend DUY NHẤT từ sau cutover M5 (bản vanilla web/js đã gỡ). Toàn bộ source —
+# kể cả CSS kế thừa (frontend/src/styles/legacy/) — nằm trong frontend/ để stage này
+# tự chứa; import ra ngoài thư mục đó sẽ vỡ build vì không có trong context.
+# npm ci cache theo package-lock.
 FROM node:20-slim AS frontend-build
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
@@ -41,9 +42,8 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 ENV LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.11/site-packages/nvidia/cudnn/lib
 
 COPY src ./src
-COPY web ./web
-# React build từ stage frontend-build. Hiện chỉ phục vụ /beta (dogfood) + sẵn cho
-# cutover; khi flip _WEB_DIR → web/dist thì đây thành production. Xem src/api.py.
+# Frontend = build React từ stage trên (không còn web/ tĩnh trong repo để copy).
+# FastAPI serve thẳng thư mục này ở "/" — xem _ROOT_DIR trong src/api.py.
 COPY --from=frontend-build /build/web/dist ./web/dist
 # Ngân hàng câu hỏi + ảnh đề mẫu cho /exam/builtin ("dùng đề có sẵn"). Chỉ JSON câu
 # hỏi và ảnh mẫu, các phần khác của data/ vẫn bị .dockerignore loại ra.

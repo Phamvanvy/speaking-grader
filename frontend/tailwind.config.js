@@ -1,7 +1,8 @@
 import animate from 'tailwindcss-animate';
 
 /**
- * Tailwind cấu hình để COEXIST với 2.068 dòng CSS legacy (web/css/*), không viết lại.
+ * Tailwind cấu hình để COEXIST với ~2.068 dòng CSS kế thừa từ bản vanilla
+ * (src/styles/legacy/*), không viết lại.
  *
  * - `preflight: false` + `container: false`: KHÔNG reset element toàn cục và KHÔNG sinh
  *   `.container` (legacy đã có `.container` riêng) → tránh phá M1–M3 đã port. box-sizing

@@ -195,23 +195,12 @@ def _resolve_save_user_id(authorization: str | None, user_id: str | None) -> str
         return None
     return _authz_user_id(authorization, _valid_user_id_or_400(user_id))
 
-# Frontend tĩnh: thư mục web/ (index.html + CSS + JS) ở repo root
-# (src/ là con của root). Mount ở "/" cùng origin với API → không cần CORS, và ô
-# "API Base URL" tự điền đúng domain. Xem mount ở CUỐI file (phải đăng ký SAU mọi
-# route API để /grade, /health, /docs... được ưu tiên; static chỉ là fallback).
-_WEB_DIR = Path(__file__).resolve().parent.parent / "web"
-# Frontend React (Vite) build output. Trong giai đoạn migration được serve ở /beta
-# để dogfood song song với legacy ở "/"; sau cutover (M5) sẽ thành frontend chính.
-_DIST_DIR = _WEB_DIR / "dist"
-
-# ── Cutover M5 (gated) ─────────────────────────────────────────────────────
-# Bật SERVE_REACT_BUILD=1 để "/" phục vụ bản React (web/dist) thay legacy. MẶC ĐỊNH
-# tắt → hành vi KHÔNG đổi (legacy vanilla ở "/"). Flip production / rollback chỉ là
-# đổi 1 biến môi trường (không cần sửa code/redeploy image) — thay cho "flip _WEB_DIR"
-# thủ công trong plan. Khi bật thật, nhớ bench + verify /beta trước, và cân nhắc route
-# /legacy nếu cần giữ vanilla (asset legacy dùng path tuyệt đối nên cần build riêng).
-_SERVE_REACT = os.getenv("SERVE_REACT_BUILD", "").strip().lower() in ("1", "true", "yes", "on")
-_ROOT_DIR = _DIST_DIR if _SERVE_REACT else _WEB_DIR
+# Frontend tĩnh: build React (Vite) ở web/dist — nguồn DUY NHẤT từ sau cutover M5
+# (bản vanilla web/js + web/index.html đã gỡ; lấy lại từ git history nếu cần).
+# Sinh ra bằng `npm run build` trong frontend/ (xem stage frontend-build ở Dockerfile).
+# Mount ở "/" cùng origin với API → không cần CORS. Xem route ở CUỐI file (phải đăng
+# ký SAU mọi route API để /grade, /health, /docs... được ưu tiên; static là fallback).
+_ROOT_DIR = Path(__file__).resolve().parent.parent / "web" / "dist"
 
 
 def _resolve_config(feedback_lang: str | None) -> Config:
@@ -1484,37 +1473,16 @@ async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
 # (đăng ký trước) được ưu tiên; catch-all này chỉ bắt phần còn lại.
 #
 # Không dùng StaticFiles(html=True) nữa vì nó chỉ fallback "/" → index.html, còn
-# path "ảo" của client-side router (vd /exam/toeic/set2/q/3 — xem web/js/router.js)
-# sẽ bị 404 khi tải lại trang / mở link trực tiếp. Route này: khớp file tĩnh thật
-# (css/js/vendor/...) thì trả đúng file; path lạ thì trả index.html để JS tự dựng
-# lại đúng màn hình từ URL.
-# _ROOT_DIR = web/ (legacy, mặc định) hoặc web/dist (React) khi SERVE_REACT_BUILD bật.
+# path "ảo" của client-side router (vd /exam/toeic/set2/q/3 — React Router) sẽ bị
+# 404 khi tải lại trang / mở link trực tiếp. Route này: khớp file tĩnh thật
+# (assets/, icons/, sw.js...) thì trả đúng file; path lạ thì trả index.html để
+# React tự dựng lại đúng màn hình từ URL.
 _INDEX_HTML = _ROOT_DIR / "index.html"
 
-if not _ROOT_DIR.is_dir():  # pragma: no cover - chỉ xảy ra khi deploy thiếu thư mục
-    logger.warning("Không thấy thư mục frontend (%s) — frontend tĩnh bị tắt.", _ROOT_DIR)
-
-
-# ── Dogfood app React (Vite) ở /beta — song song legacy, ĐĂNG KÝ TRƯỚC catch-all ──
-# Build với VITE_BASE=/beta/ nên mọi asset xin dưới /beta/... Route này serve file
-# thật trong web/dist; path "ảo" của React Router (vd /beta/exam/toeic) trả index.html
-# để client dựng lại. Bị bỏ đi ở M5 khi React thành frontend chính. Không có build
-# (chưa chạy `vite build`) → 404 gợi ý, phần còn lại của app vẫn chạy.
-_DIST_INDEX = _DIST_DIR / "index.html"
-
-
-@app.get("/beta")
-@app.get("/beta/{full_path:path}")
-def beta_spa(full_path: str = "") -> FileResponse:
-    candidate = (_DIST_DIR / full_path).resolve()
-    if full_path and candidate.is_file() and candidate.is_relative_to(_DIST_DIR.resolve()):
-        return FileResponse(candidate)
-    if not _DIST_INDEX.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail="Chưa build frontend React. Chạy `VITE_BASE=/beta/ npm run build` trong frontend/.",
-        )
-    return FileResponse(_DIST_INDEX)
+if not _ROOT_DIR.is_dir():  # pragma: no cover - chỉ xảy ra khi deploy thiếu build
+    logger.warning(
+        "Không thấy build frontend (%s) — chạy `npm run build` trong frontend/.", _ROOT_DIR
+    )
 
 
 @app.get("/{full_path:path}")
@@ -1523,5 +1491,5 @@ def web_spa(full_path: str) -> FileResponse:
     if full_path and candidate.is_file() and candidate.is_relative_to(_ROOT_DIR.resolve()):
         return FileResponse(candidate)
     if not _INDEX_HTML.is_file():
-        raise HTTPException(status_code=404, detail="Frontend tĩnh không có sẵn.")
+        raise HTTPException(status_code=404, detail="Chưa có build frontend (web/dist).")
     return FileResponse(_INDEX_HTML)

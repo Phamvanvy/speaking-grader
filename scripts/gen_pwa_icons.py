@@ -1,18 +1,21 @@
-"""Generate PWA icons cho web/ (chạy 1 lần, chỉ cần Pillow lúc generate).
+"""Generate PWA icons cho frontend/public/ (chạy 1 lần, chỉ cần Pillow lúc generate).
 
 Icon placeholder: chữ "SG" trắng trên nền indigo #4f46e5 (tông accent của app).
 Khi có logo thật chỉ cần thay các file output, không cần sửa manifest/HTML.
 
+Vite copy nguyên frontend/public/ ra web/dist khi build → icon xuất hiện ở "/icons/…"
+đúng như manifest (vite.config.ts) và <link rel="icon"> khai báo.
+
 Chạy từ repo root:  python scripts/gen_pwa_icons.py
 
 Output:
-  web/icons/icon-192.png            (purpose "any", bo góc, nền trong suốt)
-  web/icons/icon-512.png            (purpose "any")
-  web/icons/icon-maskable-512.png   (purpose "maskable", full-bleed, nội dung
-                                     nằm trong safe zone ~60% giữa)
-  web/icons/apple-touch-icon.png    (180px, full-bleed — iOS tự bo góc)
-  web/icons/favicon-32.png
-  web/favicon.ico                   (16+32, tránh browser request /favicon.ico 404)
+  frontend/public/icons/icon-192.png          (purpose "any", bo góc, nền trong suốt)
+  frontend/public/icons/icon-512.png          (purpose "any")
+  frontend/public/icons/icon-maskable-512.png (purpose "maskable", full-bleed, nội
+                                               dung nằm trong safe zone ~60% giữa)
+  frontend/public/icons/apple-touch-icon.png  (180px, full-bleed — iOS tự bo góc)
+  frontend/public/icons/favicon-32.png
+  frontend/public/favicon.ico                 (16+32, tránh request /favicon.ico 404)
 """
 
 from __future__ import annotations
@@ -22,7 +25,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
-ICONS_DIR = ROOT / "web" / "icons"
+PUBLIC_DIR = ROOT / "frontend" / "public"
+ICONS_DIR = PUBLIC_DIR / "icons"
 
 BG = "#4f46e5"
 FG = "#ffffff"
@@ -88,11 +92,12 @@ def main() -> None:
     make_rounded(32).save(ICONS_DIR / "favicon-32.png")
 
     ico_base = make_fullbleed(64, box_ratio=0.46)
-    ico_base.save(ROOT / "web" / "favicon.ico", sizes=[(16, 16), (32, 32)])
+    ico_base.save(PUBLIC_DIR / "favicon.ico", sizes=[(16, 16), (32, 32)])
 
     for p in sorted(ICONS_DIR.iterdir()):
         print(f"  {p.relative_to(ROOT)}  {p.stat().st_size} bytes")
-    print(f"  web/favicon.ico  {(ROOT / 'web' / 'favicon.ico').stat().st_size} bytes")
+    ico = PUBLIC_DIR / "favicon.ico"
+    print(f"  {ico.relative_to(ROOT)}  {ico.stat().st_size} bytes")
 
 
 if __name__ == "__main__":

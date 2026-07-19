@@ -33,7 +33,8 @@ logger = logging.getLogger("toeic.tts")
 # v3: thêm noise_scale=0.0 (tất định hoàn toàn) → bỏ các WAV cache-v2 đã trúng draw
 # xấu làm phụ âm đầu (vd "store" → gần như mất /s/) bị đóng băng vĩnh viễn.
 # v4: đổi voice US lessac→amy (lessac nuốt hẳn /s/ đầu cụm s+stop; amy phát rõ) →
-# bỏ cache lessac cũ. Phải giữ khớp TTS_AUDIO_VERSION ở web/js/playback.js.
+# bỏ cache lessac cũ. Phải giữ khớp TTS_AUDIO_VERSION ở
+# frontend/src/features/grading/playback.ts.
 # v5: thêm dấu "." cuối khi text không có dấu câu kết thúc. Không có dấu câu, VITS
 # thiếu "mỏ neo" cuối phát ngôn → từ đơn bị đọc lem: "at" thành /hɛ/ ("he"), "cat"
 # mất /k/, "student" mất /s,t/ (đo bằng Whisper + wav2vec trên 16 từ; thêm "."
