@@ -5,6 +5,10 @@ import GradingTab from './features/grading/GradingTab';
 import ExamTab from './features/exam/ExamTab';
 import HistoryTab from './features/history/HistoryTab';
 import SavedTab from './features/saved/SavedTab';
+import PracticeDialog from './features/saved/PracticeDialog';
+import AddWordsDialog, { useAddWords } from './features/saved/AddWordsDialog';
+import { Toaster } from './components/ui/sonner';
+import { TooltipProvider } from './components/ui/tooltip';
 
 // 4 tab top-level (khớp switchMode legacy) map sang route thật (History API) — giữ
 // đúng path cũ để link/reload hoạt động qua catch-all SPA của FastAPI.
@@ -16,8 +20,9 @@ const TABS = [
 ];
 
 export default function App() {
+  const openAddWords = useAddWords((s) => s.setOpen);
   return (
-    <>
+    <TooltipProvider delayDuration={200}>
       <ThemeToggle />
       <a
         className="feedback-btn"
@@ -29,7 +34,13 @@ export default function App() {
       >
         💬
       </a>
-      <button className="addwords-btn" id="addwords-btn" title="Thêm từ vựng để luyện tập" aria-label="Thêm từ vựng để luyện tập">
+      <button
+        className="addwords-btn"
+        id="addwords-btn"
+        title="Thêm từ vựng để luyện tập"
+        aria-label="Thêm từ vựng để luyện tập"
+        onClick={() => openAddWords(true)}
+      >
         📚
       </button>
       <AuthWidget />
@@ -59,6 +70,13 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
-    </>
+
+      {/* Popup dùng chung (mở từ mọi tab) */}
+      <PracticeDialog />
+      <AddWordsDialog />
+
+      {/* Toast dùng chung (sonner) — review-toast + thông báo lưu từ, chấm điểm… */}
+      <Toaster position="bottom-right" richColors closeButton />
+    </TooltipProvider>
   );
 }
