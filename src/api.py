@@ -200,6 +200,9 @@ def _resolve_save_user_id(authorization: str | None, user_id: str | None) -> str
 # "API Base URL" tự điền đúng domain. Xem mount ở CUỐI file (phải đăng ký SAU mọi
 # route API để /grade, /health, /docs... được ưu tiên; static chỉ là fallback).
 _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+# Frontend React (Vite) build output. Trong giai đoạn migration được serve ở /beta
+# để dogfood song song với legacy ở "/"; sau cutover (M5) sẽ thành frontend chính.
+_DIST_DIR = _WEB_DIR / "dist"
 
 
 def _resolve_config(feedback_lang: str | None) -> Config:
@@ -1480,6 +1483,28 @@ _INDEX_HTML = _WEB_DIR / "index.html"
 
 if not _WEB_DIR.is_dir():  # pragma: no cover - chỉ xảy ra khi deploy thiếu thư mục web/
     logger.warning("Không thấy thư mục web/ (%s) — frontend tĩnh bị tắt.", _WEB_DIR)
+
+
+# ── Dogfood app React (Vite) ở /beta — song song legacy, ĐĂNG KÝ TRƯỚC catch-all ──
+# Build với VITE_BASE=/beta/ nên mọi asset xin dưới /beta/... Route này serve file
+# thật trong web/dist; path "ảo" của React Router (vd /beta/exam/toeic) trả index.html
+# để client dựng lại. Bị bỏ đi ở M5 khi React thành frontend chính. Không có build
+# (chưa chạy `vite build`) → 404 gợi ý, phần còn lại của app vẫn chạy.
+_DIST_INDEX = _DIST_DIR / "index.html"
+
+
+@app.get("/beta")
+@app.get("/beta/{full_path:path}")
+def beta_spa(full_path: str = "") -> FileResponse:
+    candidate = (_DIST_DIR / full_path).resolve()
+    if full_path and candidate.is_file() and candidate.is_relative_to(_DIST_DIR.resolve()):
+        return FileResponse(candidate)
+    if not _DIST_INDEX.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Chưa build frontend React. Chạy `VITE_BASE=/beta/ npm run build` trong frontend/.",
+        )
+    return FileResponse(_DIST_INDEX)
 
 
 @app.get("/{full_path:path}")

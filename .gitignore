@@ -10,6 +10,10 @@ outputs/tts_cache/
 __pycache__/
 *.pyc
 .venv/
+# Frontend React (Vite): deps + build output. Build sinh trong Docker build stage
+# (M5) / local `npm run build`; không commit. Nguồn ở frontend/src.
+frontend/node_modules/
+web/dist/
 venv/
 outputs/*.json
 outputs/prompt_logs/
