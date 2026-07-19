@@ -162,6 +162,11 @@ export function toBritishWord(w) {
   return { ...w, phonemes };
 }
 
+// Tam giác play vẽ bằng SVG: ký tự "▶" lệch trục và đổi hình theo font hệ điều hành.
+const PLAY_ICON =
+  '<svg class="phoneme-play__icon" viewBox="0 0 12 14" width="10" height="11" aria-hidden="true" focusable="false">' +
+  '<path d="M2 1.8 10.4 7 2 12.2Z" fill="currentColor" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+
 export function phonemeErrorsHtml(phoneme, opts: any = {}) {
   const score = phoneme?.score;
   if (!score) return '';
@@ -182,7 +187,7 @@ export function phonemeErrorsHtml(phoneme, opts: any = {}) {
       : '';
   const playBtn = (w) =>
     playback && w.start != null && w.end != null
-      ? `<button type="button" class="phoneme-play" data-start="${w.start}" data-end="${w.end}"${srcAttr} title="Nghe lại từ này" aria-label="Nghe lại từ ${escapeHtml(w.word)}">▶</button>`
+      ? `<button type="button" class="phoneme-play" data-start="${w.start}" data-end="${w.end}"${srcAttr} title="Nghe lại từ này" aria-label="Nghe lại từ ${escapeHtml(w.word)}">${PLAY_ICON}</button>`
       : '';
   const ttsBtn = (w) =>
     w.word
@@ -276,7 +281,7 @@ export function phonemeErrorsHtml(phoneme, opts: any = {}) {
   const head = dispWords.slice(0, CAP).map((w, i) => cardHtml(w, words[i])).join('');
   const rest = dispWords.slice(CAP);
   const moreCards = rest.length
-    ? `<details style="margin-top:0.3rem;"><summary style="cursor:pointer;color:#4338ca;font-size:0.85rem;">hiện ${rest.length} từ nữa</summary><div class="phoneme-words">${rest.map((w, i) => cardHtml(w, words[CAP + i])).join('')}</div></details>`
+    ? `<details class="phoneme-more"><summary class="phoneme-more__summary">hiện ${rest.length} từ nữa</summary><div class="phoneme-words">${rest.map((w, i) => cardHtml(w, words[CAP + i])).join('')}</div></details>`
     : '';
 
   const sevRank = { high: 2, medium: 1, low: 0 };
@@ -289,7 +294,8 @@ export function phonemeErrorsHtml(phoneme, opts: any = {}) {
       const pairs = bad
         .map((p) => {
           const heard = p.status === 'del' ? '∅' : escapeHtml(p.heard ?? '');
-          return `<span style="color:${sevColor(p.severity)};">${heard} → ${escapeHtml(p.symbol)}</span>`;
+          // Class thay inline color: dark mode cần màu sáng hơn, inline style không override được.
+          return `<span class="phoneme-sev phoneme-sev--${p.severity || 'low'}">${heard} → ${escapeHtml(p.symbol)}</span>`;
         })
         .join('<br>');
       const worst = bad.reduce(
@@ -301,7 +307,7 @@ export function phonemeErrorsHtml(phoneme, opts: any = {}) {
             <td>${playBtn(w)}${heardHtml(w)}</td>
             <td>${ttsBtn(w)}${ipaHtml(w)}</td>
             <td>${pairs}</td>
-            <td style="color:${sevColor(worst)};white-space:nowrap;">${sevLabel(worst)}</td>
+            <td class="phoneme-sev phoneme-sev--${worst}" style="white-space:nowrap;">${sevLabel(worst)}</td>
         </tr>`;
     })
     .join('');
@@ -340,9 +346,9 @@ export function phonemeErrorsHtml(phoneme, opts: any = {}) {
   });
   const noiseCount = skippedWordItems.length + lowItems.length;
   const noiseHtml = noiseCount
-    ? `<details style="margin-top:0.5rem;">
-            <summary style="cursor:pointer;color:#9ca3af;font-size:0.82rem;">Hidden recognizer noise (${noiseCount})</summary>
-            <div style="color:#9ca3af;font-size:0.82rem;margin-top:0.25rem;line-height:1.5;">${[...skippedWordItems, ...lowItems].join(' · ')}</div>
+    ? `<details class="phoneme-noise">
+            <summary class="phoneme-noise__summary">Âm bỏ qua do nhiễu nhận dạng <span class="phoneme-noise__count">${noiseCount}</span></summary>
+            <div class="phoneme-noise__body">${[...skippedWordItems, ...lowItems].join(' · ')}</div>
         </details>`
     : '';
 
@@ -361,8 +367,8 @@ export function phonemeErrorsHtml(phoneme, opts: any = {}) {
             <span class="accent-note">đổi sau khi chấm chỉ đổi hiển thị, không chấm lại</span>
         </div>`;
   const noiseLegend = isKo
-    ? 'Các âm nhỏ/không chắc (recognizer nuốt, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ. IPA tham chiếu đã áp biến âm chuẩn tiếng Hàn (표준 발음법: 연음, 비음화, 경음화...) — đọc đúng biến âm mới được tính đúng.'
-    : `Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Hidden recognizer noise" thay vì tô đỏ. Nuốt âm cuối khi nối từ (vd "tes(t) preparation") là nối âm bản xứ hợp lệ — không tính lỗi.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}`;
+    ? 'Các âm nhỏ/không chắc (recognizer nuốt, từ ASR nghe nhầm) được gom vào "Âm bỏ qua do nhiễu nhận dạng" thay vì tô đỏ. IPA tham chiếu đã áp biến âm chuẩn tiếng Hàn (표준 발음법: 연음, 비음화, 경음화...) — đọc đúng biến âm mới được tính đúng.'
+    : `Các âm nhỏ/không chắc (recognizer nuốt, biến thể vùng miền, từ ASR nghe nhầm) được gom vào "Âm bỏ qua do nhiễu nhận dạng" thay vì tô đỏ. Nuốt âm cuối khi nối từ (vd "tes(t) preparation") là nối âm bản xứ hợp lệ — không tính lỗi.${currentAccent === 'default' ? ' <span class="phoneme-sym--accent">/r/</span> kiểu này = biến thể giọng (Anh-Anh nuốt /r/ cuối) được chấp nhận, không tính lỗi.' : ''}`;
   const body = `
         ${accentRow}
         ${sentenceAudioHtml}

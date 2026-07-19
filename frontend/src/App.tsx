@@ -5,6 +5,7 @@ import GradingTab from './features/grading/GradingTab';
 import ExamTab from './features/exam/ExamTab';
 import HistoryTab from './features/history/HistoryTab';
 import SavedTab from './features/saved/SavedTab';
+import AccountPage from './features/account/AccountPage';
 import PracticeDialog from './features/saved/PracticeDialog';
 import AddWordsDialog, { useAddWords } from './features/saved/AddWordsDialog';
 import AuthDialog from './features/auth/AuthDialog';
@@ -68,6 +69,8 @@ export default function App() {
           <Route path="/exam/*" element={<ExamTab />} />
           <Route path="/history/*" element={<HistoryTab />} />
           <Route path="/saved/*" element={<SavedTab />} />
+          {/* Ngoài 4 tab — vào từ widget danh tính góc trên. */}
+          <Route path="/account" element={<AccountPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

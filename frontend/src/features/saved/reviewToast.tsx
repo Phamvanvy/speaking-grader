@@ -176,15 +176,22 @@ function ReviewToastCard({ words, toastId }: { words: SavedWord[]; toastId: stri
     if (!next.length) toast.dismiss(toastId);
   };
 
+  // toast.custom KHÔNG mang style mặc định của sonner (classNames.toast chỉ áp cho
+  // toast dựng sẵn) → phải tự dựng mặt card: nền, viền, bo, đổ bóng.
+  // `mt-[3.4rem]`: toast neo top-right, chừa chỗ cho .theme-toggle (top 1rem, cao 42px)
+  // để rơi ngay DƯỚI nút dark mode thay vì đè lên.
   return (
-    <div className="w-[240px] max-w-[80vw]">
-      <div className="mb-1.5 text-sm font-semibold text-foreground">📖 Ôn lại từ đã lưu</div>
-      <div className="flex flex-col gap-1">
+    <div className="mt-[3.4rem] w-[272px] max-w-[80vw] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-xl">
+      <div className="flex items-center gap-1.5 border-b bg-muted/40 px-3 py-2 text-sm font-semibold">
+        <span aria-hidden>📖</span> Ôn lại từ đã lưu
+        <span className="ml-auto text-xs font-normal text-muted-foreground">{rows.length} từ</span>
+      </div>
+      <div className="flex flex-col p-1">
         {rows.map((w: SavedWord) => (
-          <div key={w.word} className="flex items-center gap-2 text-sm">
+          <div key={w.word} className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
             <button
               type="button"
-              className="flex-1 truncate text-left font-medium text-primary hover:underline"
+              className="flex-1 truncate rounded text-left font-medium text-primary hover:underline"
               title="Bấm để luyện từ này"
               onClick={() => {
                 openPractice({ word: w.word, ipa: w.ipa ?? null, accuracy: w.accuracy ?? null, phonemes: w.phonemes || [] });
@@ -195,10 +202,20 @@ function ReviewToastCard({ words, toastId }: { words: SavedWord[]; toastId: stri
             </button>
             <span className="shrink-0 font-mono text-xs text-muted-foreground">{reviewIpa(w)}</span>
             {/* .tts-play + data-word → delegated playback handler phát mẫu qua /tts. */}
-            <button type="button" className="tts-play shrink-0 opacity-70 hover:opacity-100" data-word={w.word} title="Nghe phát âm chuẩn">
+            <button
+              type="button"
+              className="tts-play shrink-0 rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground hover:opacity-100"
+              data-word={w.word}
+              title="Nghe phát âm chuẩn"
+            >
               <Volume2 className="h-3.5 w-3.5" />
             </button>
-            <button type="button" className="shrink-0 opacity-60 hover:opacity-100" title="Dừng nhắc ôn từ này" onClick={() => muteRow(w)}>
+            <button
+              type="button"
+              className="shrink-0 rounded p-0.5 text-muted-foreground opacity-60 hover:bg-background hover:text-foreground hover:opacity-100"
+              title="Dừng nhắc ôn từ này"
+              onClick={() => muteRow(w)}
+            >
               <BellOff className="h-3.5 w-3.5" />
             </button>
           </div>
@@ -274,6 +291,14 @@ function maybeShow() {
   toastVisible = true;
   toast.custom((id) => <ReviewToastCard words={words} toastId={id} />, {
     duration: cfg.hideSec * 1000,
+    // Neo góc trên-phải (ngay dưới nút dark mode) thay vì bottom-right mặc định
+    // của Toaster — chỉ toast này đổi vị trí, các toast khác giữ nguyên.
+    position: 'top-right',
+    // Bỏ khung mặc định: `unstyled` tắt CSS riêng của sonner, còn classNames.toast của
+    // Toaster (bg/border/shadow) vẫn áp cho toast.custom → phải ghi đè !important,
+    // nếu không lớp nền ngoài cao hơn card và đè lên nút dark mode.
+    unstyled: true,
+    className: '!bg-transparent !border-0 !p-0 !shadow-none',
     onDismiss: () => {
       toastVisible = false;
     },

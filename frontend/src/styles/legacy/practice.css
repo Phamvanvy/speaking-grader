@@ -59,9 +59,13 @@ td .practice-open:hover { text-decoration: underline; color: #4338ca; }
     color: #6b7280; font-size: 1.05rem; margin: 0.2rem 0 0;
 }
 .practice-ipa .tts-play {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.9rem; height: 1.9rem; flex: none;
     border: 1px solid #e5e7eb; background: #f9fafb; cursor: pointer;
-    border-radius: 999px; padding: 0.15rem 0.5rem; font-size: 0.95rem;
+    border-radius: 999px; padding: 0; font-size: 0.9rem;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
+.practice-ipa .tts-play:active { transform: scale(0.94); }
 .practice-ipa .tts-play:hover { background: #eef2ff; border-color: #c7d2fe; }
 
 /* Định nghĩa + ví dụ (LLM, lazy) */
@@ -126,13 +130,20 @@ button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px 
 }
 .practice-rec__hint { color: #6b7280; font-size: 0.9rem; margin-bottom: 0.45rem; }
 .practice-mic {
+    display: inline-flex; align-items: center; justify-content: center;
     width: 64px; height: 64px; border-radius: 50%; border: none; cursor: pointer;
-    background: linear-gradient(135deg, #3b82f6, #2563eb); color: #fff; font-size: 1.6rem;
-    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.4);
-    transition: transform 0.1s ease;
+    /* Indigo brand (#4f46e5) thay vì xanh dương lạc tông với phần còn lại của app. */
+    background: linear-gradient(135deg, #6366f1, #4338ca); color: #fff; font-size: 1.6rem;
+    box-shadow: 0 8px 20px rgba(79, 70, 229, 0.35), 0 0 0 6px rgba(99, 102, 241, 0.12);
+    transition: transform 0.12s ease, box-shadow 0.2s ease;
 }
-.practice-mic:hover { transform: scale(1.06); }
-.practice-mic.recording { background: linear-gradient(135deg, #ef4444, #dc2626); animation: practice-pulse 1.2s infinite; }
+.practice-mic:hover { transform: scale(1.06); box-shadow: 0 10px 26px rgba(79, 70, 229, 0.45), 0 0 0 8px rgba(99, 102, 241, 0.16); }
+.practice-mic:active { transform: scale(0.97); }
+.practice-mic.recording {
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    box-shadow: 0 8px 20px rgba(220, 38, 38, 0.35);
+    animation: practice-pulse 1.2s infinite;
+}
 .practice-mic:disabled { background: #9ca3af; cursor: wait; box-shadow: none; transform: none; }
 @keyframes practice-pulse {
     0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }

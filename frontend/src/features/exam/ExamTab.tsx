@@ -210,7 +210,7 @@ export default function ExamTab() {
             <input type="checkbox" id="exam-timed" checked={s.timed} onChange={(e) => ctrl.setTimed(e.target.checked)} />
             <label htmlFor="exam-timed">Bấm giờ như thi thật (tự ghi âm theo thời lượng từng câu)</label>
           </div>
-          <button className="btn btn-primary" onClick={() => ctrl.startTest()} disabled={!s.questions.length}>
+          <button className="btn btn-primary btn-cta" onClick={() => ctrl.startTest()} disabled={!s.questions.length}>
             ▶ Bắt đầu thi
           </button>
         </div>

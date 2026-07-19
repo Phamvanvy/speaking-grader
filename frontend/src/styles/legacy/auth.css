@@ -12,7 +12,11 @@
     gap: 0.5rem;
 }
 
+/* Là <a> tới /account từ M4 → tự tắt gạch chân; icon lucide + tên căn theo trục. */
 .auth-widget .auth-user {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     background: white;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     border-radius: 999px;
@@ -21,6 +25,15 @@
     font-weight: 600;
     color: #334155;
     white-space: nowrap;
+    text-decoration: none;
+    transition: transform 0.15s, background 0.2s;
+}
+.auth-widget .auth-user:hover { transform: scale(1.05); }
+/* Email dài không được đẩy nút Đăng xuất ra khỏi màn hẹp. */
+.auth-widget .auth-user__name {
+    max-width: 11rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .auth-widget .auth-link {
@@ -83,27 +96,38 @@ body.dark .auth-modal { background: #1e293b; color: #e2e8f0; }
 .auth-modal-close:hover { color: #475569; }
 body.dark .auth-modal-close:hover { color: #e2e8f0; }
 
+/* Segmented control (2 ô trong 1 rãnh) — rõ "đang ở tab nào" hơn kiểu gạch chân,
+ * và không bị nhầm với link. */
 .auth-tabs {
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 0.8rem;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    background: #f1f5f9;
+    border-radius: 10px;
+    margin-bottom: 0.9rem;
 }
 .auth-tab {
     flex: 1;
     border: none;
     background: transparent;
-    padding: 0.5rem 0;
-    font-size: 0.95rem;
+    padding: 0.45rem 0;
+    border-radius: 8px;
+    font-size: 0.92rem;
     font-weight: 600;
-    color: #94a3b8;
+    color: #64748b;
     cursor: pointer;
-    border-bottom: 2px solid transparent;
+    transition: background 0.15s, color 0.15s;
 }
+.auth-tab:hover { color: #334155; }
 .auth-tab.active {
-    color: #2563eb;
-    border-bottom-color: #2563eb;
+    background: #fff;
+    color: #4f46e5;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
 }
-body.dark .auth-tab.active { color: #60a5fa; border-bottom-color: #60a5fa; }
+body.dark .auth-tabs { background: #1e293b; }
+body.dark .auth-tab { color: #94a3b8; }
+body.dark .auth-tab:hover { color: #e2e8f0; }
+body.dark .auth-tab.active { background: #0f172a; color: #a5b4fc; }
 
 .auth-hint {
     font-size: 0.82rem;

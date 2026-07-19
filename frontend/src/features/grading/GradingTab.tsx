@@ -449,7 +449,7 @@ export default function GradingTab() {
           <label htmlFor="no-ai">ASR only (skip AI scoring)</label>
         </div>
 
-        <button className="btn btn-primary" id="grade-btn" onClick={grade} disabled={grading}>
+        <button className="btn btn-primary btn-cta" id="grade-btn" onClick={grade} disabled={grading}>
           {grading ? (files.length > 1 ? `Grading ${files.length} files...` : 'Grading...') : 'Grade Now'}
         </button>
       </div>

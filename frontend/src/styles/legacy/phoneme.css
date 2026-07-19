@@ -3,15 +3,21 @@
 /* ── Pronunciation detail (phoneme) — ELSA-style ───────────────────────── */
 .phoneme-detail {
     margin-top: 1rem;
-    background: #fff7ed;
-    border-radius: 8px;
-    padding: 0.85rem;
+    background: linear-gradient(180deg, #fffbf5 0%, #fff7ed 100%);
+    border: 1px solid #fed7aa;
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+    box-shadow: 0 1px 3px rgba(120, 53, 15, 0.06);
 }
 
 .phoneme-detail__title {
-    font-weight: 600;
-    color: #333;
-    margin-bottom: 0.3rem;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #7c2d12;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #fed7aa;
+    letter-spacing: 0.01em;
 }
 
 /* Khi khối phoneme lồng dưới tiêu chí Pronunciation: <details> thu gọn. */
@@ -25,13 +31,19 @@ summary.phoneme-detail__title {
 }
 
 details.phoneme-detail[open] > summary.phoneme-detail__title {
-    margin-bottom: 0.3rem;
+    margin-bottom: 0.5rem;
 }
 
+/* Chú giải: nền chìm + viền trái để tách khỏi nội dung chính, đỡ "rối chữ xám". */
 .phoneme-legend {
-    color: #888;
+    color: #78716c;
     font-size: 0.8rem;
-    margin-bottom: 0.5rem;
+    line-height: 1.55;
+    margin-bottom: 0.4rem;
+    padding: 0.35rem 0.6rem;
+    background: rgba(255, 255, 255, 0.6);
+    border-left: 3px solid #fed7aa;
+    border-radius: 0 6px 6px 0;
 }
 
 /* "Nghe lại cả câu": native <audio controls> — có sẵn thanh tua nên không cần
@@ -88,28 +100,37 @@ details.phoneme-detail[open] > summary.phoneme-detail__title {
 .phoneme-words {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
+    gap: 0.45rem;
+    margin-bottom: 0.85rem;
 }
 
 .phoneme-word {
     background: #fff;
-    border: 1px solid #fed7aa;
-    border-radius: 8px;
-    padding: 0.4rem 0.6rem;
+    border: 1px solid #f3ede7;
+    border-radius: 10px;
+    padding: 0.45rem 0.65rem;
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    transition: transform 0.12s, box-shadow 0.12s, border-color 0.12s;
 }
 
+.phoneme-word:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 8px rgba(120, 53, 15, 0.12);
+}
+
+/* Từ có lỗi: viền trái đậm = quét mắt ra ngay từ nào cần sửa. */
 .phoneme-word--err {
     border-color: #fdba74;
     background: #fffbeb;
+    border-left: 3px solid #f97316;
 }
 
 .phoneme-word__text {
     font-weight: 600;
-    color: #333;
+    color: #292524;
     font-size: 0.9rem;
 }
 
@@ -159,30 +180,150 @@ details.phoneme-detail[open] > summary.phoneme-detail__title {
     cursor: help;
 }
 
+/* Bảng lỗi: bọc nền trắng + bo góc (overflow:hidden trên table không ăn nên bo
+   qua từng ô đầu/cuối hàng header). */
 .phoneme-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
     font-size: 0.88rem;
-    margin-top: 0.3rem;
+    margin-top: 0.5rem;
+    background: #fff;
+    border: 1px solid #f3ede7;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .phoneme-table th,
 .phoneme-table td {
     text-align: left;
-    padding: 0.35rem 0.5rem;
-    border-bottom: 1px solid #fed7aa;
-    vertical-align: top;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid #f5f0ea;
+    vertical-align: middle;
+}
+
+.phoneme-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.phoneme-table tbody tr:nth-child(even) {
+    background: #fffdfa;
+}
+
+.phoneme-table tbody tr:hover {
+    background: #fff7ed;
 }
 
 .phoneme-table th {
-    color: #92400e;
-    font-size: 0.8rem;
-    font-weight: 600;
+    background: #fff7ed;
+    color: #9a3412;
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid #fed7aa;
+    white-space: nowrap;
 }
 
 .phoneme-table__word {
     font-weight: 600;
-    color: #333;
+    color: #292524;
+}
+
+/* Mức độ sai — class (không inline color) để dark mode nâng được độ tương phản. */
+.phoneme-sev--high {
+    color: #b91c1c;
+    font-weight: 600;
+}
+
+.phoneme-sev--medium {
+    color: #b45309;
+}
+
+.phoneme-sev--low {
+    color: #6b7280;
+}
+
+body.dark .phoneme-sev--high {
+    color: #f87171;
+}
+
+body.dark .phoneme-sev--medium {
+    color: #fbbf24;
+}
+
+body.dark .phoneme-sev--low {
+    color: #9ca3af;
+}
+
+/* "hiện N từ nữa" — nút text nhỏ, tách khỏi dải chip phía trên. */
+.phoneme-more {
+    margin-top: 0.4rem;
+    margin-bottom: 0.6rem;
+}
+
+.phoneme-more__summary {
+    cursor: pointer;
+    display: inline-block;
+    color: #4338ca;
+    font-size: 0.82rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+}
+
+.phoneme-more__summary:hover {
+    background: rgba(67, 56, 202, 0.08);
+}
+
+/* Nhiễu nhận dạng: khối phụ, phải NHÌN RA là phụ (nền chìm, chữ nhỏ). */
+.phoneme-noise {
+    margin-top: 0.75rem;
+    border-top: 1px dashed #e7e5e4;
+    padding-top: 0.5rem;
+}
+
+.phoneme-noise__summary {
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: #a8a29e;
+    font-size: 0.8rem;
+}
+
+.phoneme-noise__summary:hover {
+    color: #78716c;
+}
+
+.phoneme-noise__count {
+    background: #f5f5f4;
+    color: #78716c;
+    border-radius: 999px;
+    padding: 0.05rem 0.4rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.phoneme-noise__body {
+    color: #a8a29e;
+    font-size: 0.8rem;
+    margin-top: 0.35rem;
+    line-height: 1.6;
+}
+
+body.dark .phoneme-noise {
+    border-top-color: #44403c;
+}
+
+body.dark .phoneme-noise__count {
+    background: #292524;
+    color: #a8a29e;
+}
+
+body.dark .phoneme-more__summary {
+    color: #a5b4fc;
 }
 
 /* Nút "nghe lại" đoạn audio của riêng từ (bảng lỗi Pronunciation detail). */
@@ -190,23 +331,49 @@ details.phoneme-detail[open] > summary.phoneme-detail__title {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.4rem;
-    height: 1.4rem;
-    margin-right: 0.4rem;
+    width: 1.55rem;
+    height: 1.55rem;
+    margin-right: 0.45rem;
     padding: 0;
     border: none;
     border-radius: 50%;
-    background: #4f46e5;
+    background: linear-gradient(135deg, #6366f1, #4f46e5);
     color: #fff;
     font-size: 0.62rem;
     line-height: 1;
     cursor: pointer;
     vertical-align: middle;
-    transition: background 0.15s;
+    box-shadow: 0 1px 3px rgba(79, 70, 229, 0.35);
+    transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
 }
 
+/* Tam giác lệch phải ~1px để "cân thị giác" trong hình tròn. */
+.phoneme-play__icon { margin-left: 1px; }
+
+/* Nút 🔊 (đọc mẫu) cùng cỡ/cùng trục với ▶ để 2 cột nhìn cân nhau. */
+.phoneme-table .tts-play {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.55rem;
+    height: 1.55rem;
+    margin-right: 0.35rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    font-size: 0.85rem;
+    line-height: 1;
+    cursor: pointer;
+    vertical-align: middle;
+    transition: background 0.15s;
+}
+.phoneme-table .tts-play:hover { background: #eef2ff; }
+body.dark .phoneme-table .tts-play:hover { background: #312e81; }
+
 .phoneme-play:hover {
-    background: #4338ca;
+    background: linear-gradient(135deg, #4f46e5, #4338ca);
+    box-shadow: 0 2px 7px rgba(79, 70, 229, 0.45);
 }
 
 .phoneme-play:active {
@@ -214,13 +381,43 @@ details.phoneme-detail[open] > summary.phoneme-detail__title {
 }
 
 body.dark .phoneme-detail {
-    background: #1c1917;
+    background: linear-gradient(180deg, #1f1b17 0%, #1c1917 100%);
+    border-color: #44403c;
+    box-shadow: none;
 }
 
-body.dark .phoneme-detail__title,
+body.dark .phoneme-detail__title {
+    color: #fdba74;
+    border-bottom-color: #44403c;
+}
+
 body.dark .phoneme-table__word,
 body.dark .phoneme-word__text {
     color: #f1f5f9;
+}
+
+body.dark .phoneme-legend {
+    background: rgba(255, 255, 255, 0.04);
+    border-left-color: #78350f;
+    color: #a8a29e;
+}
+
+body.dark .phoneme-table {
+    background: #0f172a;
+    border-color: #44403c;
+    box-shadow: none;
+}
+
+body.dark .phoneme-table tbody tr:nth-child(even) {
+    background: #131c2f;
+}
+
+body.dark .phoneme-table tbody tr:hover {
+    background: #1c1917;
+}
+
+body.dark .phoneme-word:hover {
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
 }
 
 body.dark .accent-label {
@@ -256,6 +453,7 @@ body.dark .phoneme-stress {
 
 body.dark .phoneme-table th {
     color: #fdba74;
+    background: #1c1917;
 }
 
 body.dark .phoneme-table th,

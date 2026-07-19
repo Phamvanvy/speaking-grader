@@ -10,6 +10,13 @@
 }
 .mode-tab {
     flex: 1 1 auto;
+    /* Tab là <a> (NavLink) từ M4 → phải tự tắt gạch chân + căn giữa như <button> cũ. */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    text-align: center;
+    text-decoration: none;
     padding: 0.7rem 1rem;
     border: 1px solid #d1d5db;
     background: #f3f4f6;

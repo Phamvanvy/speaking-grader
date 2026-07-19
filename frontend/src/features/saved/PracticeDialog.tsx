@@ -273,17 +273,22 @@ export default function PracticeDialog() {
             </button>
           )}
           <span className="flex-1" />
-          <div
-            className="practice-ring"
-            style={
-              {
-                ['--pct' as any]: pct ?? 0,
-                ['--ring-color' as any]: pct != null ? ringColor(pct) : undefined,
-              } as React.CSSProperties
-            }
-          >
-            <div className="practice-ring__inner">{pct != null ? `${pct}%` : '–'}</div>
-          </div>
+          {/* Chưa có điểm thì KHÔNG vẽ vòng tròn rỗng (trông như widget hỏng) — chỉ
+              hiện khi đã chấm ít nhất 1 lần. Chừa chỗ cho nút đóng của Dialog. */}
+          {pct != null && (
+            <div
+              className="practice-ring mr-7"
+              style={
+                {
+                  ['--pct' as any]: pct,
+                  ['--ring-color' as any]: ringColor(pct),
+                } as React.CSSProperties
+              }
+              title={`Độ chính xác lần chấm gần nhất: ${pct}%`}
+            >
+              <div className="practice-ring__inner">{pct}%</div>
+            </div>
+          )}
         </div>
 
         {/* IPA */}

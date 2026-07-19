@@ -34,6 +34,43 @@
     --radius: 0.5rem;
   }
 
+  /*
+   * Mini-preflight — CHỈ 2 element mà shadcn giả định đã được reset, và legacy KHÔNG
+   * hề style ở mức element (đã kiểm: legacy chỉ dùng `.exam-q-actions button`,
+   * `button.practice-chip`… tức selector class → vẫn thắng reset này).
+   *
+   * KHÔNG reset input/select/textarea/label: ExamTab + GradingTab vẫn render các
+   * element trần dựa vào base.css (`select { width:100% }`, `label { display:block }`).
+   * Chỗ nào shadcn cần thắng luật element đó thì dùng modifier `!` tại chỗ (vd `!w-20`)
+   * — utility 1 class thua selector có attribute như `input[type="number"]`.
+   */
+  /*
+   * CHỈ selector element `button` (0,0,1) — KHÔNG dùng [type='button'] như preflight
+   * gốc: attribute selector là (0,1,0), HOÀ specificity với class legacy `.practice-mic`
+   * / `.tts-play`… và đứng sau trong bundle nên THẮNG → nuốt background/color/padding
+   * của mọi nút legacy có type="button" (bug nút mic trắng bệch).
+   */
+  button {
+    background-color: transparent;
+    background-image: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    /* Giữ mặc định UA (center) chứ KHÔNG `inherit` như preflight gốc: legacy `.btn`
+     * không set text-align nên `inherit` làm chữ nút CTA dạt trái so với M1–M3. */
+    text-align: center;
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: default;
+  }
+  /* Icon lucide: không có preflight thì svg nằm trên baseline chữ → lệch trục. */
+  svg {
+    display: block;
+    vertical-align: middle;
+  }
+
   body.dark {
     --background: 222 47% 11%;
     --foreground: 210 40% 98%;
