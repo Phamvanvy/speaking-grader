@@ -125,10 +125,10 @@ button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px 
 
 /* Khu luyện tập: mic + trạng thái + nghe lại */
 .practice-rec {
-    margin-top: 1.1rem; padding-top: 0.9rem; text-align: center;
+    margin-top: 0.5rem; padding-top: 0.85rem; text-align: center;
     border-top: 1px solid #f1f5f9;
 }
-.practice-rec__hint { color: #6b7280; font-size: 0.9rem; margin-bottom: 0.45rem; }
+.practice-rec__hint { color: #6b7280; font-size: 0.9rem; margin-bottom: 0.55rem; }
 .practice-mic {
     display: inline-flex; align-items: center; justify-content: center;
     width: 64px; height: 64px; border-radius: 50%; border: none; cursor: pointer;
@@ -150,7 +150,10 @@ button.practice-chip:hover { transform: translateY(-1px); box-shadow: 0 2px 6px 
     70% { box-shadow: 0 0 0 14px rgba(220, 38, 38, 0); }
     100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
 }
-.practice-status { margin-top: 0.5rem; font-size: 0.9rem; color: #374151; min-height: 1.2em; }
+/* Không chừa sẵn 1 dòng trống khi chưa có trạng thái — đó là khoảng hở làm khối
+ * mic trông lệch xuống dưới. Có chữ mới chiếm chỗ. */
+.practice-status { margin-top: 0.5rem; font-size: 0.9rem; color: #374151; }
+.practice-status:empty { margin-top: 0; }
 .practice-status.err { color: #dc2626; }
 .practice-status.good { color: #16a34a; font-weight: 600; }
 .practice-replay {

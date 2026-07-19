@@ -122,7 +122,9 @@ export default function AddWordsDialog() {
                   spellCheck={false}
                   className={row.err ? 'border-destructive' : ''}
                 />
-                <Button type="button" variant="ghost" size="icon" onClick={() => delRow(i)} title="Xoá dòng" aria-label="Xoá dòng">
+                {/* shrink-0: không cho flex bóp nút ✕ nhỏ lại — nếu bóp thì mép phải
+                    nút "Lưu tất cả" (mr-11) sẽ lệch vài px so với ô nhập. */}
+                <Button type="button" variant="ghost" size="icon" className="shrink-0" onClick={() => delRow(i)} title="Xoá dòng" aria-label="Xoá dòng">
                   <X className="h-4 w-4" />
                 </Button>
               </div>
@@ -132,7 +134,9 @@ export default function AddWordsDialog() {
             <Plus className="h-4 w-4" /> Thêm dòng
           </Button>
           {msg.text && <div className={`text-sm ${msg.err ? 'text-destructive' : 'text-muted-foreground'}`}>{msg.text}</div>}
-          <Button type="submit" disabled={saving}>
+          {/* mr-11 = bề ngang nút ✕ (h-9 = 36px) + gap-2 (8px): mép phải nút Lưu
+              thẳng hàng đúng mép phải ô nhập thay vì nhô ra thêm 44px. */}
+          <Button type="submit" className="mr-11" disabled={saving}>
             Lưu tất cả
           </Button>
         </form>

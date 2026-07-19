@@ -159,13 +159,28 @@ export default function SavedTab() {
                 size="sm"
                 onClick={() => setRemindOpen(true)}
                 title="Cài đặt nhắc ôn từ đã lưu"
-                className="gap-1.5"
+                className={
+                  remindOn
+                    ? 'gap-1.5 border-primary/60 bg-primary/10 font-semibold text-primary shadow-sm ring-1 ring-primary/25 hover:bg-primary/15 hover:text-primary'
+                    : 'gap-1.5 text-muted-foreground'
+                }
               >
-                {remindOn ? <Bell className="h-4 w-4 text-primary" /> : <BellOff className="h-4 w-4 opacity-60" />}
+                {remindOn ? (
+                  <span className="relative flex h-4 w-4 items-center justify-center">
+                    <Bell className="h-4 w-4" />
+                    <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-primary" />
+                  </span>
+                ) : (
+                  <BellOff className="h-4 w-4 opacity-60" />
+                )}
                 Nhắc ôn
-                <span className={`text-xs font-normal ${remindOn ? 'text-primary' : 'text-muted-foreground'}`}>
-                  {remindOn ? 'Bật' : 'Tắt'}
-                </span>
+                {remindOn ? (
+                  <span className="rounded-full bg-primary px-1.5 py-0.5 text-[0.65rem] font-bold uppercase leading-none tracking-wide text-primary-foreground">
+                    Bật
+                  </span>
+                ) : (
+                  <span className="text-xs font-normal text-muted-foreground">Tắt</span>
+                )}
               </Button>
             </div>
           }

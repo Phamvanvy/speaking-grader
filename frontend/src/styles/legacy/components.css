@@ -103,11 +103,14 @@
     text-align: center;
 }
 
-/* CTA chính (Grade Now, Bắt đầu thi): rộng theo nội dung thay vì kéo hết khung —
+/* CTA chính (Grade Now, Bắt đầu thi): rộng theo nội dung và CĂN GIỮA khung —
  * trên màn hẹp mới quay lại full-width cho dễ bấm. */
 .btn-cta {
+    display: block;
     width: auto;
     min-width: 13rem;
+    margin-left: auto;
+    margin-right: auto;
     padding-left: 2rem;
     padding-right: 2rem;
 }
