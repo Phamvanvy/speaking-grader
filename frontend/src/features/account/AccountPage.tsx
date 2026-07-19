@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import { CircleUserRound, KeyRound, LogOut, ShieldCheck, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -138,34 +139,57 @@ export default function AccountPage() {
         </CardContent>
       </Card>
 
-      {/* Quyền riêng tư */}
+      {/* Bảo mật & quyền riêng tư */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">🔒 Quyền riêng tư</CardTitle>
+          <CardTitle className="text-base">🔒 Bảo mật & quyền riêng tư</CardTitle>
         </CardHeader>
-        <CardContent className="flex items-center justify-between gap-4">
-          <Label htmlFor="acc-save-history" className="font-normal leading-relaxed">
-            Lưu lịch sử chấm bài trên máy chủ
-            <span className="block text-xs text-muted-foreground">
-              Tắt thì bài chấm mới không được gửi kèm danh tính và không xuất hiện ở tab Lịch sử.
-            </span>
-          </Label>
-          <Switch id="acc-save-history" checked={saveHistory} onCheckedChange={toggleHistory} />
+        <CardContent className="flex flex-col divide-y divide-border">
+          <div className="flex items-center justify-between gap-4 pb-4">
+            <Label htmlFor="acc-save-history" className="font-normal leading-relaxed">
+              Lưu lịch sử chấm bài trên máy chủ
+              <span className="block text-xs text-muted-foreground">
+                Tắt thì bài chấm mới không được gửi kèm danh tính và không xuất hiện ở tab Lịch sử.
+              </span>
+            </Label>
+            <Switch id="acc-save-history" checked={saveHistory} onCheckedChange={toggleHistory} />
+          </div>
+          {/* Đổi mật khẩu — chỉ có nghĩa với tài khoản username/password */}
+          {isLoggedIn && (
+            <div className="flex items-center justify-between gap-4 pt-4">
+              <div className="text-sm leading-relaxed">
+                Mật khẩu
+                <span className="block text-xs text-muted-foreground">
+                  Đổi mật khẩu đăng nhập của tài khoản này.
+                </span>
+              </div>
+              <ChangePasswordDialog />
+            </div>
+          )}
         </CardContent>
       </Card>
-
-      {/* Đổi mật khẩu — chỉ có nghĩa với tài khoản username/password */}
-      {isLoggedIn && <ChangePasswordCard />}
     </div>
   );
 }
 
-function ChangePasswordCard() {
+function ChangePasswordDialog() {
+  const [open, setOpen] = useState(false);
   const [oldPw, setOldPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Đóng modal thì xoá sạch mật khẩu đã gõ (đừng để dở dang khi mở lại).
+  function onOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      setOldPw('');
+      setNewPw('');
+      setConfirmPw('');
+      setError('');
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -186,9 +210,7 @@ function ChangePasswordCard() {
         setError(data.detail || 'Đổi mật khẩu thất bại.');
         return;
       }
-      setOldPw('');
-      setNewPw('');
-      setConfirmPw('');
+      onOpenChange(false);
       toast.success('Đã đổi mật khẩu.');
     } catch {
       setError('Không kết nối được máy chủ.');
@@ -198,15 +220,21 @@ function ChangePasswordCard() {
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">
-          <KeyRound size={16} className="inline align-[-3px] mr-2" />
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <KeyRound size={16} className="mr-2" />
           Đổi mật khẩu
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <form onSubmit={submit} className="flex max-w-sm flex-col gap-3">
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>
+            <KeyRound size={16} className="inline align-[-3px] mr-2" />
+            Đổi mật khẩu
+          </DialogTitle>
+        </DialogHeader>
+        <form onSubmit={submit} className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="acc-old-pw">Mật khẩu hiện tại</Label>
             <Input
@@ -243,7 +271,7 @@ function ChangePasswordCard() {
             {busy ? 'Đang đổi…' : 'Đổi mật khẩu'}
           </Button>
         </form>
-      </CardContent>
-    </Card>
+      </DialogContent>
+    </Dialog>
   );
 }

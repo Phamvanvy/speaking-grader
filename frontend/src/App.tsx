@@ -2,6 +2,7 @@ import { NavLink, Routes, Route, Navigate } from 'react-router-dom';
 import ThemeToggle from './components/ThemeToggle';
 import AuthWidget from './components/AuthWidget';
 import GradingTab from './features/grading/GradingTab';
+import HomePage from './features/home/HomePage';
 import ExamTab from './features/exam/ExamTab';
 import HistoryTab from './features/history/HistoryTab';
 import SavedTab from './features/saved/SavedTab';
@@ -65,6 +66,9 @@ export default function App() {
 
         <Routes>
           <Route path="/" element={<GradingTab />} />
+          {/* Landing mới — cố ý KHÔNG chiếm '/' khi Grading còn đang cutover.
+              Sau cutover: đổi element của '/' sang <HomePage /> và cho Grading path riêng. */}
+          <Route path="/home" element={<HomePage />} />
           {/* Router legacy dùng path lồng như /exam/toeic/set2/q/3 — bắt hết về ExamTab. */}
           <Route path="/exam/*" element={<ExamTab />} />
           <Route path="/history/*" element={<HistoryTab />} />
