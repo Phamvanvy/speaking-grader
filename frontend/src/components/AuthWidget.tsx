@@ -1,23 +1,38 @@
-import { useAuthStore } from '../store/auth';
+// Widget danh tính góc trên — port renderAuthWidget/verifyAuthOnLoad (web/js/auth.js).
+// Modal đầy đủ (username/password + Google) nằm ở features/auth/AuthDialog.
 
-// M0: widget tối giản — hiện trạng thái đăng nhập + logout. Modal đăng nhập/đăng ký
-// đầy đủ (username/password + Google) sẽ port từ web/js/auth.js ở M4 (tab Saved cần
-// đồng bộ tài khoản). Giữ id/khung để CSS auth.css áp đúng.
+import { useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAuthStore } from '../store/auth';
+import { useAuthDialog } from '../features/auth/AuthDialog';
+import { doLogout, verifyAuthOnLoad } from '../features/auth/authActions';
+
 export default function AuthWidget() {
-  const { auth, isLoggedIn, logout } = useAuthStore();
+  const auth = useAuthStore((s) => s.auth);
+  const isLoggedIn = useAuthStore((s) => s.isLoggedIn);
+  const openDialog = useAuthDialog((s) => s.openDialog);
+  const qc = useQueryClient();
+
+  // Khôi phục phiên khi mở lại trang (token hết hạn → dọn auth cục bộ).
+  useEffect(() => {
+    verifyAuthOnLoad(qc);
+  }, [qc]);
+
   return (
     <div className="auth-widget" id="auth-widget">
       {isLoggedIn ? (
         <>
-          <span className="auth-user">👤 {auth?.username || auth?.user_id?.slice(0, 8)}</span>
-          <button className="btn btn-secondary btn-inline" onClick={logout}>
+          <span className="auth-user" title="Đã đăng nhập — lịch sử đồng bộ đa thiết bị">
+            👤 {auth?.username || auth?.user_id?.slice(0, 8)}
+          </span>
+          <button className="auth-link" onClick={() => doLogout(qc)}>
             Đăng xuất
           </button>
         </>
       ) : (
-        <span className="auth-anon" title="Đang dùng ẩn danh (lịch sử lưu theo trình duyệt này)">
-          Ẩn danh
-        </span>
+        <button className="auth-link auth-login-cta" onClick={() => openDialog('login')}>
+          🔐 Đăng nhập
+        </button>
       )}
     </div>
   );

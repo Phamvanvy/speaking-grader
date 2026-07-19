@@ -22,6 +22,13 @@ logs/
 # build context khi file .onnx nằm trong repo.
 voices/
 
+# Frontend React: node_modules là native theo nền (esbuild/rollup) — cài lại bằng
+# npm ci trong stage frontend-build; web/dist + frontend/dist build lại, không copy
+# bản cục bộ (tránh đè node_modules Windows vào image Linux → hỏng build).
+frontend/node_modules/
+frontend/dist/
+web/dist/
+
 # Tài liệu/khác không cần cho runtime.
 docs/
 tests/

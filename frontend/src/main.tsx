@@ -50,10 +50,15 @@ installSavedInterop();
 useSavedWords.getState().refresh().catch(() => { /* server tắt → coi như chưa lưu gì */ });
 installReviewToast();
 
-// Test-hook TẠM (migration): phơi renderer interop ra window để verify bằng payload
-// tổng hợp mà không cần backend grade (chậm). Gỡ ở M5 cutover.
-import { scoresBreakdownHtml, phonemeErrorsHtml, setRenderAccent } from './legacy/render';
-(window as any).__sgRender = { scoresBreakdownHtml, phonemeErrorsHtml, setRenderAccent };
+// M5 cutover — dọn cache của SW legacy (web/sw.js, CACHE_NAME "sg-shell-v*"). SW mới
+// (Workbox, cùng URL /sw.js) đã thay thế SW cũ, nhưng cleanupOutdatedCaches chỉ dọn
+// precache của chính Workbox nên cache legacy còn lại sẽ chiếm chỗ vô ích.
+if ('caches' in window) {
+  caches
+    .keys()
+    .then((keys) => Promise.all(keys.filter((k) => k.startsWith('sg-shell-')).map((k) => caches.delete(k))))
+    .catch(() => { /* storage bị chặn → bỏ qua */ });
+}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

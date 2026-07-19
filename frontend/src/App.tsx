@@ -7,6 +7,7 @@ import HistoryTab from './features/history/HistoryTab';
 import SavedTab from './features/saved/SavedTab';
 import PracticeDialog from './features/saved/PracticeDialog';
 import AddWordsDialog, { useAddWords } from './features/saved/AddWordsDialog';
+import AuthDialog from './features/auth/AuthDialog';
 import { Toaster } from './components/ui/sonner';
 import { TooltipProvider } from './components/ui/tooltip';
 
@@ -74,6 +75,7 @@ export default function App() {
       {/* Popup dùng chung (mở từ mọi tab) */}
       <PracticeDialog />
       <AddWordsDialog />
+      <AuthDialog />
 
       {/* Toast dùng chung (sonner) — review-toast + thông báo lưu từ, chấm điểm… */}
       <Toaster position="bottom-right" richColors closeButton />

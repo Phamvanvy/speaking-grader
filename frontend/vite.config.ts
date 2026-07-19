@@ -6,10 +6,12 @@ import { fileURLToPath, URL } from 'node:url';
 // Build ra web/dist (FastAPI serve từ đó — xem src/api.py). base '/' vì app chạy
 // ở gốc domain sau cutover; giai đoạn dogfood serve qua /beta (route riêng ở FastAPI).
 //
-// PWA: SW BỊ TẮT trong suốt migration (injectRegister:false) để không tranh chấp
-// cache với web/sw.js legacy đang chạy ở scope '/'. Khi cutover (M5) mới bật lại
-// (injectRegister:'auto', registerType:'autoUpdate'). Xem plan "Service Worker
-// trong giai đoạn coexistence".
+// PWA (M5 — cutover): SW Workbox ĐÃ BẬT. Nó build ra ĐÚNG /sw.js — cùng URL với
+// web/sw.js legacy — nên lần load đầu sau cutover trình duyệt coi là bản cập nhật
+// của SW cũ và thay thế tại chỗ: không có 2 SW tranh scope '/'. Cache legacy
+// ("sg-shell-*") do app xoá lúc khởi động (xem main.tsx), vì cleanupOutdatedCaches
+// chỉ dọn precache của chính Workbox. Xem plan "Service Worker trong giai đoạn
+// coexistence".
 // base: '/' sau cutover; trong migration build dogfood với VITE_BASE=/beta/ để asset
 // + router chạy dưới /beta (FastAPI serve web/dist ở đó, legacy vẫn ở '/').
 const BASE = process.env.VITE_BASE ?? '/';
@@ -19,10 +21,10 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      injectRegister: false, // KHÔNG tự chèn <script> đăng ký SW (migration)
+      injectRegister: 'auto', // chèn đăng ký SW vào index.html (cutover)
       selfDestroying: false,
       registerType: 'autoUpdate',
-      devOptions: { enabled: false }, // dev: không SW
+      devOptions: { enabled: false }, // dev: vẫn không SW (tránh cache bản dev)
       manifest: {
         name: 'Speaking Grader',
         short_name: 'Speaking Grader',
@@ -39,6 +41,7 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
+        cleanupOutdatedCaches: true,
         // Không cache các route API (giữ đúng hành vi legacy sw.js).
         navigateFallbackDenylist: [
           /^\/(grade|grade-batch|exam|auth|history|words|word-info|tts|settings|suggest|health|docs|openapi)/,

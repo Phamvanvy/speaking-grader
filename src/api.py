@@ -204,6 +204,15 @@ _WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 # để dogfood song song với legacy ở "/"; sau cutover (M5) sẽ thành frontend chính.
 _DIST_DIR = _WEB_DIR / "dist"
 
+# ── Cutover M5 (gated) ─────────────────────────────────────────────────────
+# Bật SERVE_REACT_BUILD=1 để "/" phục vụ bản React (web/dist) thay legacy. MẶC ĐỊNH
+# tắt → hành vi KHÔNG đổi (legacy vanilla ở "/"). Flip production / rollback chỉ là
+# đổi 1 biến môi trường (không cần sửa code/redeploy image) — thay cho "flip _WEB_DIR"
+# thủ công trong plan. Khi bật thật, nhớ bench + verify /beta trước, và cân nhắc route
+# /legacy nếu cần giữ vanilla (asset legacy dùng path tuyệt đối nên cần build riêng).
+_SERVE_REACT = os.getenv("SERVE_REACT_BUILD", "").strip().lower() in ("1", "true", "yes", "on")
+_ROOT_DIR = _DIST_DIR if _SERVE_REACT else _WEB_DIR
+
 
 def _resolve_config(feedback_lang: str | None) -> Config:
     """Trả về Config (ghi đè feedback_lang theo request nếu có)."""
@@ -1479,10 +1488,11 @@ async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
 # sẽ bị 404 khi tải lại trang / mở link trực tiếp. Route này: khớp file tĩnh thật
 # (css/js/vendor/...) thì trả đúng file; path lạ thì trả index.html để JS tự dựng
 # lại đúng màn hình từ URL.
-_INDEX_HTML = _WEB_DIR / "index.html"
+# _ROOT_DIR = web/ (legacy, mặc định) hoặc web/dist (React) khi SERVE_REACT_BUILD bật.
+_INDEX_HTML = _ROOT_DIR / "index.html"
 
-if not _WEB_DIR.is_dir():  # pragma: no cover - chỉ xảy ra khi deploy thiếu thư mục web/
-    logger.warning("Không thấy thư mục web/ (%s) — frontend tĩnh bị tắt.", _WEB_DIR)
+if not _ROOT_DIR.is_dir():  # pragma: no cover - chỉ xảy ra khi deploy thiếu thư mục
+    logger.warning("Không thấy thư mục frontend (%s) — frontend tĩnh bị tắt.", _ROOT_DIR)
 
 
 # ── Dogfood app React (Vite) ở /beta — song song legacy, ĐĂNG KÝ TRƯỚC catch-all ──
@@ -1509,9 +1519,9 @@ def beta_spa(full_path: str = "") -> FileResponse:
 
 @app.get("/{full_path:path}")
 def web_spa(full_path: str) -> FileResponse:
-    candidate = (_WEB_DIR / full_path).resolve()
-    if full_path and candidate.is_file() and candidate.is_relative_to(_WEB_DIR.resolve()):
+    candidate = (_ROOT_DIR / full_path).resolve()
+    if full_path and candidate.is_file() and candidate.is_relative_to(_ROOT_DIR.resolve()):
         return FileResponse(candidate)
     if not _INDEX_HTML.is_file():
-        raise HTTPException(status_code=404, detail="Frontend tĩnh (web/) không có sẵn.")
+        raise HTTPException(status_code=404, detail="Frontend tĩnh không có sẵn.")
     return FileResponse(_INDEX_HTML)
