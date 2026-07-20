@@ -1469,7 +1469,11 @@ async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
     # flag tắt). Cache word_info (định nghĩa LLM) và cache IPA là 2 kho RIÊNG nên
     # đính IPA cho CẢ nhánh cache-hit lẫn nhánh sinh mới. Lỗi IPA không chặn định nghĩa.
     try:
-        ipa_fields = (await resolve_ipa(w, _BASE_CONFIG)).to_dict()
+        # wait_cambridge: chờ Cambridge đồng bộ để popup có cả uk_ipa/us_ipa NGAY lần
+        # mở đầu (đánh đổi ~vài trăm ms cho từ mới; từ đã cache = tức thì).
+        ipa_fields = (
+            await resolve_ipa(w, _BASE_CONFIG, wait_cambridge=True)
+        ).to_dict()
     except Exception:  # noqa: BLE001
         logger.exception("Lỗi tra IPA cho word-info %r (bỏ qua)", w)
         ipa_fields = {}

@@ -85,6 +85,8 @@ export default function PracticeDialog() {
         setWordInfo(wordInfoCache.get(key));
       } else {
         setWordInfo(undefined); // loading
+        // /word-info chờ Cambridge đồng bộ (wait_cambridge) nên response đầu đã có CẢ
+        // uk_ipa lẫn us_ipa → popup hiện cả hai ngay, không cần refetch/upgrade.
         apiFetch(`/word-info?word=${encodeURIComponent(key)}`)
           .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
           .then((info: WordInfo) => {
@@ -259,7 +261,12 @@ export default function PracticeDialog() {
   // US: ưu tiên từ điển (Cambridge us_ipa) → CMUdict phonemes → data.ipa.
   // UK: ưu tiên từ điển (uk_ipa) → suy từ phonemes qua toBritishWord (như chip lỗi) khi
   //     nguồn là CMUdict (uk_ipa thường trống). Rỗng cả hai → không hiện hàng đó.
+  // Phiên âm theo từng accent — CHỈ hiện hàng có dữ liệu (không bịa/không mượn chéo).
+  // US: từ điển us_ipa → suy từ phonemes → data.ipa.
   const usIpa = (wordInfo?.us_ipa || ipaStressString(phonemes) || data.ipa || '').trim();
+  // UK: từ điển uk_ipa → suy từ phonemes (toBritishWord). Rỗng (mở từ 1 từ đã lưu,
+  // chưa có phonemes + nguồn CMUdict chưa có uk_ipa) → ẩn hàng UK. Cambridge warm nền
+  // sau đó điền uk_ipa → lần mở lại (cache đã đổi) hiện cả hai.
   const ukIpa = (
     wordInfo?.uk_ipa ||
     (phonemes.length ? ipaStressString(toBritishWord({ phonemes }).phonemes) : '') ||

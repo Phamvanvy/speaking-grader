@@ -222,11 +222,18 @@ async def _get_lock(word: str) -> asyncio.Lock:
 # ── API công khai ────────────────────────────────────────────────────────
 
 
-async def resolve_ipa(word: str, cfg: Config) -> IPAResult:
+async def resolve_ipa(
+    word: str, cfg: Config, *, wait_cambridge: bool = False
+) -> IPAResult:
     """Tra IPA đầy đủ (uk/us + audio) cho 1 từ — dùng ở endpoint async (/word-info).
 
     Master flag tắt → degrade word_ipa_display. Cụm nhiều từ → chỉ ghép display
     theo token (không Cambridge/audio). Đồng thời-an toàn qua khoá per-word.
+
+    `wait_cambridge`: khi CMUdict-found tươi (chỉ có us_ipa), CHỜ Cambridge ĐỒNG BỘ
+    để có luôn uk_ipa ngay lần gọi đầu (thay vì warm nền rồi phải gọi lại). Dùng cho
+    /word-info: popup hiện cả UK/US ngay lần mở đầu. Đánh đổi ~vài trăm ms cho TỪ MỚI
+    (từ đã cache Cambridge = tức thì). KHÔNG áp cụm từ (Cambridge demand-driven 1 từ).
     """
     word = _normalize(word)
     if not word:
@@ -240,6 +247,11 @@ async def resolve_ipa(word: str, cfg: Config) -> IPAResult:
     lock = await _get_lock(word)
     async with lock:
         result, needs_warm = await run_in_threadpool(_resolve_core, word, cfg)
+        if needs_warm and wait_cambridge:
+            # Nâng cache lên Cambridge NGAY (đồng bộ) rồi đọc lại → có uk_ipa. Trong
+            # cùng lock để 2 request cùng từ không fetch đôi (dogpile).
+            await run_in_threadpool(_warm_sync, word, cfg)
+            result, needs_warm = await run_in_threadpool(_resolve_core, word, cfg)
     if needs_warm:
         asyncio.create_task(_warm(word, cfg))
     return result
