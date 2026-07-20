@@ -276,6 +276,28 @@ class Config:
     # Từ đã lưu để luyện tập (per-user) + cache định nghĩa LLM — DB file riêng
     # (không đụng schema versioning của history.db). Xem src/words.py.
     words_db_path: str = "data/words.db"
+    # ── IPA lookup cache (Cambridge-augmented, on-demand) ────────────────
+    # Dịch vụ tra IPA có cache SQLite bền: cascade cache → CMUdict → Cambridge
+    # → eSpeak (xem src/ipa_resolve.py). MASTER FLAG mặc định TẮT: khi tắt,
+    # resolve_ipa() rơi về đúng word_ipa_display() cũ (bit-for-bit, không mạng,
+    # không DB) nên không có regression. Qua TOEIC_IPA_CACHE_ENABLED.
+    ipa_cache_enabled: bool = False
+    # Cho phép fetch Cambridge Dictionary (nguồn IPA/audio người bản xứ). Tắt →
+    # cascade chỉ dùng cache + CMUdict + eSpeak (không gọi mạng). Chỉ có tác dụng
+    # khi ipa_cache_enabled bật. Qua TOEIC_IPA_CAMBRIDGE_ENABLED.
+    ipa_cambridge_enabled: bool = False
+    # DB file RIÊNG cho cache IPA (không đụng schema versioning của words.db).
+    # Docker nên trỏ vào subtree đã mount để sống qua rebuild. Qua TOEIC_IPA_DB_PATH.
+    ipa_db_path: str = "data/ipa_cache.db"
+    # Timeout mỗi request Cambridge (giây). Qua TOEIC_IPA_FETCH_TIMEOUT.
+    ipa_fetch_timeout_sec: float = 10.0
+    # Số lần thử lại tối đa khi fetch lỗi tạm thời (429/5xx/timeout), backoff
+    # luỹ thừa base×2^n. Qua TOEIC_IPA_MAX_RETRIES / TOEIC_IPA_BACKOFF_BASE.
+    ipa_max_retries: int = 3
+    ipa_backoff_base_sec: float = 1.0
+    # Trần số request Cambridge ĐỒNG THỜI trên toàn tiến trình (lịch sự với dịch
+    # vụ ngoài, giống admission control). Qua TOEIC_IPA_MAX_CONCURRENCY.
+    ipa_max_concurrency: int = 2
     # Tài khoản đăng nhập (users + sessions) — DB file RIÊNG. QUAN TRỌNG: trong
     # Docker phải trỏ vào subtree đã mount (data/history/) để tài khoản sống qua
     # rebuild; xem docker-compose.yml (TOEIC_AUTH_DB_PATH). Xem src/auth.py.
@@ -594,6 +616,25 @@ def load_config() -> Config:
         ),
         words_db_path=(
             os.getenv("TOEIC_WORDS_DB_PATH", "data/words.db") or "data/words.db"
+        ),
+        ipa_cache_enabled=(
+            os.getenv("TOEIC_IPA_CACHE_ENABLED", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        ipa_cambridge_enabled=(
+            os.getenv("TOEIC_IPA_CAMBRIDGE_ENABLED", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        ipa_db_path=(
+            os.getenv("TOEIC_IPA_DB_PATH", "data/ipa_cache.db") or "data/ipa_cache.db"
+        ),
+        ipa_fetch_timeout_sec=float(
+            os.getenv("TOEIC_IPA_FETCH_TIMEOUT", "10") or "10"
+        ),
+        ipa_max_retries=int(os.getenv("TOEIC_IPA_MAX_RETRIES", "3") or "3"),
+        ipa_backoff_base_sec=float(
+            os.getenv("TOEIC_IPA_BACKOFF_BASE", "1") or "1"
+        ),
+        ipa_max_concurrency=int(
+            os.getenv("TOEIC_IPA_MAX_CONCURRENCY", "2") or "2"
         ),
         auth_db_path=(
             os.getenv("TOEIC_AUTH_DB_PATH", "data/auth.db") or "data/auth.db"

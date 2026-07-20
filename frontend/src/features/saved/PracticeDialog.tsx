@@ -21,6 +21,10 @@ interface WordInfo {
   meaning?: string;
   definition_en?: string;
   example_en?: string;
+  // Phiên âm UK/US từ /word-info (cascade cache→CMUdict→Cambridge→eSpeak). Chỉ có
+  // khi bật TOEIC_IPA_CACHE_ENABLED; uk_ipa thường chỉ có khi nguồn là Cambridge.
+  uk_ipa?: string;
+  us_ipa?: string;
 }
 
 // % chính xác: (ok + low-severity) / non-skipped — khớp ngưỡng isSignificant render.js.
@@ -298,6 +302,14 @@ export default function PracticeDialog() {
             🔊
           </button>
         </div>
+
+        {/* Phiên âm UK/US theo từ điển (Cambridge) — chỉ hiện khi có, bổ sung cho IPA trên */}
+        {wordInfo && (wordInfo.uk_ipa || wordInfo.us_ipa) && (
+          <div className="flex gap-4 text-sm opacity-70 -mt-1">
+            {wordInfo.uk_ipa && <span>UK&nbsp;/{wordInfo.uk_ipa}/</span>}
+            {wordInfo.us_ipa && <span>US&nbsp;/{wordInfo.us_ipa}/</span>}
+          </div>
+        )}
 
         {/* Định nghĩa + ví dụ */}
         <div className="practice-info">

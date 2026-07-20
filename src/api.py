@@ -46,7 +46,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from . import auth, history, word_suggest, words
-from .phoneme.ipa import word_ipa_display
+from .ipa_resolve import resolve_ipa, resolve_ipa_display
 from .admission import admission_slot, admission_stats
 from .config import Config, load_config
 from .core import grade_response
@@ -1364,7 +1364,9 @@ def words_upsert(
         try:
             # Cụm nhiều từ ('borrow a book'): tra IPA từng từ rồi ghép bằng khoảng
             # trắng; từ nào không tra được thì bỏ qua từ đó (hiển thị phần còn lại).
-            ipa = " ".join(filter(None, (word_ipa_display(t) for t in w.split()))) or None
+            # resolve_ipa_display: cascade cache→CMUdict→Cambridge→eSpeak khi bật
+            # (TOEIC_IPA_CACHE_ENABLED); tắt → đúng word_ipa_display cũ (bit-for-bit).
+            ipa = resolve_ipa_display(w, _BASE_CONFIG) or None
         except Exception:  # noqa: BLE001 - thiếu IPA không được chặn việc lưu từ
             logger.exception("Lỗi tra IPA cho từ %r (bỏ qua)", w)
             ipa = None
@@ -1448,9 +1450,17 @@ async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
     w = _valid_word_or_400(word)
     config = _resolve_config(lang)
     lang_key = (config.feedback_lang or "vi").strip().lower()
+    # Phiên âm UK/US (cascade cache→CMUdict→Cambridge→eSpeak; degrade an toàn khi
+    # flag tắt). Cache word_info (định nghĩa LLM) và cache IPA là 2 kho RIÊNG nên
+    # đính IPA cho CẢ nhánh cache-hit lẫn nhánh sinh mới. Lỗi IPA không chặn định nghĩa.
+    try:
+        ipa_fields = (await resolve_ipa(w, _BASE_CONFIG)).to_dict()
+    except Exception:  # noqa: BLE001
+        logger.exception("Lỗi tra IPA cho word-info %r (bỏ qua)", w)
+        ipa_fields = {}
     cached = words.get_word_info(_BASE_CONFIG, w, lang_key)
     if cached:
-        return {**cached, "cached": True}
+        return {**cached, **ipa_fields, "cached": True}
     try:
         info = await run_in_threadpool(_gen_word_info, config, w, lang_key)
     except Exception as e:  # noqa: BLE001
@@ -1464,7 +1474,8 @@ async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
         logger.exception("Lỗi ghi cache word_info (bỏ qua)")
     return {
         "word": w, "lang": lang_key, "definition_en": info.definition_en,
-        "example_en": info.example_en, "meaning": info.meaning, "cached": False,
+        "example_en": info.example_en, "meaning": info.meaning,
+        **ipa_fields, "cached": False,
     }
 
 
