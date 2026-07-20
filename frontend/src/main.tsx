@@ -17,6 +17,9 @@ import './styles/legacy/history.css';
 import './styles/legacy/practice.css';
 import './styles/legacy/auth.css';
 
+// Form chấm bài lẻ (luồng 3 bước) — sau legacy để override .card/.form-group.
+import './styles/grading.css';
+
 // Tailwind + shadcn tokens SAU cùng — layer utility/component nằm trên cascade legacy.
 // preflight tắt (tailwind.config.js) nên KHÔNG reset element M1–M3.
 import './styles/tailwind.css';

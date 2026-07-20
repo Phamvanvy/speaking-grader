@@ -1,0 +1,224 @@
+/* Form chấm bài lẻ (/grade) — luồng 3 bước cho người mới.
+   Nạp SAU legacy: dùng lại .card/.form-group/.file-upload, chỉ thêm khung bước,
+   badge "bắt buộc", và khối tuỳ chọn nâng cao. */
+
+.gform-sub {
+    margin: -1rem 0 1.5rem;
+    color: #6b7280;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+/* ── Một bước ────────────────────────────────────────────────────────── */
+.gstep {
+    border-top: 1px solid #eef0f4;
+    padding-top: 1.25rem;
+    margin-top: 1.25rem;
+}
+
+.gstep:first-of-type {
+    border-top: none;
+    padding-top: 0;
+    margin-top: 0;
+}
+
+.gstep__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.9rem;
+}
+
+.gstep__num {
+    flex: none;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #e5e7eb;
+    color: #4b5563;
+    font-size: 0.85rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, color 0.2s;
+}
+
+.gstep.is-done .gstep__num {
+    background: #22c55e;
+    color: #fff;
+}
+
+.gstep__title {
+    color: #1f2937;
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0.15rem 0 0;
+}
+
+.gstep__hint {
+    margin: 0.25rem 0 0;
+    color: #6b7280;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+/* Ô nhập cuối trong một bước không cần margin dưới (bước đã có padding riêng). */
+.gstep__body > .form-group:last-child {
+    margin-bottom: 0;
+}
+
+/* ── Badge bắt buộc / tuỳ chọn ───────────────────────────────────────── */
+.gbadge {
+    display: inline-block;
+    margin-left: 0.45rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    vertical-align: middle;
+}
+
+.gbadge--req {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.gbadge--opt {
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+/* ── Khối đề bài gộp khi để "Tự nhận dạng" ───────────────────────────── */
+.gcollapse {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    background: #fafafa;
+}
+
+.gcollapse > summary {
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #4b5563;
+    list-style: none;
+}
+
+.gcollapse > summary::-webkit-details-marker {
+    display: none;
+}
+
+.gcollapse > summary::before {
+    content: '▸ ';
+    color: #9ca3af;
+}
+
+.gcollapse[open] > summary::before {
+    content: '▾ ';
+}
+
+.gcollapse[open] > summary {
+    margin-bottom: 1rem;
+}
+
+.gcollapse .form-group:last-child {
+    margin-bottom: 0;
+}
+
+/* ── Tuỳ chọn nâng cao ───────────────────────────────────────────────── */
+.gadvanced {
+    margin-top: 1.5rem;
+}
+
+/* ── Thanh hành động cuối form ───────────────────────────────────────── */
+.gsubmit {
+    margin-top: 1.5rem;
+    text-align: center;
+}
+
+.gsubmit__hint {
+    margin-top: 0.6rem;
+    font-size: 0.85rem;
+    color: #6b7280;
+}
+
+.gnotice {
+    margin: 1.25rem 0 0;
+    padding: 0.7rem 0.9rem;
+    border-radius: 8px;
+    border-left: 3px solid #f59e0b;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+/* ── Danh sách file: nút xoá từng file ───────────────────────────────── */
+.gfile-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.gfile-remove {
+    flex: none;
+    background: none;
+    border: none;
+    color: #dc2626;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.15rem 0.35rem;
+    border-radius: 4px;
+}
+
+.gfile-remove:hover {
+    background: rgba(220, 38, 38, 0.12);
+}
+
+/* ── Dark ────────────────────────────────────────────────────────────── */
+body.dark .gform-sub,
+body.dark .gstep__hint,
+body.dark .gsubmit__hint {
+    color: #94a3b8;
+}
+
+body.dark .gstep {
+    border-top-color: #334155;
+}
+
+body.dark .gstep__title {
+    color: #f1f5f9;
+}
+
+body.dark .gstep__num {
+    background: #334155;
+    color: #cbd5e1;
+}
+
+body.dark .gcollapse {
+    background: #0f172a;
+    border-color: #334155;
+}
+
+body.dark .gcollapse > summary {
+    color: #cbd5e1;
+}
+
+body.dark .gbadge--req {
+    background: #78350f;
+    color: #fde68a;
+}
+
+body.dark .gbadge--opt {
+    background: #1e293b;
+    color: #94a3b8;
+}
+
+body.dark .gnotice {
+    background: #451a03;
+    color: #fde68a;
+    border-left-color: #f59e0b;
+}

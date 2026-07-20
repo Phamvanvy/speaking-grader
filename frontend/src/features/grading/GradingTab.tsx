@@ -59,9 +59,25 @@ function filesFromDrop(e: React.DragEvent): File[] {
 
 const MODE_NOTES: Record<string, string> = {
   practice:
-    'Fast first pass (faster-whisper). Auto-upgrades to the Mock Test pipeline (better ASR + phoneme analysis) when confidence/coverage is low.',
-  mock_test: 'Most accurate: best ASR (WhisperX) + phoneme analysis ON. Use this as the reference score.',
+    'Chấm nhanh (faster-whisper). Tự động chuyển sang pipeline Mock Test khi độ tin cậy / độ khớp thấp.',
+  mock_test: 'Chính xác nhất: ASR tốt nhất (WhisperX) + phân tích âm vị. Chậm hơn — dùng khi cần điểm chuẩn.',
 };
+
+// Tên tiếng Việt của từng loại "đề bài" — dùng chung cho nhãn ô nhập và câu gợi ý
+// "Dạng câu này cần …" nên chỉ khai báo một chỗ.
+const INPUT_LABELS: Record<string, string> = {
+  reference: 'đoạn văn mẫu',
+  image: 'ảnh đề bài',
+  prompt: 'câu hỏi / đề bài',
+};
+
+function requirementHint(qt?: { required?: string[] }): string {
+  const req = qt?.required;
+  if (!req || !req.length) return 'Có thể chấm ngay chỉ với file audio. Nhập thêm đề bài để chấm điểm tổng.';
+  const names = req.map((r) => INPUT_LABELS[r] || r);
+  const joined = names.length > 1 ? names.join(' hoặc ') : names[0];
+  return `Dạng câu này cần ${joined} thì mới chấm được điểm tổng.`;
+}
 
 export default function GradingTab() {
   const accent = useUiStore((st) => st.accent);
@@ -105,6 +121,18 @@ export default function GradingTab() {
   const showImage = uses.includes('image');
   const showPrompt = uses.includes('prompt');
   const showAccent = cfg.lang !== 'ko';
+  // "Tự nhận dạng" mở cả 3 ô đề bài → với người mới trông như một tờ khai dài.
+  // Gộp lại thành khối gấp gọn; dạng câu cụ thể thì hiện thẳng ô cần nhập.
+  const genericTask = !qt || !qt.required || !qt.required.length;
+
+  // Object URL cho <audio>/<img> preview: tạo trong useMemo (không phải mỗi lần
+  // render như trước — mỗi render cũ rò một URL) và thu hồi khi danh sách đổi.
+  const fileUrls = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
+  useEffect(() => () => fileUrls.forEach(URL.revokeObjectURL), [fileUrls]);
+  const imageUrl = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : null), [imageFile]);
+  useEffect(() => () => { if (imageUrl) URL.revokeObjectURL(imageUrl); }, [imageUrl]);
+  const savedUrls = useMemo(() => savedRecs.map((r) => URL.createObjectURL(r.blob)), [savedRecs]);
+  useEffect(() => () => savedUrls.forEach(URL.revokeObjectURL), [savedUrls]);
 
   // Đổi exam → reset questionType về option đầu của exam mới (tránh giữ giá trị exam cũ).
   useEffect(() => {
@@ -175,6 +203,9 @@ export default function GradingTab() {
   function clearFiles() {
     setFiles([]);
   }
+  function removeFile(i: number) {
+    setFiles((prev) => prev.filter((_, idx) => idx !== i));
+  }
 
   // ── recorder ──
   function startRecTimer() {
@@ -242,13 +273,13 @@ export default function GradingTab() {
     addFiles([new File([rec.blob], rec.name, { type: rec.type })]);
   }
   async function deleteRecording(id: number) {
-    if (!confirm('Delete this recording from your device?')) return;
+    if (!confirm('Xoá bản ghi này khỏi máy?')) return;
     await deleteRecordingDb(id);
     refreshSaved();
   }
   async function deleteAllRecordings() {
     if (!savedRecs.length) return;
-    if (!confirm(`Delete all ${savedRecs.length} saved recording(s) from your device?`)) return;
+    if (!confirm(`Xoá tất cả ${savedRecs.length} bản ghi đã lưu khỏi máy?`)) return;
     await clearRecordingsDb();
     refreshSaved();
   }
@@ -276,17 +307,9 @@ export default function GradingTab() {
     if (historySaveEnabled()) fd.append('user_id', getUserId());
   }
   async function grade() {
-    if (files.length === 0) {
-      alert('Please select at least one audio file');
-      return;
-    }
-    if (!hasTaskContext()) {
-      const ok = confirm(
-        '⚠️ Chưa nhập đề/câu hỏi cho dạng câu này nên không thể chấm điểm tổng — chỉ chấm phát âm.\n\n' +
-          'Nhấn OK để vẫn chấm phát âm, hoặc Cancel để quay lại nhập đề bài.',
-      );
-      if (!ok) return;
-    }
+    // Thiếu audio: nút đã disabled; thiếu đề bài: đã cảnh báo tại chỗ ngay trên nút
+    // (bỏ confirm() — người dùng đã đọc cảnh báo trước khi bấm).
+    if (files.length === 0) return;
     const isBatch = files.length > 1;
     setGrading(true);
     const fd = new FormData();
@@ -338,14 +361,14 @@ export default function GradingTab() {
     return {
       scoreLabel: pronOnly ? 'Chỉ chấm phát âm (chưa có đề)' : c.overallLabel,
       scoreVal: pronOnly ? '--' : d.scores?.[c.scoreField] ?? '--',
-      transcript: d.transcript || 'No transcript available',
+      transcript: d.transcript || 'Không nhận dạng được lời nói',
       features: featureGridHtml(d.features || {}),
       scores: scoresBreakdownHtml(d.scores, d.exam, d.phoneme, {
         pronunciationOnly: pronOnly,
         notice: d.notice,
         playback: true,
       }),
-      feedback: d.scores?.summary_feedback || (pronOnly ? d.notice || '' : 'No feedback available'),
+      feedback: d.scores?.summary_feedback || (pronOnly ? d.notice || '' : 'Chưa có nhận xét'),
       telemetry: telemetryHtml(d.telemetry),
     };
     // accent trong deps → đổi giọng re-render kết quả từ data gốc (không chấm lại).
@@ -360,144 +383,230 @@ export default function GradingTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchData, accent]);
 
-  return (
-    <div id="mode-classic">
-      {/* Grading form */}
-      <div className="card">
-        <h2>
-          📝 Grading <span style={{ fontWeight: 400, fontSize: '0.85rem', color: '#888' }}>— 1 file = single · 2+ files = batch</span>
-        </h2>
-
-        <div className="row">
-          <div className="form-group">
-            <label htmlFor="exam">Exam</label>
-            <select id="exam" value={exam} onChange={(e) => setExam(e.target.value)}>
-              <option value="toeic">TOEIC</option>
-              <option value="ielts">IELTS</option>
-              <option value="topik">TOPIK 말하기 (tiếng Hàn)</option>
-            </select>
-          </div>
-          <div className="form-group">
-            <label htmlFor="question-type">Question Type</label>
-            <select id="question-type" value={questionType} onChange={(e) => setQuestionType(e.target.value)}>
-              {questionTypes.map((q) => (
-                <option key={q.value} value={q.value}>
-                  {q.label}
-                </option>
-              ))}
-            </select>
-          </div>
+  // Ô nhập đề bài — dùng lại cho cả 2 chỗ đặt (hiện thẳng / trong khối gấp gọn).
+  const taskFields = (
+    <>
+      {showReference && (
+        <div className="form-group" id="reference-group">
+          <label htmlFor="reference-text">
+            Đoạn văn mẫu (bài đọc)
+            <span className={'gbadge ' + (qt?.required?.includes('reference') ? 'gbadge--req' : 'gbadge--opt')}>
+              {qt?.required?.includes('reference') ? 'bắt buộc' : 'không bắt buộc'}
+            </span>
+          </label>
+          <textarea
+            id="reference-text"
+            value={referenceText}
+            onChange={(e) => setReferenceText(e.target.value)}
+            placeholder="Dán đoạn văn học viên phải đọc to…"
+          />
         </div>
+      )}
 
-        <div className="form-group">
+      {showImage && (
+        <div className="form-group" id="image-group">
           <label
-            className={'file-upload' + (files.length ? ' has-file' : '') + (dragOver === 'audio' ? ' dragover' : '')}
+            className={'file-upload' + (imageFile ? ' has-file' : '') + (dragOver === 'image' ? ' dragover' : '')}
             onDragOver={(e) => {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'copy';
-              setDragOver('audio');
+              setDragOver('image');
             }}
             onDragLeave={(e) => {
+              // dragleave cũng bắn khi con trỏ đi vào phần tử con → chỉ tắt khi rời hẳn label.
               if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null);
             }}
             onDrop={(e) => {
               e.preventDefault();
               setDragOver(null);
-              const dropped = filesFromDrop(e).filter(isAudioFile);
-              if (dropped.length) addFiles(dropped);
+              const img = filesFromDrop(e).find((f) => (f.type || '').toLowerCase().startsWith('image/'));
+              if (img) setImageFile(img);
             }}
           >
-            <input
-              type="file"
-              multiple
-              accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.weba,.mp4,.mov,.mkv,.avi"
-              onChange={(e) => {
-                addFiles(Array.from(e.target.files || []));
-                e.target.value = '';
-              }}
-            />
+            <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} />
             <div className="file-upload-text">
-              <span className="icon">📁</span>
-              <span>Kéo-thả hoặc bấm để chọn file audio — chọn nhiều file để chấm cả loạt</span>
+              <span className="icon">🖼️</span>
+              <span>Ảnh đề bài — kéo-thả, dán Ctrl+V, hoặc bấm để chọn</span>
+              <span className="file-upload-hint">Dùng cho dạng câu tả tranh / nhìn tranh</span>
             </div>
           </label>
-          <div className="recorder">
-            <button type="button" className={'btn btn-secondary' + (recording ? ' recording' : '')} onClick={toggleRecording}>
-              {recording ? '⏹ Stop recording' : '🎙️ Record audio'}
-            </button>
-            <span className="record-timer">
-              {recording ? `● ${Math.floor(recSeconds / 60)}:${String(recSeconds % 60).padStart(2, '0')}` : ''}
-            </span>
-          </div>
-          <div className="file-list">
-            {files.length > 1 && (
-              <div className="file-item" style={{ background: '#eef2ff', color: '#3730a3', fontWeight: 600 }}>
-                📦 {files.length} files — will be graded as a batch
-              </div>
-            )}
-            {files.map((f, i) => (
-              <div className="file-item file-item-audio" key={i}>
-                <span className="name">📄 {f.name}</span>
-                <audio controls preload="metadata" src={URL.createObjectURL(f)} />
-              </div>
-            ))}
-            {files.length > 0 && (
-              <button className="btn btn-secondary" onClick={clearFiles} style={{ marginTop: '0.5rem', width: 'auto', padding: '0.4rem 0.9rem' }}>
-                Clear
+          {imageFile && imageUrl && (
+            <div className="image-preview">
+              <img src={imageUrl} alt={imageFile.name} className="preview-img" />
+              <button className="btn btn-secondary" onClick={() => setImageFile(null)} style={{ width: 'auto', padding: '0.4rem 0.9rem' }}>
+                Xoá ảnh
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
+      )}
 
-        {showReference && (
-          <div className="form-group" id="reference-group">
-            <label htmlFor="reference-text">Reference Script (optional - for Read Aloud)</label>
-            <textarea id="reference-text" value={referenceText} onChange={(e) => setReferenceText(e.target.value)} placeholder="Enter the reference transcript here..." />
+      {showPrompt && (
+        <div className="form-group" id="prompt-group">
+          <label htmlFor="prompt-text">
+            Câu hỏi / đề bài
+            <span className={'gbadge ' + (qt?.required?.includes('prompt') ? 'gbadge--req' : 'gbadge--opt')}>
+              {qt?.required?.includes('prompt') ? 'bắt buộc' : 'không bắt buộc'}
+            </span>
+          </label>
+          <textarea
+            id="prompt-text"
+            value={promptText}
+            onChange={(e) => setPromptText(e.target.value)}
+            placeholder="Nhập câu hỏi/đề bài mà học viên nhìn thấy…"
+          />
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <div id="mode-classic">
+      {/* Grading form — 3 bước, tuỳ chọn ít dùng gấp vào cuối */}
+      <div className="card">
+        <h2>📝 Chấm bài</h2>
+        <p className="gform-sub">
+          Tải lên hoặc ghi âm bài nói để nhận điểm và phân tích phát âm. Chọn <strong>1 file</strong> để chấm một bài, hoặc{' '}
+          <strong>nhiều file</strong> để chấm cả lớp một lượt.
+        </p>
+
+        {/* ── Bước 1 — kỳ thi & dạng câu ───────────────────────────────── */}
+        <section className="gstep is-done">
+          <div className="gstep__head">
+            <span className="gstep__num">✓</span>
+            <div>
+              <h3 className="gstep__title">Chọn kỳ thi và dạng câu</h3>
+              <p className="gstep__hint">{requirementHint(qt)}</p>
+            </div>
           </div>
-        )}
-
-        {showImage && (
-          <div className="form-group" id="image-group">
-            <label
-              className={'file-upload' + (imageFile ? ' has-file' : '') + (dragOver === 'image' ? ' dragover' : '')}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'copy';
-                setDragOver('image');
-              }}
-              onDragLeave={(e) => {
-                // dragleave cũng bắn khi con trỏ đi vào phần tử con → chỉ tắt khi rời hẳn label.
-                if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(null);
-                const img = filesFromDrop(e).find((f) => (f.type || '').toLowerCase().startsWith('image/'));
-                if (img) setImageFile(img);
-              }}
-            >
-              <input type="file" accept="image/*" onChange={(e) => setImageFile(e.target.files?.[0] || null)} />
-              <div className="file-upload-text">
-                <span className="icon">🖼️</span>
-                <span>Kéo-thả ảnh, dán Ctrl+V, hoặc bấm để chọn ảnh (optional — for Describe Picture)</span>
+          <div className="gstep__body">
+            <div className="row">
+              <div className="form-group">
+                <label htmlFor="exam">Kỳ thi</label>
+                <select id="exam" value={exam} onChange={(e) => setExam(e.target.value)}>
+                  <option value="toeic">TOEIC</option>
+                  <option value="ielts">IELTS</option>
+                  <option value="topik">TOPIK 말하기 (tiếng Hàn)</option>
+                </select>
               </div>
-            </label>
-            {imageFile && (
-              <div className="image-preview">
-                <img src={URL.createObjectURL(imageFile)} alt={imageFile.name} className="preview-img" />
-                <button className="btn btn-secondary" onClick={() => setImageFile(null)} style={{ width: 'auto', padding: '0.4rem 0.9rem' }}>
-                  Clear image
+              <div className="form-group">
+                <label htmlFor="question-type">Dạng câu</label>
+                <select id="question-type" value={questionType} onChange={(e) => setQuestionType(e.target.value)}>
+                  {questionTypes.map((q) => (
+                    <option key={q.value} value={q.value}>
+                      {q.value === '' ? 'Tự nhận dạng' : q.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Bước 2 — audio ───────────────────────────────────────────── */}
+        <section className={'gstep' + (files.length ? ' is-done' : '')}>
+          <div className="gstep__head">
+            <span className="gstep__num">{files.length ? '✓' : '2'}</span>
+            <div>
+              <h3 className="gstep__title">Thêm bài nói</h3>
+              <p className="gstep__hint">Ghi âm trực tiếp, hoặc chọn file có sẵn (wav, mp3, m4a, webm…).</p>
+            </div>
+          </div>
+          <div className="gstep__body">
+            <div className="form-group">
+              <label
+                className={'file-upload' + (files.length ? ' has-file' : '') + (dragOver === 'audio' ? ' dragover' : '')}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'copy';
+                  setDragOver('audio');
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(null);
+                  const dropped = filesFromDrop(e).filter(isAudioFile);
+                  if (dropped.length) addFiles(dropped);
+                }}
+              >
+                <input
+                  type="file"
+                  multiple
+                  accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.weba,.mp4,.mov,.mkv,.avi"
+                  onChange={(e) => {
+                    addFiles(Array.from(e.target.files || []));
+                    e.target.value = '';
+                  }}
+                />
+                <div className="file-upload-text">
+                  <span className="icon">📁</span>
+                  <span>Kéo-thả hoặc bấm để chọn file audio</span>
+                  <span className="file-upload-hint">Chọn nhiều file để chấm cả lớp cùng lúc</span>
+                </div>
+              </label>
+              <div className="recorder">
+                <button type="button" className={'btn btn-secondary' + (recording ? ' recording' : '')} onClick={toggleRecording}>
+                  {recording ? '⏹ Dừng ghi âm' : '🎙️ Ghi âm'}
                 </button>
+                <span className="record-timer">
+                  {recording ? `● ${Math.floor(recSeconds / 60)}:${String(recSeconds % 60).padStart(2, '0')}` : ''}
+                </span>
               </div>
-            )}
+              <div className="file-list">
+                {files.length > 1 && (
+                  <div className="file-item" style={{ background: '#eef2ff', color: '#3730a3', fontWeight: 600 }}>
+                    📦 {files.length} file — sẽ chấm cả loạt
+                  </div>
+                )}
+                {files.map((f, i) => (
+                  <div className="file-item file-item-audio" key={i}>
+                    <div className="gfile-head">
+                      <span className="name">📄 {f.name}</span>
+                      <button type="button" className="gfile-remove" title="Bỏ file này" aria-label="Bỏ file này" onClick={() => removeFile(i)}>
+                        ✕
+                      </button>
+                    </div>
+                    <audio controls preload="metadata" src={fileUrls[i]} />
+                  </div>
+                ))}
+                {files.length > 1 && (
+                  <button className="btn btn-secondary" onClick={clearFiles} style={{ marginTop: '0.5rem', width: 'auto', padding: '0.4rem 0.9rem' }}>
+                    Bỏ hết
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-        )}
+        </section>
 
-        {showPrompt && (
-          <div className="form-group" id="prompt-group">
-            <label htmlFor="prompt-text">Prompt (optional)</label>
-            <textarea id="prompt-text" value={promptText} onChange={(e) => setPromptText(e.target.value)} placeholder="Enter the prompt shown to the test-taker..." />
-          </div>
+        {/* ── Bước 3 — đề bài ──────────────────────────────────────────── */}
+        {(showReference || showImage || showPrompt) && (
+          <section className={'gstep' + (hasTaskContext() && (referenceText.trim() || promptText.trim() || imageFile) ? ' is-done' : '')}>
+            <div className="gstep__head">
+              <span className="gstep__num">{hasTaskContext() && (referenceText.trim() || promptText.trim() || imageFile) ? '✓' : '3'}</span>
+              <div>
+                <h3 className="gstep__title">Nhập đề bài</h3>
+                <p className="gstep__hint">
+                  {genericTask
+                    ? 'Không bắt buộc — bỏ trống thì hệ thống chỉ chấm phát âm.'
+                    : 'Cần có đề bài thì AI mới chấm được nội dung câu trả lời.'}
+                </p>
+              </div>
+            </div>
+            <div className="gstep__body">
+              {genericTask ? (
+                // "Tự nhận dạng": mở sẵn nếu đã nhập gì đó, còn lại gấp gọn cho đỡ rối.
+                <details className="gcollapse" open={!!(referenceText || promptText || imageFile)}>
+                  <summary>Thêm đề bài (không bắt buộc)</summary>
+                  {taskFields}
+                </details>
+              ) : (
+                taskFields
+              )}
+            </div>
+          </section>
         )}
 
         {/* Gợi ý bài nói mẫu cho dạng câu mở (không phải read_aloud/auto) */}
@@ -514,51 +623,63 @@ export default function GradingTab() {
           />
         )}
 
-        <div className="row">
-          <div className="form-group">
-            <label htmlFor="mode">Grading Mode</label>
-            <select id="mode" value={mode} onChange={(e) => setMode(e.target.value)}>
-              <option value="practice">Practice</option>
-              <option value="mock_test">Mock Test</option>
-            </select>
-            <p className="mode-note">{MODE_NOTES[mode]}</p>
+        {/* ── Tuỳ chọn nâng cao (mặc định đã hợp lý) ───────────────────── */}
+        <details className="gcollapse gadvanced">
+          <summary>Tuỳ chọn nâng cao</summary>
+          <div className="row">
+            <div className="form-group">
+              <label htmlFor="mode">Chế độ chấm</label>
+              <select id="mode" value={mode} onChange={(e) => setMode(e.target.value)}>
+                <option value="practice">Luyện tập (nhanh)</option>
+                <option value="mock_test">Thi thử (chính xác nhất)</option>
+              </select>
+              <p className="mode-note">{MODE_NOTES[mode]}</p>
+            </div>
+            <div className="form-group">
+              <label htmlFor="expected-duration">Thời lượng mong đợi (giây)</label>
+              <input type="number" id="expected-duration" value={expectedDuration} onChange={(e) => setExpectedDuration(e.target.value)} placeholder="vd. 60" min={1} />
+            </div>
           </div>
-          <div className="form-group">
-            <label htmlFor="expected-duration">Expected Duration (sec)</label>
-            <input type="number" id="expected-duration" value={expectedDuration} onChange={(e) => setExpectedDuration(e.target.value)} placeholder="e.g. 60" min={1} />
-          </div>
-        </div>
 
-        <div className="row">
-          <div className="form-group">
-            <label htmlFor="feedback-lang">Feedback Language</label>
-            <select id="feedback-lang" value={feedbackLang} onChange={(e) => setFeedbackLang(e.target.value)}>
-              <option value="">Default</option>
-              <option value="vi">Vietnamese</option>
-              <option value="en">English</option>
-              <option value="ko">Korean (한국어)</option>
-            </select>
-          </div>
-          {showAccent && (
-            <div className="form-group" id="accent-group">
-              <label htmlFor="accent">Pronunciation Reference</label>
-              <select id="accent" className="accent-select" value={accent} onChange={(e) => setAccent(e.target.value as any)}>
-                <option value="default">Tự động (default)</option>
-                <option value="gb">Anh-Anh (British)</option>
-                <option value="us">Anh-Mỹ (American)</option>
+          <div className="row">
+            <div className="form-group">
+              <label htmlFor="feedback-lang">Ngôn ngữ nhận xét</label>
+              <select id="feedback-lang" value={feedbackLang} onChange={(e) => setFeedbackLang(e.target.value)}>
+                <option value="">Mặc định</option>
+                <option value="vi">Tiếng Việt</option>
+                <option value="en">English</option>
+                <option value="ko">한국어</option>
               </select>
             </div>
-          )}
-        </div>
+            {showAccent && (
+              <div className="form-group" id="accent-group">
+                <label htmlFor="accent">Giọng chuẩn đối chiếu</label>
+                <select id="accent" className="accent-select" value={accent} onChange={(e) => setAccent(e.target.value as any)}>
+                  <option value="default">Tự động (mặc định)</option>
+                  <option value="gb">Anh-Anh (British)</option>
+                  <option value="us">Anh-Mỹ (American)</option>
+                </select>
+              </div>
+            )}
+          </div>
 
-        <div className="checkbox-group" style={{ marginBottom: '1.5rem' }}>
-          <input type="checkbox" id="no-ai" checked={noAi} onChange={(e) => setNoAi(e.target.checked)} />
-          <label htmlFor="no-ai">ASR only (skip AI scoring)</label>
-        </div>
+          <div className="checkbox-group">
+            <input type="checkbox" id="no-ai" checked={noAi} onChange={(e) => setNoAi(e.target.checked)} />
+            <label htmlFor="no-ai" style={{ marginBottom: 0 }}>Chỉ nhận dạng lời nói (bỏ qua chấm điểm AI)</label>
+          </div>
+        </details>
 
-        <button className="btn btn-primary btn-cta" id="grade-btn" onClick={grade} disabled={grading}>
-          {grading ? (files.length > 1 ? `Grading ${files.length} files...` : 'Grading...') : 'Grade Now'}
-        </button>
+        {/* Cảnh báo TRƯỚC khi bấm, thay vì confirm() sau khi bấm. */}
+        {files.length > 0 && !hasTaskContext() && (
+          <p className="gnotice">⚠️ Chưa có {(qt?.required || []).map((r) => INPUT_LABELS[r] || r).join(' hoặc ')} nên sẽ chỉ chấm phát âm, không có điểm tổng.</p>
+        )}
+
+        <div className="gsubmit">
+          <button className="btn btn-primary btn-cta" id="grade-btn" onClick={grade} disabled={grading || files.length === 0}>
+            {grading ? (files.length > 1 ? `Đang chấm ${files.length} file…` : 'Đang chấm…') : files.length > 1 ? `Chấm ${files.length} bài` : 'Chấm bài'}
+          </button>
+          {files.length === 0 && <p className="gsubmit__hint">Hãy ghi âm hoặc chọn file audio ở bước 2 trước.</p>}
+        </div>
       </div>
 
       {/* Saved recordings (IndexedDB) */}
@@ -566,14 +687,14 @@ export default function GradingTab() {
         <div className="card" id="saved-recordings-card">
           <div className="result-header">
             <h2>
-              💾 Saved Recordings <span style={{ fontWeight: 400, fontSize: '0.85rem', color: '#888' }}>— stored on this device</span>
+              💾 Bản ghi đã lưu <span style={{ fontWeight: 400, fontSize: '0.85rem', color: '#888' }}>— lưu trên máy này</span>
             </h2>
             <button className="btn btn-secondary" onClick={deleteAllRecordings} style={{ width: 'auto', padding: '0.5rem 1rem' }}>
-              Delete all
+              Xoá hết
             </button>
           </div>
           <div className="file-list">
-            {savedRecs.map((rec) => (
+            {savedRecs.map((rec, ri) => (
               <div className="file-item file-item-audio" key={rec.id}>
                 <div className="saved-rec-head">
                   <span className="name">📄 {rec.name}</span>
@@ -582,13 +703,13 @@ export default function GradingTab() {
                     {rec.size ? ' · ' + formatBytes(rec.size) : ''}
                   </span>
                 </div>
-                <audio controls preload="metadata" src={URL.createObjectURL(rec.blob)} />
+                <audio controls preload="metadata" src={savedUrls[ri]} />
                 <div className="saved-rec-actions">
                   <button className="btn btn-secondary" onClick={() => useRecording(rec.id)} style={{ width: 'auto', padding: '0.35rem 0.8rem' }}>
-                    ➕ Add to grading
+                    ➕ Đưa vào chấm
                   </button>
                   <button className="btn btn-secondary remove-btn" onClick={() => deleteRecording(rec.id)} style={{ width: 'auto', padding: '0.35rem 0.8rem' }}>
-                    🗑 Delete
+                    🗑 Xoá
                   </button>
                 </div>
               </div>
@@ -602,7 +723,7 @@ export default function GradingTab() {
         <div className="result visible" id="result">
           <div className="card">
             <div className="result-header">
-              <h2>📊 Results</h2>
+              <h2>📊 Kết quả</h2>
               <div className="actions">
                 <button
                   className="btn btn-secondary"
@@ -615,7 +736,7 @@ export default function GradingTab() {
                   🖨 Print / PDF
                 </button>
                 <button className="btn btn-secondary" onClick={() => setSingleData(null)} style={{ width: 'auto', padding: '0.5rem 1rem' }}>
-                  Close
+                  Đóng
                 </button>
               </div>
             </div>
@@ -624,19 +745,19 @@ export default function GradingTab() {
               <div className="score">{singleHtml.scoreVal}</div>
             </div>
             <div className="result-section">
-              <h3>📝 Transcript</h3>
+              <h3>📝 Lời nói nhận dạng được</h3>
               <p>{singleHtml.transcript}</p>
             </div>
             <div className="result-section">
-              <h3>📈 Features</h3>
+              <h3>📈 Chỉ số</h3>
               <div className="features-grid" dangerouslySetInnerHTML={{ __html: singleHtml.features }} />
             </div>
             <div className="result-section">
-              <h3>📋 Scores Breakdown</h3>
+              <h3>📋 Chi tiết điểm</h3>
               <div dangerouslySetInnerHTML={{ __html: singleHtml.scores }} />
             </div>
             <div className="result-section">
-              <h3>💬 Feedback</h3>
+              <h3>💬 Nhận xét</h3>
               <p>{singleHtml.feedback}</p>
             </div>
             <div className="result-section">
@@ -652,7 +773,7 @@ export default function GradingTab() {
         <div className="result visible" id="batch-result">
           <div className="card">
             <div className="result-header">
-              <h2>📊 Batch Results</h2>
+              <h2>📊 Kết quả cả loạt</h2>
               <div className="actions">
                 <button
                   className="btn btn-secondary"
@@ -669,14 +790,14 @@ export default function GradingTab() {
                   🖨 Print / PDF
                 </button>
                 <button className="btn btn-secondary" onClick={() => setBatchData(null)} style={{ width: 'auto', padding: '0.5rem 1rem' }}>
-                  Close
+                  Đóng
                 </button>
               </div>
             </div>
             <div id="batch-summary">
               <div className={'status-bar ' + (batchData.failed ? 'info' : 'success')} style={{ justifyContent: 'center' }}>
                 <span>
-                  {batchData.succeeded}/{batchData.count} graded
+                  {batchData.succeeded}/{batchData.count} bài đã chấm
                   {batchData.failed ? ` · ${batchData.failed} failed` : ''} · exam: {batchView.c.label} · type: {batchData.question_type} · mode:{' '}
                   {batchData.mode_requested}
                 </span>
