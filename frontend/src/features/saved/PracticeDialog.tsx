@@ -255,6 +255,16 @@ export default function PracticeDialog() {
   const disp = accent === 'gb' && !isKo ? toBritishWord({ phonemes }).phonemes : phonemes;
   const shown = (disp || []).filter((p: any) => !p._hidden);
   const ipaStr = (ipaStressString(disp) || data.ipa || '').trim();
+  // Phiên âm theo TỪNG accent (độc lập với accent đang chọn) để hiện + đọc CẢ UK và US.
+  // US: ưu tiên từ điển (Cambridge us_ipa) → CMUdict phonemes → data.ipa.
+  // UK: ưu tiên từ điển (uk_ipa) → suy từ phonemes qua toBritishWord (như chip lỗi) khi
+  //     nguồn là CMUdict (uk_ipa thường trống). Rỗng cả hai → không hiện hàng đó.
+  const usIpa = (wordInfo?.us_ipa || ipaStressString(phonemes) || data.ipa || '').trim();
+  const ukIpa = (
+    wordInfo?.uk_ipa ||
+    (phonemes.length ? ipaStressString(toBritishWord({ phonemes }).phonemes) : '') ||
+    ''
+  ).trim();
   const pct = practicePct(phonemes);
   const bad = shown.filter(practiceIsBad);
   const skippedCount = shown.filter((p: any) => p.status === 'skipped').length;
@@ -295,19 +305,33 @@ export default function PracticeDialog() {
           )}
         </div>
 
-        {/* IPA */}
-        <div className="practice-ipa">
-          {ipaStr ? `/${ipaStr}/` : ''}
-          <button type="button" className="tts-play" data-word={word} title="Nghe phát âm chuẩn">
-            🔊
-          </button>
-        </div>
-
-        {/* Phiên âm UK/US theo từ điển (Cambridge) — chỉ hiện khi có, bổ sung cho IPA trên */}
-        {wordInfo && (wordInfo.uk_ipa || wordInfo.us_ipa) && (
-          <div className="flex gap-4 text-sm opacity-70 -mt-1">
-            {wordInfo.uk_ipa && <span>UK&nbsp;/{wordInfo.uk_ipa}/</span>}
-            {wordInfo.us_ipa && <span>US&nbsp;/{wordInfo.us_ipa}/</span>}
+        {/* IPA — tiếng Hàn: 1 dòng (không có UK/US). Tiếng Anh: 2 hàng UK + US, mỗi
+            hàng đọc ĐÚNG giọng của nó qua data-accent (playWordTts). */}
+        {isKo ? (
+          <div className="practice-ipa">
+            {ipaStr ? `/${ipaStr}/` : ''}
+            <button type="button" className="tts-play" data-word={word} data-ipa={ipaStr || undefined} title="Nghe phát âm chuẩn">
+              🔊
+            </button>
+          </div>
+        ) : (
+          <div className="practice-ipa practice-ipa--dual">
+            {ukIpa && (
+              <span className="practice-ipa__row">
+                <span className="practice-ipa__accent">UK</span>&nbsp;/{ukIpa}/
+                <button type="button" className="tts-play" data-word={word} data-ipa={ukIpa} data-accent="gb" title="Nghe giọng Anh (UK)">
+                  🔊
+                </button>
+              </span>
+            )}
+            {usIpa && (
+              <span className="practice-ipa__row">
+                <span className="practice-ipa__accent">US</span>&nbsp;/{usIpa}/
+                <button type="button" className="tts-play" data-word={word} data-ipa={usIpa} data-accent="us" title="Nghe giọng Mỹ (US)">
+                  🔊
+                </button>
+              </span>
+            )}
           </div>
         )}
 

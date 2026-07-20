@@ -68,6 +68,19 @@ td .practice-open:hover { text-decoration: underline; color: #4338ca; }
 .practice-ipa .tts-play:active { transform: scale(0.94); }
 .practice-ipa .tts-play:hover { background: #eef2ff; border-color: #c7d2fe; }
 
+/* Hai hàng UK + US (mỗi hàng 1 phiên âm + nút nghe giọng tương ứng) */
+.practice-ipa--dual {
+    flex-direction: column; align-items: flex-start; gap: 0.3rem;
+    font-size: 0.98rem;
+}
+.practice-ipa__row { display: inline-flex; align-items: center; gap: 0.35rem; }
+.practice-ipa__accent {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em;
+    color: #4f46e5; background: #eef2ff; border-radius: 5px;
+    padding: 0.05rem 0.3rem;
+}
+body.dark .practice-ipa__accent { color: #c7d2fe; background: #312e81; }
+
 /* Định nghĩa + ví dụ (LLM, lazy) */
 .practice-info {
     background: #f8fafc; border: 1px solid #eef2f7; border-radius: 12px;

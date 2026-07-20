@@ -217,11 +217,13 @@ function ReviewToastCard({ words, toastId }: { words: SavedWord[]; toastId: stri
               </button>
               <span className="max-w-full break-words font-mono text-xs text-muted-foreground">{reviewIpa(w)}</span>
             </div>
-            {/* .tts-play + data-word → delegated playback handler phát mẫu qua /tts. */}
+            {/* .tts-play + data-word (+ data-ipa) → delegated playback handler phát mẫu
+                qua /tts; data-ipa để server đọc đúng IPA hiển thị khi bật TTS_IPA_SYNTH. */}
             <button
               type="button"
               className="tts-play shrink-0 rounded p-0.5 text-muted-foreground opacity-70 hover:bg-background hover:text-foreground hover:opacity-100"
               data-word={w.word}
+              data-ipa={reviewIpa(w) || undefined}
               title="Nghe phát âm chuẩn"
             >
               <Volume2 className="h-3.5 w-3.5" />

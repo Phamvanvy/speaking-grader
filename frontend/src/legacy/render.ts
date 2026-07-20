@@ -189,10 +189,15 @@ export function phonemeErrorsHtml(phoneme, opts: any = {}) {
     playback && w.start != null && w.end != null
       ? `<button type="button" class="phoneme-play" data-start="${w.start}" data-end="${w.end}"${srcAttr} title="Nghe lại từ này" aria-label="Nghe lại từ ${escapeHtml(w.word)}">${PLAY_ICON}</button>`
       : '';
-  const ttsBtn = (w) =>
-    w.word
-      ? `<button type="button" class="tts-play" data-word="${escapeHtml(w.word)}" title="Nghe phát âm chuẩn (máy đọc — tham khảo)" aria-label="Nghe phát âm chuẩn của từ ${escapeHtml(w.word)}">🔊</button>`
-      : '';
+  const ttsBtn = (w) => {
+    if (!w.word) return '';
+    // data-ipa = IPA tham chiếu ĐANG hiển thị của từ (đã theo accent — w là dispWords
+    // đã map British khi GB). Server đọc đúng chuỗi này khi bật TTS_IPA_SYNTH, khớp
+    // homograph/dạng trích dẫn; rỗng thì handler chỉ gửi text như cũ.
+    const ipa = ipaStressString(w.phonemes);
+    const ipaAttr = ipa ? ` data-ipa="${escapeHtml(ipa)}"` : '';
+    return `<button type="button" class="tts-play" data-word="${escapeHtml(w.word)}"${ipaAttr} title="Nghe phát âm chuẩn (máy đọc — tham khảo)" aria-label="Nghe phát âm chuẩn của từ ${escapeHtml(w.word)}">🔊</button>`;
+  };
 
   const isKo = typeof hasHangul === 'function' && words.some((w) => hasHangul(w.word));
 

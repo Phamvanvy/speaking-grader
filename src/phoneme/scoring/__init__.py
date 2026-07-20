@@ -176,6 +176,7 @@ def compute_phoneme_score(
     drift_window_pad: float = DRIFT_WINDOW_PAD_SEC,
     posteriors: FramePosteriors | None = None,
     homograph_selection_enabled: bool = False,
+    accent_dualref_enabled: bool = False,
     boundary_refine_enabled: bool = False,
     s_cluster_enabled: bool = False,
     collapse_gate_enabled: bool = False,
@@ -297,11 +298,14 @@ def compute_phoneme_score(
     # Multi-reference homograph (flag OFF = no-op): đổi lát reference của từ
     # đa-entry sang entry khớp acoustic nhất TRƯỚC DTW. Số span/chỉ số span không
     # đổi → skips/word_windows/word_probs (keyed span index) vẫn đúng.
-    if homograph_selection_enabled and reference_spans and word_windows and segments:
+    if ((homograph_selection_enabled or accent_dualref_enabled)
+            and reference_spans and word_windows and segments):
         (reference_phonemes, reference_spans, reference_stress,
          reference_display_stress) = select_homograph_references(
             reference_phonemes, reference_spans, reference_stress,
             reference_display_stress, segments, word_windows, skips=skips,
+            homograph_enabled=homograph_selection_enabled,
+            accent_dualref=accent_dualref_enabled,
         )
 
     predicted_phonemes = [s.phoneme for s in segments]

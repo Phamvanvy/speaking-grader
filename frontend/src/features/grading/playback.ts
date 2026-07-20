@@ -70,9 +70,14 @@ function playWordSegment(start, end, srcUrl) {
 
 // ── Phát "phát âm đúng" của 1 TỪ (nút 🔊 — Piper TTS qua /tts) ──
 let ttsAudio = null;
-const TTS_AUDIO_VERSION = 'v5'; // phải khớp CACHE_VERSION ở src/tts.py
+const TTS_AUDIO_VERSION = 'v6'; // phải khớp CACHE_VERSION ở src/tts.py
 
-function playWordTts(word) {
+// `ipa` (tuỳ chọn): chuỗi IPA tham chiếu ĐANG hiển thị của từ. Server đọc đúng chuỗi
+// này khi bật TTS_IPA_SYNTH (khớp homograph/viết tắt/dạng trích dẫn) và tự fallback
+// về `text` nếu tắt hoặc IPA không map được — nên luôn gửi kèm cả hai.
+// `accent` (tuỳ chọn): ép giọng đọc cụ thể ('us' | 'gb') — dùng khi 1 chỗ hiện CẢ hai
+// phiên âm UK và US, mỗi nút 🔊 đọc đúng giọng của nó. Rỗng → theo accent đang chọn.
+function playWordTts(word, ipa = '', accent = '') {
   if (!word) return;
   if (hasHangul(word)) {
     if (!window.speechSynthesis) {
@@ -86,7 +91,9 @@ function playWordTts(word) {
     window.speechSynthesis.speak(u);
     return;
   }
-  const url = `${apiBase()}/tts?text=${encodeURIComponent(word)}&accent=${encodeURIComponent(currentAccent)}&v=${TTS_AUDIO_VERSION}`;
+  const acc = accent || currentAccent;
+  const ipaParam = ipa ? `&ipa=${encodeURIComponent(ipa)}` : '';
+  const url = `${apiBase()}/tts?text=${encodeURIComponent(word)}${ipaParam}&accent=${encodeURIComponent(acc)}&v=${TTS_AUDIO_VERSION}`;
   if (!ttsAudio) ttsAudio = new Audio();
   ttsAudio.pause();
   ttsAudio.src = url;
@@ -118,7 +125,7 @@ export function installPlaybackHandlers() {
     const ttsBtn = t.closest('.tts-play');
     if (ttsBtn) {
       e.preventDefault();
-      playWordTts(ttsBtn.dataset.word || '');
+      playWordTts(ttsBtn.dataset.word || '', ttsBtn.dataset.ipa || '', ttsBtn.dataset.accent || '');
     }
   });
 }

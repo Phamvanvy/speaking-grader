@@ -272,3 +272,20 @@ def _validate_tts_text(text: str) -> str:
             detail=f"'text' quá dài ({len(value)} > {_TTS_MAX_TEXT} ký tự).",
         )
     return value
+
+
+def _validate_tts_ipa(ipa: str) -> str:
+    """Chuẩn hoá chuỗi IPA tuỳ chọn cho TTS (nhánh đọc-IPA).
+
+    IPA là OPTIONAL — rỗng/thiếu → trả "" để endpoint fallback sang `text` (KHÔNG
+    400). Chỉ strip ký tự điều khiển, gộp khoảng trắng, và chặn quá dài (chống lạm
+    dụng). KHÔNG whitelist ký hiệu IPA ở đây: src/tts.py tự bỏ token ngoài bảng
+    phoneme của voice, nên input rác chỉ ra audio ngắn/rỗng chứ không nguy hiểm."""
+    value = "".join(ch for ch in (ipa or "") if ch >= " " or ch == "\t")
+    value = " ".join(value.split())
+    if len(value) > _TTS_MAX_TEXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'ipa' quá dài ({len(value)} > {_TTS_MAX_TEXT} ký tự).",
+        )
+    return value

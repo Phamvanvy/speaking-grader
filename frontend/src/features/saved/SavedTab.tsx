@@ -252,7 +252,7 @@ export default function SavedTab() {
                           <TableCell className="py-3">
                             <span className="flex items-center gap-1.5">
                               <span className="rounded-md bg-muted/70 px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{ipa}</span>
-                              <IconBtn className="tts-play h-7 w-7" data-word={w.word} title="Nghe phát âm chuẩn">
+                              <IconBtn className="tts-play h-7 w-7" data-word={w.word} data-ipa={ipa || undefined} title="Nghe phát âm chuẩn">
                                 <Volume2 className="h-4 w-4" />
                               </IconBtn>
                             </span>
@@ -621,6 +621,7 @@ function SuggestionsCard({ onPractice }: { onPractice: (d: any) => void }) {
                           <IconBtn
                             className="tts-play h-8 w-8"
                             data-word={s.word}
+                            data-ipa={s.ipa || undefined}
                             title="Nghe phát âm chuẩn"
                             onClick={(e) => e.stopPropagation()}
                           >

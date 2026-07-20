@@ -201,6 +201,13 @@ class Config:
     # scripts/analyze_homographs.py). Default OFF = bit-for-bit như cũ.
     # Qua TOEIC_PHONEME_MULTIREF.
     phoneme_homograph_multiref: bool = False
+    # Accent dual-reference: thêm biến thể GIỌNG UK làm reference thay thế (dùng chung
+    # cơ chế fitting với homograph) → người nói khớp phát âm US HOẶC UK đều tính đúng.
+    # Tolerance (accept_accent_variants) đã lo hầu hết khác biệt UK/US; luật hiện tại
+    # đóng gap còn lại: BATH-split /æ/↔/ɑː/ (dance/path/class/ask…). Xem
+    # scoring/accent_variant.py. Default OFF = bit-for-bit như cũ. Qua
+    # TOEIC_PHONEME_ACCENT_DUALREF.
+    phoneme_accent_dualref: bool = False
     # S-cluster leniency: /p t k/ sau /s/ đầu từ (speak, stay, school) là âm KHÔNG bật
     # hơi → wav2vec hay gán nhầm chỗ cấu âm (sp→st) hoặc voicing (p→b). 2 bậc: voiced
     # cùng chỗ (p→b/t→d/k→ɡ) = "ok" (s_cluster_variant); plosive khác chỗ = cap penalty
@@ -254,6 +261,12 @@ class Config:
     # Thư mục cache WAV đã tổng hợp. Key cache có version (xem src/tts.py:CACHE_VERSION)
     # → đổi voice/normalization tự "miss" không cần xoá tay. Đặt qua TTS_CACHE_DIR.
     tts_cache_dir: str = "outputs/tts_cache"
+    # Cho phép tổng hợp audio mẫu TỪ IPA (thay vì để Piper G2P từ chữ viết). Khi BẬT +
+    # request có `ipa=`, /tts đọc ĐÚNG chuỗi IPA tham chiếu đang hiển thị (khớp
+    # homograph / dạng trích dẫn theo ngữ cảnh / từ viết tắt). TẮT → luôn dùng nhánh
+    # text như cũ (bit-for-bit). Rollout an toàn: giữ OFF tới khi bench âm học (chạy
+    # scripts/bench_tts_ipa.py) xác nhận không regression. Đặt qua TTS_IPA_SYNTH.
+    tts_ipa_synth: bool = False
     # ── CORS (gọi API từ origin khác) ────────────────────────────────────
     # Danh sách origin được phép gọi API qua trình duyệt, ngăn cách bằng dấu
     # phẩy (vd "https://app.example.com,https://foo.bar"). Mặc định "*" = mọi
@@ -563,6 +576,9 @@ def load_config() -> Config:
         phoneme_homograph_multiref=(
             os.getenv("TOEIC_PHONEME_MULTIREF", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},
+        phoneme_accent_dualref=(
+            os.getenv("TOEIC_PHONEME_ACCENT_DUALREF", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         phoneme_s_cluster_enabled=(
             os.getenv("TOEIC_PHONEME_S_CLUSTER", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},
@@ -599,6 +615,9 @@ def load_config() -> Config:
         tts_cache_dir=(
             os.getenv("TTS_CACHE_DIR", "outputs/tts_cache") or "outputs/tts_cache"
         ),
+        tts_ipa_synth=(
+            os.getenv("TTS_IPA_SYNTH", "false") or "false"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         cors_allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*") or "*",
         history_enabled=(
             os.getenv("TOEIC_HISTORY_ENABLED", "true") or "true"

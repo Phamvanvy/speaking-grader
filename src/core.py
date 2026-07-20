@@ -266,6 +266,9 @@ def grade_response(
                 homograph_selection_enabled=(
                     config.phoneme_homograph_multiref and not _is_ko
                 ),
+                accent_dualref_enabled=(
+                    config.phoneme_accent_dualref and not _is_ko
+                ),
                 boundary_refine_enabled=config.phoneme_boundary_refine_enabled,
                 s_cluster_enabled=config.phoneme_s_cluster_enabled and not _is_ko,
                 collapse_gate_enabled=(

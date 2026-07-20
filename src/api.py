@@ -72,6 +72,7 @@ from .api_helpers import (
     _resolve,
     _validate_accent,
     _validate_exam,
+    _validate_tts_ipa,
     _validate_tts_text,
 )
 
@@ -688,19 +689,33 @@ async def grade_batch(
 
 
 @app.get("/tts")
-async def tts(text: str = "", accent: str = "default") -> Response:
+async def tts(text: str = "", ipa: str = "", accent: str = "default") -> Response:
     """Tổng hợp audio mẫu (Piper TTS) cho 1 từ/cụm ngắn → WAV.
 
-    Dùng cho nút 🔊 "nghe phát âm đúng" ở bảng lỗi phát âm. Param đặt tên trung lập
-    để sau thêm `ipa=` mà giữ nguyên route (xem src/tts.py:synthesize). Voice chưa
-    cài → 503; text sai → 400.
+    Dùng cho nút 🔊 "nghe phát âm đúng". `text`: Piper G2P từ chữ viết. `ipa` (tuỳ
+    chọn): đọc ĐÚNG chuỗi IPA tham chiếu đang hiển thị — CHỈ dùng khi server bật
+    TTS_IPA_SYNTH; lỗi/không map được → fallback `text` (nên frontend luôn gửi kèm
+    cả `text` làm phương án dự phòng). Voice chưa cài → 503; text sai → 400.
     """
     clean = _validate_tts_text(text)
+    clean_ipa = _validate_tts_ipa(ipa)
     accent = _validate_accent(accent)
+    use_ipa = bool(clean_ipa) and getattr(_BASE_CONFIG, "tts_ipa_synth", False)
     try:
-        wav = await run_in_threadpool(
-            _tts_synthesize, text=clean, accent=accent, config=_BASE_CONFIG
-        )
+        if use_ipa:
+            try:
+                wav = await run_in_threadpool(
+                    _tts_synthesize, ipa=clean_ipa, accent=accent, config=_BASE_CONFIG
+                )
+            except ValueError:  # IPA rỗng/không map được phoneme → dùng text
+                logger.info("TTS IPA không dùng được (%r) → fallback text", clean_ipa)
+                wav = await run_in_threadpool(
+                    _tts_synthesize, text=clean, accent=accent, config=_BASE_CONFIG
+                )
+        else:
+            wav = await run_in_threadpool(
+                _tts_synthesize, text=clean, accent=accent, config=_BASE_CONFIG
+            )
     except TtsUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client

@@ -41,6 +41,7 @@ from ..ipa.g2p import (
 )
 from ..models import PhonemeSegment, WordSpan
 from ..reliability import SkipDecision
+from .accent_variant import uk_variant
 
 logger = logging.getLogger("toeic.phoneme.homograph")
 
@@ -96,10 +97,16 @@ def select_homograph_references(
     segments: list[PhonemeSegment],
     word_windows: Mapping[int, tuple[float, float]],
     skips: Mapping[int, SkipDecision] | None = None,
+    homograph_enabled: bool = True,
+    accent_dualref: bool = False,
 ) -> tuple[
     list[str], list[WordSpan], list[str | None] | None, list[str | None] | None
 ]:
-    """Chọn lại entry phát âm cho từ đa-entry theo acoustic best-match.
+    """Chọn lại lát reference của từng từ theo acoustic best-match giữa các candidate.
+
+    Candidate gồm: các entry CMUdict đa-nghĩa (homograph), VÀ — khi `accent_dualref` —
+    một biến thể GIỌNG UK (accent_variant.uk_variant, hiện: BATH-split). Người nói khớp
+    BẤT KỲ candidate nào (homograph HOẶC US/UK) là đúng.
 
     Trả về (phonemes, spans, stress, display_stress) MỚI — bản gốc không bị sửa.
     Không có swap nào → trả về đúng 4 object đầu vào (caller so sánh identity được).
@@ -107,7 +114,7 @@ def select_homograph_references(
     Chỉ số span giữ nguyên 1-1 với đầu vào (chỉ start_idx/end_idx dịch theo độ dài
     lát mới) nên skips/word_windows/word_probs keyed theo span index vẫn đúng.
     """
-    # {span index: (symbols, stresses)} — entry thay thế thắng entry mặc định.
+    # {span index: (symbols, stresses)} — candidate thay thế thắng lát mặc định.
     swaps: dict[int, tuple[list[str], list[str | None]]] = {}
     for k, span in enumerate(reference_spans):
         if span.source != "cmudict" or (skips and k in skips):
@@ -115,22 +122,34 @@ def select_homograph_references(
         window = word_windows.get(k)
         if window is None:
             continue
-        entries = _candidate_entries(span.word)
-        if not entries:
-            continue
+        entries = _candidate_entries(span.word) if homograph_enabled else []
+        current = reference_phonemes[span.start_idx:span.end_idx]
+        current_stress = (
+            reference_stress[span.start_idx:span.end_idx]
+            if reference_stress is not None else [None] * len(current)
+        )
+        # Biến thể UK (nếu bật + từ có luật áp) — thêm vào tập candidate.
+        uk_cand = uk_variant(current, current_stress, span.word) if accent_dualref else None
+        if not entries and uk_cand is None:
+            continue  # không có candidate thay thế nào cho từ này
         predicted = [
             s.phoneme for s in segments
             if is_within_word_window(s.start, s.end, window)
         ]
         if not predicted:
             continue
-        current = reference_phonemes[span.start_idx:span.end_idx]
         best_cost = _alignment_cost(predicted, current)
         default_cost = best_cost
         best: tuple[list[str], list[str | None]] | None = None
+        # candidate = (symbols, stresses) đã dựng sẵn; entry CMUdict + biến thể UK.
+        candidates: list[tuple[list[str], list[str | None]]] = []
         for entry in entries:
             symbols, stresses, syllables = _arpabet_tokens_to_ipa_stress(entry)
             symbols, stresses = _finalize_stress(symbols, stresses, syllables)
+            candidates.append((symbols, stresses))
+        if uk_cand is not None:
+            candidates.append(uk_cand)
+        for symbols, stresses in candidates:
             if not symbols or symbols == current:
                 continue
             cost = _alignment_cost(predicted, symbols)

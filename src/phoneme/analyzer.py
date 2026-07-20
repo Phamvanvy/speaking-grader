@@ -105,6 +105,7 @@ class HybridPhonemeAnalyzer:
         drift_window_pad: float = DRIFT_WINDOW_PAD_SEC,
         deletion_evidence_enabled: bool = True,
         homograph_selection_enabled: bool = False,
+        accent_dualref_enabled: bool = False,
         boundary_refine_enabled: bool = False,
         s_cluster_enabled: bool = False,
         collapse_gate_enabled: bool = False,
@@ -142,6 +143,9 @@ class HybridPhonemeAnalyzer:
         # Multi-reference homograph: chọn lại entry CMUdict khớp acoustic nhất cho
         # từ đa-entry (xem scoring/homograph.py). Default OFF = bit-for-bit như cũ.
         self._homograph_selection_enabled = homograph_selection_enabled
+        # Accent dual-reference: thêm biến thể giọng UK làm reference thay thế (BATH
+        # split) — khớp US hoặc UK đều đúng (xem scoring/accent_variant.py).
+        self._accent_dualref_enabled = accent_dualref_enabled
         # Boundary refinement: sửa segment bị DTW gán nhầm sang từ kề trên path
         # trước khi chấm (xem scoring/alignment.py). Default OFF = bit-for-bit.
         self._boundary_refine_enabled = boundary_refine_enabled
@@ -318,6 +322,7 @@ class HybridPhonemeAnalyzer:
                 drift_window_pad=self._drift_window_pad,
                 posteriors=posteriors,
                 homograph_selection_enabled=self._homograph_selection_enabled,
+                accent_dualref_enabled=self._accent_dualref_enabled,
                 boundary_refine_enabled=self._boundary_refine_enabled,
                 s_cluster_enabled=self._s_cluster_enabled,
                 collapse_gate_enabled=self._collapse_gate_enabled,

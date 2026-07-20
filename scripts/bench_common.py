@@ -171,7 +171,8 @@ def run_scoring(config, segments, posteriors, reference_text: str,
                 word_windows_locked: set | None = None,
                 boundary_refine_on: bool | None = None,
                 s_cluster_on: bool | None = None,
-                collapse_on: bool | None = None) -> dict:
+                collapse_on: bool | None = None,
+                accent_dualref_on: bool | None = None) -> dict:
     """Gọi compute_phoneme_score với đúng tham số analyzer truyền (accent default),
     capture diagnostics in-memory. Trả {score, diags}.
 
@@ -216,6 +217,10 @@ def run_scoring(config, segments, posteriors, reference_text: str,
         homograph_selection_enabled=(
             config.phoneme_homograph_multiref if homograph_on is None
             else homograph_on
+        ),
+        accent_dualref_enabled=(
+            config.phoneme_accent_dualref if accent_dualref_on is None
+            else accent_dualref_on
         ),
         boundary_refine_enabled=(
             config.phoneme_boundary_refine_enabled if boundary_refine_on is None
