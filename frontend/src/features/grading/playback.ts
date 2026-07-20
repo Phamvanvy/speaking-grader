@@ -70,7 +70,7 @@ function playWordSegment(start, end, srcUrl) {
 
 // ── Phát "phát âm đúng" của 1 TỪ (nút 🔊 — Piper TTS qua /tts) ──
 let ttsAudio = null;
-const TTS_AUDIO_VERSION = 'v6'; // phải khớp CACHE_VERSION ở src/tts.py
+const TTS_AUDIO_VERSION = 'v7'; // phải khớp CACHE_VERSION ở src/tts.py
 
 // `ipa` (tuỳ chọn): chuỗi IPA tham chiếu ĐANG hiển thị của từ. Server đọc đúng chuỗi
 // này khi bật TTS_IPA_SYNTH (khớp homograph/viết tắt/dạng trích dẫn) và tự fallback
