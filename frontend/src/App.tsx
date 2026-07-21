@@ -6,6 +6,8 @@ import HomePage from './features/home/HomePage';
 import ExamTab from './features/exam/ExamTab';
 import HistoryTab from './features/history/HistoryTab';
 import SavedTab from './features/saved/SavedTab';
+import CourseTab from './features/course/CourseTab';
+import LessonView from './features/course/LessonView';
 import AccountPage from './features/account/AccountPage';
 import PracticeDialog from './features/saved/PracticeDialog';
 import AddWordsDialog, { useAddWords } from './features/saved/AddWordsDialog';
@@ -17,6 +19,7 @@ import { TooltipProvider } from './components/ui/tooltip';
 // đúng path cũ để link/reload hoạt động qua catch-all SPA của FastAPI.
 const TABS = [
   { to: '/exam', label: '📄 Thi cả đề (cá nhân)', end: false },
+  { to: '/course', label: '🎓 Khóa học', end: false },
   { to: '/history', label: '🕘 Lịch sử', end: false },
   { to: '/saved', label: '📚 Từ đã lưu', end: false },
   { to: '/grade', label: '📝 Chấm bài lẻ / cả lớp', end: false },
@@ -74,6 +77,9 @@ export default function App() {
           <Route path="/exam/*" element={<ExamTab />} />
           <Route path="/history/*" element={<HistoryTab />} />
           <Route path="/saved/*" element={<SavedTab />} />
+          {/* Khóa học: danh sách + màn hình 1 bài (:lessonId). */}
+          <Route path="/course" element={<CourseTab />} />
+          <Route path="/course/lesson/:lessonId" element={<LessonView />} />
           {/* Ngoài 4 tab — vào từ widget danh tính góc trên. */}
           <Route path="/account" element={<AccountPage />} />
           <Route path="*" element={<Navigate to="/exam" replace />} />

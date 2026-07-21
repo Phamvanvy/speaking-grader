@@ -1546,6 +1546,26 @@ def course_refresh(
         raise HTTPException(status_code=500, detail=f"Lỗi refresh khóa học: {e}") from e
 
 
+@app.get("/course/lesson/{lesson_id}")
+async def course_lesson(
+    lesson_id: str, user_id: str, lang: str | None = None,
+    authorization: str | None = Header(None),
+) -> dict:
+    """Nội dung 1 lesson (từ luyện / tips / bài mẫu). Có thể chạm LLM → threadpool."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    config = _resolve_config(lang)
+    lang_key = (config.feedback_lang or "vi").strip().lower()
+    try:
+        return await run_in_threadpool(
+            course.get_lesson_content, _BASE_CONFIG, config, user_id, lesson_id, lang_key
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi lấy nội dung lesson")
+        raise HTTPException(status_code=500, detail=f"Lỗi nội dung lesson: {e}") from e
+
+
 @app.post("/course/lesson/{lesson_id}/complete")
 def course_lesson_complete(
     lesson_id: str,

@@ -16,9 +16,17 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src import history
+from src import history, word_suggest
 from src.config import load_config
-from src.course import generate, mark_lesson_complete, merge_user, profile, store
+from src.course import (
+    content,
+    generate,
+    get_lesson_content,
+    mark_lesson_complete,
+    merge_user,
+    profile,
+    store,
+)
 from src.course.syllabus import SUPPORTED_EXAMS, all_lessons
 
 
@@ -313,3 +321,85 @@ def test_merge_user_moves_progress_wipes_mastery(cfg):
 
 def test_supported_exams():
     assert SUPPORTED_EXAMS == ("toeic", "ielts")
+
+
+# ── Nội dung bài (content.py) ─────────────────────────────────────────────
+
+
+@pytest.fixture()
+def small_index(monkeypatch):
+    """Index nhỏ deterministic (mirror test_word_suggest) để không đọc wordlist thật."""
+    wl = ["the", "think", "this", "that", "cat", "see", "zoo", "ship",
+          "chair", "job", "van", "sit", "month", "three", "bath", "thin"]
+    monkeypatch.setattr(word_suggest, "_load_wordlist", lambda: wl)
+    monkeypatch.setattr(word_suggest, "_index", None)
+    yield wl
+    word_suggest._index = None
+
+
+def test_lesson_content_pronunciation(cfg, small_index, monkeypatch):
+    # cached_suggestions: dùng fallback tần suất (không LLM) → deterministic.
+    monkeypatch.setattr(
+        word_suggest, "cached_suggestions",
+        lambda c, cfg2, sym, lang, **k: (
+            [{"word": w, "reason": None} for w in word_suggest.candidates_for(sym)[:5]],
+            False,
+        ),
+    )
+    out = get_lesson_content(cfg, cfg, "u1", "toeic.pron.th_family", "vi")
+    assert out["dimension"] == "pronunciation"
+    assert out["phonemes"]  # normalized θ/ð
+    assert out["words"] and all(w["ipa"] for w in out["words"])
+    assert out["done_threshold"] == pytest.approx(0.80)
+
+
+def test_lesson_content_pronunciation_excludes_saved(cfg, small_index, monkeypatch):
+    from src import words as words_mod
+    words_mod.upsert_word(cfg, "u1", "think")
+    monkeypatch.setattr(
+        word_suggest, "cached_suggestions",
+        lambda c, cfg2, sym, lang, **k: ([{"word": "think", "reason": None}], False),
+    )
+    out = get_lesson_content(cfg, cfg, "u1", "toeic.pron.th_family", "vi")
+    assert "think" not in [w["word"] for w in out["words"]]
+
+
+def test_lesson_content_rubric_aggregates_history(cfg):
+    uid = "u1"
+    r = _result("toeic", "describe_picture",
+                [("grammar", 2.0)], 140)
+    r["scores"]["criteria"][0]["suggestions"] = ["Dùng đúng thì hiện tại tiếp diễn"]
+    _insert(cfg, uid, _recent(1), "aaa", r)
+    out = get_lesson_content(cfg, cfg, uid, "toeic.rubric.grammar", "vi")
+    assert out["dimension"] == "rubric"
+    assert "Dùng đúng thì hiện tại tiếp diễn" in out["learner_suggestions"]
+    assert out["tips"]  # tips tĩnh vẫn có
+    assert out["done_threshold"] == pytest.approx(0.67)
+
+
+def test_lesson_content_qtype_uses_and_caches_sample(cfg, monkeypatch):
+    calls = []
+
+    class _Ans:
+        answer = "A model answer."
+        outline = ["intro", "body"]
+        highlights = ["strong collocation"]
+        target_band = "200"
+
+    def fake_suggest(config, qt, **k):
+        calls.append(qt.key)
+        return _Ans()
+
+    monkeypatch.setattr(content, "suggest_answer", fake_suggest)
+    out1 = get_lesson_content(cfg, cfg, "u1", "toeic.qtype.read_aloud", "vi")
+    out2 = get_lesson_content(cfg, cfg, "u1", "toeic.qtype.read_aloud", "vi")
+    assert out1["sample_answer"]["answer"] == "A model answer."
+    assert out1["scale_description"] and out1["guidance"]
+    # Lần 2 đọc cache → không gọi LLM lại.
+    assert calls == ["read_aloud"]
+    assert out2["sample_answer"]["answer"] == "A model answer."
+
+
+def test_lesson_content_unknown_raises(cfg):
+    with pytest.raises(ValueError):
+        get_lesson_content(cfg, cfg, "u1", "toeic.pron.nope", "vi")

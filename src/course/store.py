@@ -85,6 +85,19 @@ CREATE TABLE IF NOT EXISTS course_activity (
   total_completed INTEGER NOT NULL DEFAULT 0,
   updated_at      TEXT
 );
+
+-- Cache nội dung bài (chỉ dạng-câu: SampleAnswer do LLM sinh) — USER-AGNOSTIC,
+-- key (lesson_id, lang). TTL + version do content.py quyết định khi đọc. Phát âm
+-- reuse words.suggestion_cache; rubric tính từ history mỗi lần (không cache).
+CREATE TABLE IF NOT EXISTS lesson_content_cache (
+  lesson_id     TEXT NOT NULL,
+  lang          TEXT NOT NULL,
+  cache_version INTEGER NOT NULL DEFAULT 1,
+  content_json  TEXT NOT NULL,
+  model         TEXT,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (lesson_id, lang)
+);
 """
 
 
@@ -381,6 +394,63 @@ def _parse_day(day: str | None) -> date | None:
         return date.fromisoformat(day) if day else None
     except (TypeError, ValueError):
         return None
+
+
+# ── Cache nội dung bài dạng-câu (LLM) ────────────────────────────────────
+
+
+def get_lesson_content_cache(cfg: Config, lesson_id: str, lang: str) -> dict | None:
+    """Entry cache {content, model, cache_version, created_at}; None nếu chưa có."""
+    import json
+
+    conn = _connect(cfg)
+    try:
+        row = conn.execute(
+            "SELECT content_json, model, cache_version, created_at "
+            "FROM lesson_content_cache WHERE lesson_id = ? AND lang = ?",
+            (lesson_id, lang),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            content = json.loads(row["content_json"])
+        except (TypeError, ValueError):
+            return None
+        return {
+            "content": content,
+            "model": row["model"],
+            "cache_version": row["cache_version"],
+            "created_at": row["created_at"],
+        }
+    finally:
+        conn.close()
+
+
+def put_lesson_content_cache(
+    cfg: Config, lesson_id: str, lang: str, content: dict, model: str | None,
+    cache_version: int,
+) -> None:
+    """Ghi/ghi đè cache nội dung bài (upsert theo (lesson_id, lang))."""
+    import json
+
+    conn = _connect(cfg)
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO lesson_content_cache
+                  (lesson_id, lang, cache_version, content_json, model, created_at)
+                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                ON CONFLICT(lesson_id, lang) DO UPDATE SET
+                  cache_version = excluded.cache_version,
+                  content_json = excluded.content_json,
+                  model = excluded.model,
+                  created_at = excluded.created_at
+                """,
+                (lesson_id, lang, cache_version, json.dumps(content, ensure_ascii=False), model),
+            )
+    finally:
+        conn.close()
 
 
 # ── Gộp tài khoản (dùng khi /auth/claim) ─────────────────────────────────

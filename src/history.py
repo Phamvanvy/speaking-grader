@@ -612,6 +612,44 @@ def list_results_since(
     return results, cursor
 
 
+def list_recent_results(
+    cfg: Config, user_id: str, limit: int = 50
+) -> list[dict]:
+    """Result dicts (đã parse) MỚI NHẤT trước — records + items của user. CHỈ ĐỌC.
+
+    Dùng cho khóa học (src/course/content.py) gộp suggestions/corrections gần đây
+    của 1 tiêu chí. Khác list_results_since (quét tăng dần ASC theo con trỏ), hàm
+    này lấy N blob mới nhất (DESC) không trạng thái. `limit` chặn payload.
+    """
+    user_id = validate_user_id(user_id)
+    limit = max(1, min(int(limit), 300))
+    conn = _connect(cfg)
+    try:
+        rows = conn.execute(
+            """
+            SELECT created_at, id, result_json FROM history_records
+              WHERE user_id = ? AND result_json IS NOT NULL
+            UNION ALL
+            SELECT i.created_at, i.id, i.result_json FROM history_items i
+              JOIN history_records r ON r.id = i.record_id
+              WHERE r.user_id = ? AND i.result_json IS NOT NULL
+            ORDER BY created_at DESC, id DESC LIMIT ?
+            """,
+            (user_id, user_id, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    out: list[dict] = []
+    for row in rows:
+        try:
+            parsed = json.loads(row["result_json"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(parsed, dict):
+            out.append(parsed)
+    return out
+
+
 def get_audio_path(
     cfg: Config, user_id: str, record_id: str, item_id: str | None = None
 ) -> Path | None:

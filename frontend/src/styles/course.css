@@ -1,0 +1,212 @@
+/* Tab "Khóa học" — bám tokens legacy (.card/.btn) + màu trạng thái riêng.
+   Dùng biến CSS theme sẵn có; dark mode kế thừa từ theme-dark.css. */
+
+.course-intro,
+.course-lesson-desc,
+.course-note {
+  color: var(--muted, #64748b);
+  font-size: 0.9rem;
+  margin: 0.3rem 0 0.6rem;
+}
+.course-note {
+  background: var(--surface-2, #f1f5f9);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+}
+
+/* Chọn kỳ thi */
+.course-exam-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.8rem;
+}
+.course-exam-tab {
+  border: 1px solid var(--border, #cbd5e1);
+  background: var(--surface, #fff);
+  color: var(--text, #0f172a);
+  border-radius: 999px;
+  padding: 0.3rem 0.9rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+.course-exam-tab.active {
+  background: var(--primary, #2563eb);
+  border-color: var(--primary, #2563eb);
+  color: #fff;
+}
+
+/* Tiến độ + streak */
+.course-summary {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.course-progress {
+  flex: 1 1 220px;
+}
+.course-progress__bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2, #e2e8f0);
+  overflow: hidden;
+}
+.course-progress__fill {
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  transition: width 0.3s ease;
+}
+.course-progress__label {
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted, #64748b);
+}
+.course-streak {
+  font-weight: 700;
+  color: #ea580c;
+  white-space: nowrap;
+}
+
+/* Unit + lesson */
+.course-unit__title {
+  margin: 0 0 0.6rem;
+  font-size: 1.05rem;
+}
+.course-lessons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.course-lesson {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  padding: 0.6rem 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.course-lesson:hover:not(.is-locked) {
+  border-color: var(--primary, #2563eb);
+  box-shadow: 0 1px 6px rgba(37, 99, 235, 0.15);
+}
+.course-lesson.is-locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.course-lesson.is-focus {
+  border-color: #f59e0b;
+  background: color-mix(in srgb, #f59e0b 8%, var(--surface, #fff));
+}
+.course-lesson__main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.course-lesson__title {
+  font-weight: 600;
+}
+.course-lesson__desc {
+  font-size: 0.8rem;
+  color: var(--muted, #64748b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.course-lesson__side {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.course-lesson__score {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #16a34a;
+}
+
+/* Badge trạng thái */
+.course-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.course-badge.locked { background: #e2e8f0; color: #64748b; }
+.course-badge.available { background: #dbeafe; color: #1d4ed8; }
+.course-badge.in_progress { background: #fef3c7; color: #b45309; }
+.course-badge.done { background: #dcfce7; color: #15803d; }
+.course-badge.focus { background: #fde68a; color: #92400e; }
+
+/* Màn hình bài học */
+.course-section-label {
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin: 0.9rem 0 0.4rem;
+}
+.course-pron-words {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.course-pron-word {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+}
+.course-pron-word__play {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+.course-pron-word__text { flex: 1; min-width: 0; }
+.course-pron-word__ipa { color: var(--muted, #64748b); }
+.course-pron-word__reason {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted, #64748b);
+}
+.course-tips,
+.course-corrections {
+  margin: 0.2rem 0 0.4rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.course-tips--learner li { color: #1d4ed8; }
+.course-corrections__ex {
+  font-size: 0.82rem;
+  color: var(--muted, #64748b);
+}
+.course-guidance,
+.course-sample__answer {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.course-complete {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+}
+.course-complete__hint {
+  font-size: 0.85rem;
+  color: var(--muted, #64748b);
+  text-align: center;
+}
+.course-complete__status {
+  font-size: 0.9rem;
+  font-weight: 600;
+}

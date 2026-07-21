@@ -17,6 +17,7 @@ import logging
 
 from ..config import Config
 from ..phoneme_profile import get_weak_phonemes
+from . import content as _content
 from . import generate, profile, store
 from .generate import DONE_THRESHOLD
 from .syllabus import SUPPORTED_EXAMS, get_lesson
@@ -26,6 +27,7 @@ logger = logging.getLogger("toeic.course")
 __all__ = [
     "SUPPORTED_EXAMS",
     "get_course",
+    "get_lesson_content",
     "refresh",
     "mark_lesson_complete",
     "merge_user",
@@ -50,10 +52,20 @@ def get_course(cfg: Config, user_id: str, exam: str = "toeic") -> dict:
     exam = _validate_exam(exam)
     profile.refresh_mastery(cfg, user_id)
     mastery = profile.get_mastery(cfg, user_id, exam)
-    weak, _source = get_weak_phonemes(cfg, user_id, top_k=8)
+    # top_k phủ HẾT FALLBACK_WEAK_PHONEMES (10) để cold-start mọi nhóm âm đều có
+    # tín hiệu → các Unit hòa priority và về đúng thứ tự syllabus (phát âm trước),
+    # thay vì short_vowels bị cắt thành no-signal kéo mean phát âm xuống.
+    weak, _source = get_weak_phonemes(cfg, user_id, top_k=10)
     progress = store.get_progress(cfg, user_id)
     activity = store.get_activity(cfg, user_id)
     return generate.build_course(exam, mastery, weak, progress, activity)
+
+
+def get_lesson_content(
+    cfg: Config, config: Config, user_id: str, lesson_id: str, lang: str
+) -> dict:
+    """Nội dung 1 lesson (từ luyện / tips / bài mẫu) — xem course/content.py."""
+    return _content.get_lesson_content(cfg, config, user_id, lesson_id, lang)
 
 
 def refresh(cfg: Config, user_id: str) -> dict:
