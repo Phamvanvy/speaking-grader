@@ -1,5 +1,6 @@
 // API layer cho tab "Khóa học" — bám apiGet/apiPostForm (lib/api.ts) + getUserId.
-// Backend: src/course/ (GET /course, GET /course/lesson/{id}, POST .../complete).
+// Backend: src/course/ (GET /course/state, GET /course/lesson/{id}/content, POST .../complete).
+// Lưu ý: API KHÔNG dùng bare /course và /course/lesson/{id} — đó là route SPA.
 
 import { apiFetch, apiGet, apiPostForm } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
@@ -96,12 +97,12 @@ export interface LessonContent {
 
 export function getCourse(exam: string): Promise<CourseView> {
   const uid = getUserId();
-  return apiGet<CourseView>(`/course?user_id=${encodeURIComponent(uid)}&exam=${encodeURIComponent(exam)}`);
+  return apiGet<CourseView>(`/course/state?user_id=${encodeURIComponent(uid)}&exam=${encodeURIComponent(exam)}`);
 }
 
 export function getLesson(lessonId: string): Promise<LessonContent> {
   const uid = getUserId();
-  return apiGet<LessonContent>(`/course/lesson/${encodeURIComponent(lessonId)}?user_id=${encodeURIComponent(uid)}`);
+  return apiGet<LessonContent>(`/course/lesson/${encodeURIComponent(lessonId)}/content?user_id=${encodeURIComponent(uid)}`);
 }
 
 export interface CompleteResult {

@@ -1518,7 +1518,11 @@ async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
 # nhau (cùng lý do /history/list, /words/suggestions ở trên).
 
 
-@app.get("/course")
+# NB: bare "/course" và "/course/lesson/{id}" là route SPA (React Router) — API phải
+# nằm ở sub-path khác, nếu không sẽ chiếm chỗ và trả 422 khi mở link trực tiếp / F5
+# (xem convention /history/list). Đó là lý do state ở /course/state, content ở
+# /course/lesson/{id}/content.
+@app.get("/course/state")
 def course_get(
     user_id: str, exam: str = "toeic", authorization: str | None = Header(None)
 ) -> dict:
@@ -1546,7 +1550,7 @@ def course_refresh(
         raise HTTPException(status_code=500, detail=f"Lỗi refresh khóa học: {e}") from e
 
 
-@app.get("/course/lesson/{lesson_id}")
+@app.get("/course/lesson/{lesson_id}/content")
 async def course_lesson(
     lesson_id: str, user_id: str, lang: str | None = None,
     authorization: str | None = Header(None),
