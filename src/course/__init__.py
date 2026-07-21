@@ -17,6 +17,7 @@ import logging
 
 from ..config import Config
 from ..phoneme_profile import get_weak_phonemes
+from ..rubrics.base import exam_language
 from . import content as _content
 from . import generate, profile, store
 from .generate import DONE_THRESHOLD
@@ -55,7 +56,11 @@ def get_course(cfg: Config, user_id: str, exam: str = "toeic") -> dict:
     # top_k phủ HẾT FALLBACK_WEAK_PHONEMES (10) để cold-start mọi nhóm âm đều có
     # tín hiệu → các Unit hòa priority và về đúng thứ tự syllabus (phát âm trước),
     # thay vì short_vowels bị cắt thành no-signal kéo mean phát âm xuống.
-    weak, _source = get_weak_phonemes(cfg, user_id, top_k=10)
+    # Âm yếu theo NGÔN NGỮ nói của kỳ thi (TOEIC/IELTS→en, TOPIK→ko) — hồ sơ âm
+    # đã tách lang ở phoneme_stats nên khóa TOPIK chỉ lấy âm yếu tiếng Hàn.
+    weak, _source = get_weak_phonemes(
+        cfg, user_id, top_k=10, lang=exam_language(exam)
+    )
     # Khép vòng "khóa học theo kết quả test": lesson rubric/qtype mà bài chấm THẬT
     # đã cho thấy thành thạo (đủ mẫu + đạt ngưỡng) tự đánh dấu done — không cần
     # luyện lại thủ công. Không bump streak (không phải hành động luyện chủ động).

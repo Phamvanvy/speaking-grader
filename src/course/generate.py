@@ -19,8 +19,14 @@ Ngưỡng "done" theo dimension (điểm đã chuẩn hóa 0-1) — mark_lesson_
 
 from __future__ import annotations
 
+from ..phoneme.ipa.ko.phoneme_set_ko import normalize_ipa_ko
 from ..phoneme.ipa.phoneme_set import normalize_ipa
-from .syllabus import SYLLABUS, Lesson, Unit
+from ..rubrics.base import exam_language
+from .syllabus import PHONEME_GROUPS, SYLLABUS, Lesson, Unit
+
+
+def _norm(symbol: str, lang: str) -> str:
+    return normalize_ipa_ko(symbol) if lang == "ko" else normalize_ipa(symbol)
 
 # Ngưỡng đạt để đánh dấu lesson 'done' — điểm đã chuẩn hóa 0-1. Phát âm khớt hơn
 # (âm rõ đúng/sai); rubric & dạng câu 0.67 ≈ 2/3 TOEIC / 6/9 IELTS (mức khá).
@@ -42,29 +48,28 @@ _NO_SIGNAL_PRIORITY = 0.3
 
 
 def _weak_map(weak_phonemes: list[dict]) -> dict[str, float]:
-    """symbol (normalized) → weakness 0-1. error_rate làm weakness; entry fallback
-    (error_rate None, chưa đủ data) → _UNKNOWN_PRIORITY."""
+    """symbol → weakness 0-1. Symbol GIỮ NGUYÊN (get_weak_phonemes đã chuẩn hoá
+    theo lang đúng). error_rate làm weakness; entry fallback (None) → _UNKNOWN."""
     out: dict[str, float] = {}
     for w in weak_phonemes or []:
         sym = w.get("symbol")
         if not sym:
             continue
         rate = w.get("error_rate")
-        out[normalize_ipa(sym)] = (
-            float(rate) if isinstance(rate, (int, float)) else _UNKNOWN_PRIORITY
-        )
+        out[sym] = float(rate) if isinstance(rate, (int, float)) else _UNKNOWN_PRIORITY
     return out
 
 
-def _lesson_priority(lesson: Lesson, mastery: dict, weak: dict[str, float]) -> float:
-    """priority 0-1 của 1 lesson theo dimension."""
+def _lesson_priority(
+    lesson: Lesson, mastery: dict, weak: dict[str, float], lang: str
+) -> float:
+    """priority 0-1 của 1 lesson theo dimension. `lang` chuẩn hoá symbol nhóm âm
+    khớp với key của weak (en: normalize_ipa; ko: normalize_ipa_ko)."""
     if lesson.dimension == "pronunciation":
-        from .syllabus import PHONEME_GROUPS
-
         present = [
-            weak[normalize_ipa(s)]
+            weak[_norm(s, lang)]
             for s in PHONEME_GROUPS.get(lesson.target, [])
-            if normalize_ipa(s) in weak
+            if _norm(s, lang) in weak
         ]
         return max(present) if present else _NO_SIGNAL_PRIORITY
     bucket = "criteria" if lesson.dimension == "rubric" else "question_types"
@@ -123,13 +128,14 @@ def build_course(
 ) -> dict:
     """View model khóa học cá nhân hóa cho 1 kỳ thi."""
     weak = _weak_map(weak_phonemes)
+    lang = exam_language(exam)
     units_src: list[Unit] = SYLLABUS.get(exam, [])
 
     # 1) priority mỗi lesson.
     prio: dict[str, float] = {}
     for unit in units_src:
         for ls in unit.lessons:
-            prio[ls.id] = _lesson_priority(ls, mastery, weak)
+            prio[ls.id] = _lesson_priority(ls, mastery, weak, lang)
 
     # 2) Xếp Unit theo priority: MAX lesson (điểm yếu mạnh nhất nổi lên — tránh 1
     #    tín hiệu mạnh bị loãng bởi các lesson no-signal), rồi mean, rồi thứ tự

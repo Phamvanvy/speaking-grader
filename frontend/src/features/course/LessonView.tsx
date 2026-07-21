@@ -142,6 +142,7 @@ function PronBody({ lesson, onCompleted }: { lesson: LessonContent; onCompleted:
       fd.append('no_ai', 'true');
       fd.append('strict', 'true');
       fd.append('accent', accent);
+      if (lesson.exam === 'topik') fd.append('exam', 'topik'); // pipeline tiếng Hàn
       const res = await apiFetch('/grade', { method: 'POST', body: fd });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const result = await res.json();

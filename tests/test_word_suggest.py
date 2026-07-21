@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS word_info_cache (
 """
 
 
-def test_words_db_migrates_v1_to_v2(cfg):
+def test_words_db_migrates_v1_to_current(cfg):
     conn = sqlite3.connect(cfg.words_db_path)
     with conn:
         conn.executescript(_V1_DDL)
@@ -180,14 +180,43 @@ def test_words_db_migrates_v1_to_v2(cfg):
             "INSERT INTO saved_words (user_id, word, ipa) VALUES ('u1', 'think', 'θɪŋk')"
         )
     conn.close()
-    # Mở qua words._connect → tự migrate lên v2, dữ liệu cũ nguyên vẹn.
+    # Mở qua words._connect → tự migrate lên schema hiện tại, dữ liệu cũ nguyên vẹn.
     assert words.list_words(cfg, "u1")["words"][0]["word"] == "think"
     conn = sqlite3.connect(cfg.words_db_path)
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == words._SCHEMA_VERSION
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(phoneme_stats)")}
     conn.close()
     assert {"saved_words", "word_info_cache", "phoneme_stats",
-            "phoneme_profile_state", "suggestion_cache"} <= tables
+            "phoneme_profile_state", "suggestion_cache", "user_settings"} <= tables
+    assert "lang" in cols  # v4: phoneme_stats có cột lang
+
+
+def test_words_db_migrates_v3_phoneme_stats_backfills_en(cfg):
+    # Bảng phoneme_stats v3 (PK cũ (user_id, symbol), KHÔNG có lang) + 1 hàng.
+    conn = sqlite3.connect(cfg.words_db_path)
+    with conn:
+        conn.executescript(_V1_DDL)
+        conn.executescript(
+            "CREATE TABLE phoneme_stats (user_id TEXT NOT NULL, symbol TEXT NOT NULL,"
+            " attempts REAL DEFAULT 0, ok REAL DEFAULT 0, sub REAL DEFAULT 0,"
+            " del REAL DEFAULT 0, err_weighted REAL DEFAULT 0, heard_json TEXT,"
+            " updated_at TEXT, PRIMARY KEY (user_id, symbol));"
+        )
+        conn.execute(
+            "INSERT INTO phoneme_stats (user_id, symbol, attempts, err_weighted)"
+            " VALUES ('u1', 'θ', 7, 5)"
+        )
+        conn.execute("PRAGMA user_version = 3")
+    conn.close()
+    # _connect → migrate v3→v4: hàng cũ backfill lang='en', dữ liệu giữ nguyên.
+    stats_en = words.get_phoneme_stats(cfg, "u1", "en")
+    assert stats_en["θ"]["attempts"] == pytest.approx(7.0)
+    assert words.get_phoneme_stats(cfg, "u1", "ko") == {}  # không rò sang ko
+    conn = sqlite3.connect(cfg.words_db_path)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(phoneme_stats)")}
+    conn.close()
+    assert "lang" in cols
 
 
 # ── Inverted index ────────────────────────────────────────────────────────

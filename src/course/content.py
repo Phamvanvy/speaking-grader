@@ -19,12 +19,15 @@ from datetime import datetime, timezone
 
 from .. import history, word_suggest, words as words_mod
 from ..config import Config
+from ..phoneme.ipa.ko import word_to_ipa_ko
+from ..phoneme.ipa.ko.phoneme_set_ko import normalize_ipa_ko
 from ..phoneme.ipa.phoneme_set import normalize_ipa
 from ..rubrics import resolve_question_type
+from ..rubrics.base import exam_language
 from ..suggest import suggest_answer
 from . import store
 from .generate import DONE_THRESHOLD
-from .syllabus import PHONEME_GROUPS, get_lesson
+from .syllabus import KOREAN_PRACTICE_WORDS, PHONEME_GROUPS, get_lesson
 
 logger = logging.getLogger("toeic.course.content")
 
@@ -67,6 +70,10 @@ def get_lesson_content(
 
 
 def _pron_content(cfg, config, user_id, lesson, lang) -> dict:
+    # Tiếng Hàn: từ luyện curated (KOREAN_PRACTICE_WORDS) + IPA sinh qua G2P Hàn;
+    # KHÔNG dùng word_suggest (index CMUdict tiếng Anh).
+    if exam_language(lesson.exam) == "ko":
+        return _pron_content_ko(lesson)
     symbols = PHONEME_GROUPS.get(lesson.target, [])
     saved = {e["word"] for e in words_mod.list_words(cfg, user_id)["words"]}
     _by_symbol, by_word = word_suggest._get_index()
@@ -92,6 +99,25 @@ def _pron_content(cfg, config, user_id, lesson, lang) -> dict:
             break
     return {
         "phonemes": [normalize_ipa(s) for s in symbols],
+        "words": out_words,
+    }
+
+
+def _pron_content_ko(lesson) -> dict:
+    """Từ luyện tiếng Hàn curated: hangul + IPA (word_to_ipa_ko, khớp reference
+    recognizer) + nghĩa tiếng Việt (đưa vào `reason` để UI hiển thị)."""
+    out_words: list[dict] = []
+    for hangul, meaning in KOREAN_PRACTICE_WORDS.get(lesson.target, []):
+        try:
+            ipa = "".join(normalize_ipa_ko(s) for s in word_to_ipa_ko(hangul))
+        except Exception:  # noqa: BLE001 - IPA lỗi không chặn từ luyện
+            ipa = ""
+        out_words.append({
+            "word": hangul, "ipa": ipa,
+            "phoneme": lesson.target, "reason": meaning,
+        })
+    return {
+        "phonemes": [normalize_ipa_ko(s) for s in PHONEME_GROUPS.get(lesson.target, [])],
         "words": out_words,
     }
 

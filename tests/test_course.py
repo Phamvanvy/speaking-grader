@@ -340,12 +340,42 @@ def test_topik_mastery_normalized_by_five(cfg):
     assert m["question_types"]["q1_answer_question"]["mastery"] == pytest.approx(0.75)
 
 
-def test_build_course_topik_has_no_pronunciation():
+def test_build_course_topik_has_three_dimensions():
     course = generate.build_course("topik", _empty_mastery(), [], {}, {})
-    dims = [u["dimension"] for u in course["units"]]
-    assert "pronunciation" not in dims
-    assert set(dims) == {"rubric", "question_type"}
-    assert course["progress"]["total"] == len(all_lessons("topik")) == 10
+    dims = {u["dimension"] for u in course["units"]}
+    assert dims == {"pronunciation", "rubric", "question_type"}
+    assert course["progress"]["total"] == len(all_lessons("topik")) == 13
+
+
+def test_topik_pron_weak_phoneme_lang_separated(cfg):
+    uid = "u1"
+    # Bài chấm TOPIK có lỗi âm căng /k͈/ (nặng), lặp đủ mẫu để vào weak list.
+    kpts = [{"symbol": "k͈", "status": "sub", "severity": "high", "heard": "k"}] * 6
+    _insert(cfg, uid, _recent(1), "ko1",
+            {"exam": "topik", "question_type": "q1_answer_question",
+             "phoneme": {"score": {"words": [{"word": "까", "phonemes": kpts}]}}})
+    # Bài TOEIC lỗi /θ/.
+    epts = [{"symbol": "θ", "status": "sub", "severity": "high", "heard": "t"}] * 6
+    _insert(cfg, uid, _recent(1), "en1",
+            {"exam": "toeic", "question_type": "read_aloud",
+             "phoneme": {"score": {"words": [{"word": "think", "phonemes": epts}]}}})
+    from src.phoneme_profile import get_weak_phonemes
+
+    ko_weak, ko_src = get_weak_phonemes(cfg, uid, top_k=8, lang="ko")
+    en_weak, _ = get_weak_phonemes(cfg, uid, top_k=8, lang="en")
+    ko_syms = {w["symbol"] for w in ko_weak if not w["fallback"]}
+    en_syms = {w["symbol"] for w in en_weak if not w["fallback"]}
+    assert "k͈" in ko_syms and "θ" not in ko_syms   # ko chỉ thấy âm Hàn
+    assert "θ" in en_syms and "k͈" not in en_syms   # en chỉ thấy âm Anh
+
+
+def test_lesson_content_korean_pronunciation(cfg):
+    out = get_lesson_content(cfg, cfg, "u1", "topik.pron.ko_tense", "vi")
+    assert out["dimension"] == "pronunciation"
+    assert "p͈" in out["phonemes"]  # âm căng (không fold với model phone-mfa)
+    assert out["words"] and all(w["word"] and w["ipa"] for w in out["words"])
+    # reason = nghĩa tiếng Việt curated.
+    assert any(w["reason"] for w in out["words"])
 
 
 def test_topik_mark_complete_rubric_threshold(cfg):

@@ -36,7 +36,7 @@ from .history import validate_user_id  # noqa: F401 - re-export cho api.py
 
 logger = logging.getLogger("toeic.words")
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 # Giữ tối đa N từ mỗi user (xoá từ lưu cũ nhất khi vượt) — chống phình vô hạn.
 MAX_WORDS_PER_USER = 500
@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS word_info_cache (
 CREATE TABLE IF NOT EXISTS phoneme_stats (
   user_id      TEXT NOT NULL,
   symbol       TEXT NOT NULL,
+  lang         TEXT NOT NULL DEFAULT 'en',
   attempts     REAL NOT NULL DEFAULT 0,
   ok           REAL NOT NULL DEFAULT 0,
   sub          REAL NOT NULL DEFAULT 0,
@@ -76,7 +77,7 @@ CREATE TABLE IF NOT EXISTS phoneme_stats (
   err_weighted REAL NOT NULL DEFAULT 0,
   heard_json   TEXT,
   updated_at   TEXT,
-  PRIMARY KEY (user_id, symbol)
+  PRIMARY KEY (user_id, symbol, lang)
 );
 
 CREATE TABLE IF NOT EXISTS phoneme_profile_state (
@@ -102,6 +103,31 @@ CREATE TABLE IF NOT EXISTS user_settings (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   PRIMARY KEY (user_id, key)
 );
+"""
+
+# Migration v3→v4: thêm cột `lang` vào phoneme_stats (tách hồ sơ âm theo ngôn ngữ
+# nói của kỳ thi — en cho TOEIC/IELTS, ko cho TOPIK). Dữ liệu cũ toàn bộ là tiếng
+# Anh → backfill lang='en'. Rebuild bảng vì SQLite không ALTER được PRIMARY KEY.
+_MIGRATE_PHONEME_STATS_V4 = """
+ALTER TABLE phoneme_stats RENAME TO _phoneme_stats_v3;
+CREATE TABLE phoneme_stats (
+  user_id      TEXT NOT NULL,
+  symbol       TEXT NOT NULL,
+  lang         TEXT NOT NULL DEFAULT 'en',
+  attempts     REAL NOT NULL DEFAULT 0,
+  ok           REAL NOT NULL DEFAULT 0,
+  sub          REAL NOT NULL DEFAULT 0,
+  del          REAL NOT NULL DEFAULT 0,
+  err_weighted REAL NOT NULL DEFAULT 0,
+  heard_json   TEXT,
+  updated_at   TEXT,
+  PRIMARY KEY (user_id, symbol, lang)
+);
+INSERT INTO phoneme_stats
+  (user_id, symbol, lang, attempts, ok, sub, del, err_weighted, heard_json, updated_at)
+  SELECT user_id, symbol, 'en', attempts, ok, sub, del, err_weighted, heard_json, updated_at
+  FROM _phoneme_stats_v3;
+DROP TABLE _phoneme_stats_v3;
 """
 
 # Giới hạn để bảng settings không bị lạm dụng làm kho dữ liệu tuỳ ý.
@@ -137,7 +163,11 @@ def _connect(cfg: Config) -> sqlite3.Connection:
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     if version < _SCHEMA_VERSION:
         with conn:
-            conn.executescript(_DDL)
+            conn.executescript(_DDL)  # tạo bảng còn thiếu (IF NOT EXISTS)
+            # v3→v4: phoneme_stats cũ chưa có cột lang → rebuild + backfill 'en'.
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(phoneme_stats)")}
+            if "lang" not in cols:
+                conn.executescript(_MIGRATE_PHONEME_STATS_V4)
             conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     return conn
 
@@ -353,13 +383,15 @@ def put_word_info(
 # ── Phoneme stats (hồ sơ âm yếu — src/phoneme_profile.py ghi/đọc) ─────────
 
 
-def get_phoneme_stats(cfg: Config, user_id: str) -> dict[str, dict]:
-    """Toàn bộ thống kê phoneme của user: {symbol: {attempts, ok, sub, del,
-    err_weighted, heard: {phone: weight}}}."""
+def get_phoneme_stats(cfg: Config, user_id: str, lang: str = "en") -> dict[str, dict]:
+    """Thống kê phoneme của user cho 1 NGÔN NGỮ: {symbol: {attempts, ok, sub, del,
+    err_weighted, heard: {phone: weight}}}. Default 'en' → hành vi cũ (TOEIC/IELTS
+    + tab Từ đã lưu) bit-for-bit; 'ko' cho khóa học TOPIK."""
     conn = _connect(cfg)
     try:
         rows = conn.execute(
-            "SELECT * FROM phoneme_stats WHERE user_id = ?", (user_id,)
+            "SELECT * FROM phoneme_stats WHERE user_id = ? AND lang = ?",
+            (user_id, lang),
         ).fetchall()
         stats: dict[str, dict] = {}
         for r in rows:
@@ -408,10 +440,13 @@ def apply_phoneme_tallies(
             if current >= new_cursor:
                 return False
             now = "strftime('%Y-%m-%dT%H:%M:%SZ','now')"
-            for symbol, t in tallies.items():
+            for key, t in tallies.items():
+                # key: (symbol, lang) HOẶC symbol thuần → ('en'), giữ back-compat
+                # với caller/test cũ truyền tallies keyed theo symbol.
+                symbol, lang = key if isinstance(key, tuple) else (key, "en")
                 old = conn.execute(
-                    "SELECT heard_json FROM phoneme_stats WHERE user_id = ? AND symbol = ?",
-                    (user_id, symbol),
+                    "SELECT heard_json FROM phoneme_stats WHERE user_id = ? AND symbol = ? AND lang = ?",
+                    (user_id, symbol, lang),
                 ).fetchone()
                 heard: dict[str, float] = {}
                 if old and old["heard_json"]:
@@ -424,9 +459,9 @@ def apply_phoneme_tallies(
                 conn.execute(
                     f"""
                     INSERT INTO phoneme_stats
-                      (user_id, symbol, attempts, ok, sub, del, err_weighted, heard_json, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, {now})
-                    ON CONFLICT(user_id, symbol) DO UPDATE SET
+                      (user_id, symbol, lang, attempts, ok, sub, del, err_weighted, heard_json, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, {now})
+                    ON CONFLICT(user_id, symbol, lang) DO UPDATE SET
                       attempts     = attempts + excluded.attempts,
                       ok           = ok + excluded.ok,
                       sub          = sub + excluded.sub,
@@ -436,7 +471,7 @@ def apply_phoneme_tallies(
                       updated_at   = excluded.updated_at
                     """,
                     (
-                        user_id, symbol,
+                        user_id, symbol, lang,
                         t.get("attempts", 0), t.get("ok", 0), t.get("sub", 0),
                         t.get("del", 0), t.get("err_weighted", 0),
                         json.dumps(heard, ensure_ascii=False) if heard else None,

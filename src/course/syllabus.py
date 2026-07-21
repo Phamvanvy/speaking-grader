@@ -20,17 +20,31 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..rubrics import EXAM_REGISTRIES, list_question_types, resolve_question_type
+from ..rubrics.base import exam_language
 
 # ── Nhóm âm cho Unit phát âm ──────────────────────────────────────────────
-# key nhóm → danh sách IPA. Seed từ phoneme_profile.FALLBACK_WEAK_PHONEMES (điểm
-# nóng L1 Việt: fricative/affricate + nguyên âm ngắn hay nhầm). Khớp với symbol
-# của get_weak_phonemes qua normalize_ipa (generate.py chuẩn hóa cả hai vế).
-PHONEME_GROUPS: dict[str, list[str]] = {
+# key nhóm → danh sách IPA. EN seed từ phoneme_profile.FALLBACK_WEAK_PHONEMES
+# (điểm nóng L1 Việt). KO seed từ KOREAN_FALLBACK_WEAK_PHONEMES (âm căng/bật hơi
+# + coda ㄹ — người Việt học tiếng Hàn hay khó). Khớp symbol của get_weak_phonemes
+# qua normalizer đúng ngôn ngữ (generate.py chuẩn hóa cả hai vế theo lang).
+_EN_PHONEME_GROUPS: dict[str, list[str]] = {
     "th_family": ["θ", "ð"],
     "s_z": ["s", "z"],
     "sh_ch_j": ["ʃ", "tʃ", "dʒ"],
     "v_w": ["v", "w"],
     "short_vowels": ["ɪ", "æ", "ʊ"],
+}
+# Tiếng Hàn: KHÔNG nhóm nguyên âm ㅓ/ㅗ (model phone-mfa fold ɔ→ʌ, không chấm
+# được contrast — xem phoneme_set_ko). Chọn âm căng/bật hơi + coda ㄹ.
+_KO_PHONEME_GROUPS: dict[str, list[str]] = {
+    "ko_tense": ["p͈", "t͈", "k͈", "s͈", "t͈ɕ"],
+    "ko_aspirated": ["pʰ", "tʰ", "kʰ", "tɕʰ"],
+    "ko_coda_l": ["l"],
+}
+PHONEME_GROUPS: dict[str, list[str]] = {**_EN_PHONEME_GROUPS, **_KO_PHONEME_GROUPS}
+_GROUP_KEYS_BY_LANG: dict[str, tuple[str, ...]] = {
+    "en": tuple(_EN_PHONEME_GROUPS),
+    "ko": tuple(_KO_PHONEME_GROUPS),
 }
 
 # Tiêu đề + mô tả nhóm âm (tiếng Việt) cho UI.
@@ -40,6 +54,32 @@ _PHONEME_GROUP_META: dict[str, tuple[str, str]] = {
     "sh_ch_j": ("Âm /ʃ/, /tʃ/, /dʒ/", "Nhóm âm xát/tắc-xát: sh, ch, j — dễ lẫn với /s/, /z/."),
     "v_w": ("Âm /v/ và /w/", "Âm môi-răng /v/ vs môi-môi /w/ — người Việt hay lẫn."),
     "short_vowels": ("Nguyên âm ngắn /ɪ/, /æ/, /ʊ/", "Nguyên âm ngắn hay bị kéo dài hoặc nhầm (ship/sheep, bad/bed)."),
+    "ko_tense": ("Âm căng ㄲ ㄸ ㅃ ㅆ ㅉ", "Âm căng (경음) không có trong tiếng Việt — cần gồng thanh môn, không bật hơi."),
+    "ko_aspirated": ("Âm bật hơi ㅋ ㅌ ㅍ ㅊ", "Bật hơi mạnh (격음) — phân biệt rõ với âm thường ㄱ ㄷ ㅂ ㅈ."),
+    "ko_coda_l": ("Âm cuối ㄹ [l]", "Coda ㄹ đọc [l] rõ (물, 서울) — người Việt hay nuốt hoặc đổi thành [n]."),
+}
+
+# Từ luyện tập curated cho từng nhóm âm tiếng Hàn: (hangul, nghĩa tiếng Việt).
+# IPA sinh động ở content.py qua word_to_ipa_ko (khớp reference recognizer).
+KOREAN_PRACTICE_WORDS: dict[str, list[tuple[str, str]]] = {
+    "ko_tense": [
+        ("까치", "chim ác là"), ("꼬리", "cái đuôi"), ("아빠", "bố"),
+        ("오빠", "anh trai"), ("토끼", "con thỏ"), ("싸다", "rẻ"),
+        ("쓰다", "viết; dùng"), ("짜다", "mặn"), ("찌개", "món canh (jjigae)"),
+        ("땀", "mồ hôi"),
+    ],
+    "ko_aspirated": [
+        ("코", "cái mũi"), ("커피", "cà phê"), ("차", "xe; trà"),
+        ("치마", "váy"), ("파", "hành lá"), ("표", "vé"),
+        ("크다", "to, lớn"), ("타다", "đi (xe), cưỡi"), ("침대", "giường"),
+        ("카드", "thẻ (card)"),
+    ],
+    "ko_coda_l": [
+        ("물", "nước"), ("딸", "con gái"), ("발", "bàn chân"),
+        ("서울", "Seoul"), ("겨울", "mùa đông"), ("이불", "chăn"),
+        ("얼굴", "khuôn mặt"), ("별", "ngôi sao"), ("살", "tuổi; thịt"),
+        ("갈비", "sườn (galbi)"),
+    ],
 }
 
 
@@ -125,7 +165,7 @@ _CRITERION_TIPS: dict[str, tuple[str, ...]] = {
 
 def _pronunciation_unit(exam: str) -> Unit:
     lessons = []
-    for gkey in PHONEME_GROUPS:
+    for gkey in _GROUP_KEYS_BY_LANG[exam_language(exam)]:
         title, desc = _PHONEME_GROUP_META.get(gkey, (gkey, ""))
         lessons.append(
             Lesson(
@@ -215,11 +255,10 @@ def _build_syllabus() -> dict[str, list[Unit]]:
             _rubric_unit(exam),
             _question_type_unit(exam),
         ]
-    # TOPIK (tiếng Hàn): CHỈ rubric + dạng câu. Mảng phát âm tiếng Hàn chưa hỗ trợ
-    # (word_suggest/FALLBACK_WEAK_PHONEMES là index tiếng Anh — cần nguồn từ luyện
-    # + nhóm âm Hàn riêng, để mốc sau). Không có PHONEME_GROUPS Hàn nên KHÔNG thêm
-    # Unit phát âm ở đây.
+    # TOPIK (tiếng Hàn): đủ 3 mảng. Phát âm dùng nhóm âm Hàn (_KO_PHONEME_GROUPS)
+    # + từ luyện curated (KOREAN_PRACTICE_WORDS) thay index tiếng Anh.
     out["topik"] = [
+        _pronunciation_unit("topik"),
         _rubric_unit("topik"),
         _question_type_unit("topik"),
     ]
