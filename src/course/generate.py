@@ -32,6 +32,9 @@ DONE_THRESHOLD: dict[str, float] = {
 
 # Số lesson gắn badge "Nên học" (ưu tiên cao nhất, đang mở).
 _PRIORITY_BADGE_K = 3
+# Số lần chấm thật tối thiểu để TỰ ĐỘNG hoàn thành 1 lesson rubric/qtype từ
+# mastery (đủ bằng chứng, không phải may rủi 1 bài).
+AUTO_COMPLETE_MIN_ATTEMPTS = 3.0
 # Priority mặc định khi chưa đủ dữ liệu để biết yếu hay không.
 _UNKNOWN_PRIORITY = 0.5
 # Priority khi 1 nhóm âm hoàn toàn không xuất hiện trong hồ sơ (không tín hiệu).
@@ -87,6 +90,28 @@ def _lesson_view(
         "best_score": (prog or {}).get("best_score"),
         "attempts": (prog or {}).get("attempts", 0),
     }
+
+
+def auto_completions(exam: str, mastery: dict) -> list[tuple[str, float]]:
+    """(lesson_id, mastery) cho các lesson rubric/qtype ĐÃ đạt ngưỡng done từ bài
+    chấm THẬT (đủ AUTO_COMPLETE_MIN_ATTEMPTS lần). Phát âm không tự hoàn thành —
+    người học tự luyện. Dùng để khép vòng "khóa học theo kết quả test"."""
+    out: list[tuple[str, float]] = []
+    for unit in SYLLABUS.get(exam, []):
+        if unit.dimension == "pronunciation":
+            continue
+        bucket = "criteria" if unit.dimension == "rubric" else "question_types"
+        threshold = DONE_THRESHOLD[unit.dimension]
+        for ls in unit.lessons:
+            entry = (mastery.get(bucket) or {}).get(ls.target)
+            if not entry:
+                continue
+            if (
+                entry.get("attempts", 0) >= AUTO_COMPLETE_MIN_ATTEMPTS
+                and entry.get("mastery", 0) >= threshold
+            ):
+                out.append((ls.id, float(entry["mastery"])))
+    return out
 
 
 def build_course(

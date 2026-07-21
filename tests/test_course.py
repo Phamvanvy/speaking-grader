@@ -403,3 +403,62 @@ def test_lesson_content_qtype_uses_and_caches_sample(cfg, monkeypatch):
 def test_lesson_content_unknown_raises(cfg):
     with pytest.raises(ValueError):
         get_lesson_content(cfg, cfg, "u1", "toeic.pron.nope", "vi")
+
+
+# ── Tự động hoàn thành từ mastery (Phase 2) ──────────────────────────────
+
+
+def test_auto_completions_selects_qualified_rubric_qtype():
+    mastery = {
+        "criteria": {
+            "grammar": {"mastery": 0.9, "attempts": 3, "weakness": 0.1},   # đạt
+            "vocabulary": {"mastery": 0.5, "attempts": 5, "weakness": 0.5},  # < 0.67
+            "cohesion": {"mastery": 0.9, "attempts": 2, "weakness": None},   # < 3 mẫu
+        },
+        "question_types": {
+            "read_aloud": {"mastery": 0.8, "attempts": 4, "weakness": 0.2},  # đạt
+        },
+    }
+    got = dict(generate.auto_completions("toeic", mastery))
+    assert "toeic.rubric.grammar" in got
+    assert "toeic.qtype.read_aloud" in got
+    assert "toeic.rubric.vocabulary" not in got
+    assert "toeic.rubric.cohesion" not in got
+    # Phát âm KHÔNG bao giờ tự hoàn thành.
+    assert not any(k.startswith("toeic.pron.") for k in got)
+
+
+def test_auto_complete_lesson_idempotent_no_attempt_bump(cfg):
+    uid = "u1"
+    lid = "toeic.rubric.grammar"
+    assert store.auto_complete_lesson(cfg, uid, lid, 0.9) is True
+    # Lần 2 → đã done, không ghi lại.
+    assert store.auto_complete_lesson(cfg, uid, lid, 0.95) is False
+    prog = store.get_progress(cfg, uid)[lid]
+    assert prog["status"] == "done"
+    assert prog["attempts"] == 0  # auto KHÔNG tăng attempts
+    assert prog["best_score"] == pytest.approx(0.9)  # đã done → lần 2 no-op
+
+
+def test_auto_complete_does_not_bump_streak(cfg):
+    uid = "u1"
+    store.auto_complete_lesson(cfg, uid, "toeic.rubric.grammar", 0.9)
+    # Streak chỉ cho hành động luyện chủ động (mark_lesson_complete), không phải auto.
+    assert store.get_activity(cfg, uid)["streak_days"] == 0
+
+
+def test_get_course_auto_completes_from_real_grades(cfg):
+    uid = "u1"
+    # 3 bài chấm THẬT grammar mạnh (2.7/3 = 0.9) → tự done lesson grammar.
+    for i in range(3):
+        _insert(cfg, uid, _recent(i + 1), f"r{i}",
+                _result("toeic", "respond_questions", [("grammar", 2.7)], 160))
+    from src.course import get_course
+
+    course = get_course(cfg, uid, "toeic")
+    grammar = [
+        ls for u in course["units"] for ls in u["lessons"]
+        if ls["id"] == "toeic.rubric.grammar"
+    ][0]
+    assert grammar["status"] == "done"
+    assert course["progress"]["done"] >= 1

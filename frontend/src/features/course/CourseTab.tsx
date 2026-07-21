@@ -16,6 +16,12 @@ const DIM_ICON: Record<string, string> = {
   question_type: '🎯',
 };
 
+const DIM_LABEL: Record<string, string> = {
+  pronunciation: 'Phát âm',
+  rubric: 'Tiêu chí',
+  question_type: 'Dạng câu',
+};
+
 const STATUS_META: Record<LessonStatus, { label: string; cls: string }> = {
   locked: { label: '🔒 Khóa', cls: 'locked' },
   available: { label: '▶ Học ngay', cls: 'available' },
@@ -49,7 +55,8 @@ export default function CourseTab() {
         </div>
         <p className="course-intro">
           Lộ trình được sắp theo điểm yếu trong các bài chấm của bạn. Càng luyện & làm bài,
-          khóa học càng bám sát chỗ cần cải thiện.
+          khóa học càng bám sát chỗ cần cải thiện — tiêu chí/dạng câu bạn đã thành thạo trong
+          bài thi sẽ <b>tự đánh dấu xong</b>.
         </p>
 
         <div className="course-exam-tabs">
@@ -101,6 +108,17 @@ function CourseSummary({ course }: { course: CourseView }) {
       <div className="course-streak" title="Chuỗi ngày học liên tiếp">
         🔥 {course.streak.days} ngày
         {course.streak.longest > course.streak.days ? ` · kỷ lục ${course.streak.longest}` : ''}
+      </div>
+      <div className="course-dims">
+        {['pronunciation', 'rubric', 'question_type'].map((d) => {
+          const s = course.progress.by_dimension[d];
+          if (!s) return null;
+          return (
+            <span className="course-dim" key={d}>
+              {DIM_ICON[d]} {DIM_LABEL[d]} {s.done}/{s.total}
+            </span>
+          );
+        })}
       </div>
     </div>
   );

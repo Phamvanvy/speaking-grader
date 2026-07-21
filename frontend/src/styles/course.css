@@ -67,6 +67,20 @@
   color: #ea580c;
   white-space: nowrap;
 }
+.course-dims {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+.course-dim {
+  font-size: 0.78rem;
+  color: var(--muted, #64748b);
+  background: var(--surface-2, #f1f5f9);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+}
 
 /* Unit + lesson */
 .course-unit__title {

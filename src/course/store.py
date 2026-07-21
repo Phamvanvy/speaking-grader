@@ -259,6 +259,44 @@ def get_progress(cfg: Config, user_id: str) -> dict[str, dict]:
         conn.close()
 
 
+def auto_complete_lesson(
+    cfg: Config, user_id: str, lesson_id: str, score: float
+) -> bool:
+    """Đánh dấu lesson 'done' TỰ ĐỘNG từ mastery bài chấm thật (không phải luyện).
+
+    Idempotent + KHÔNG tăng attempts, KHÔNG bump streak (streak chỉ cho hành động
+    luyện chủ động). Chỉ ghi khi lesson CHƯA done (không hạ done đã có, không đụng
+    best_score nếu lớn hơn). Trả True nếu vừa chuyển sang done lần này.
+    """
+    conn = _connect(cfg)
+    try:
+        with conn:
+            row = conn.execute(
+                "SELECT status FROM lesson_progress WHERE user_id = ? AND lesson_id = ?",
+                (user_id, lesson_id),
+            ).fetchone()
+            if row and row["status"] == "done":
+                return False
+            conn.execute(
+                """
+                INSERT INTO lesson_progress
+                  (user_id, lesson_id, status, best_score, attempts, completed_at, updated_at)
+                VALUES (?, ?, 'done', ?, 0,
+                        strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+                        strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                ON CONFLICT(user_id, lesson_id) DO UPDATE SET
+                  status = 'done',
+                  best_score = MAX(COALESCE(lesson_progress.best_score, 0), excluded.best_score),
+                  completed_at = COALESCE(lesson_progress.completed_at, excluded.completed_at),
+                  updated_at = excluded.updated_at
+                """,
+                (user_id, lesson_id, score),
+            )
+        return True
+    finally:
+        conn.close()
+
+
 def upsert_lesson_progress(
     cfg: Config,
     user_id: str,

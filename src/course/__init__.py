@@ -56,6 +56,11 @@ def get_course(cfg: Config, user_id: str, exam: str = "toeic") -> dict:
     # tín hiệu → các Unit hòa priority và về đúng thứ tự syllabus (phát âm trước),
     # thay vì short_vowels bị cắt thành no-signal kéo mean phát âm xuống.
     weak, _source = get_weak_phonemes(cfg, user_id, top_k=10)
+    # Khép vòng "khóa học theo kết quả test": lesson rubric/qtype mà bài chấm THẬT
+    # đã cho thấy thành thạo (đủ mẫu + đạt ngưỡng) tự đánh dấu done — không cần
+    # luyện lại thủ công. Không bump streak (không phải hành động luyện chủ động).
+    for lid, score in generate.auto_completions(exam, mastery):
+        store.auto_complete_lesson(cfg, user_id, lid, score)
     progress = store.get_progress(cfg, user_id)
     activity = store.get_activity(cfg, user_id)
     return generate.build_course(exam, mastery, weak, progress, activity)
