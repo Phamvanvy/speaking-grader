@@ -16,6 +16,10 @@ import { apiGet } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
 import { useSavedWords, syncBookmarkButtons, type SavedWord } from '@/store/savedWords';
 import { usePractice } from '@/store/practice';
+import { useXp } from '@/store/xp';
+import XpBar from '@/features/gamify/XpBar';
+import StreakFlame from '@/features/gamify/StreakFlame';
+import BadgeGrid from '@/features/gamify/BadgeGrid';
 import { useReviewToast, type ReviewSettings } from './reviewToast';
 import { ipaStressString } from '@/legacy/render';
 import { phonemeTip } from '@/lib/phonemeTips';
@@ -55,12 +59,13 @@ function scorePct(w: SavedWord): string {
   const v = scoreVal(w);
   return v == null ? '—' : `${Math.round(v * 100)}%`;
 }
-/** Màu điểm luyện gần nhất: xanh ≥80, hổ phách ≥60, đỏ dưới đó (khớp thang chấm). */
-function scoreTone(v: number | null): string {
-  if (v == null) return 'text-muted-foreground';
-  if (v >= 0.8) return 'text-emerald-600 dark:text-emerald-400';
-  if (v >= 0.6) return 'text-amber-600 dark:text-amber-400';
-  return 'text-rose-600 dark:text-rose-400';
+/** Mức thành thạo 0–3 sao theo điểm luyện gần nhất (game hóa cột "Điểm"). */
+function masteryStars(v: number | null): number {
+  if (v == null) return 0;
+  if (v >= 0.85) return 3;
+  if (v >= 0.7) return 2;
+  if (v >= 0.5) return 1;
+  return 0;
 }
 
 const ADD_WORD_RE = /^[A-Za-z][A-Za-z' -]{0,39}$/;
@@ -80,11 +85,13 @@ export default function SavedTab() {
   const [filter, setFilter] = useState('');
   const [remindOpen, setRemindOpen] = useState(false);
   const remindOn = useReviewToast((s) => s.settings.enabled);
+  const fetchXp = useXp((s) => s.fetch);
 
   // Nạp lại mỗi lần mở tab (giữ đúng thứ tự server "mới lưu trước").
   useEffect(() => {
     refresh().catch(() => {});
-  }, [refresh]);
+    fetchXp();
+  }, [refresh, fetchXp]);
 
   const isMuted = (w: string) => muted.has((w || '').trim().toLowerCase());
 
@@ -145,6 +152,7 @@ export default function SavedTab() {
 
   return (
     <div id="mode-saved" className="flex flex-col gap-5">
+      <GamifyHeader />
       <Card className="overflow-hidden">
         <SectionHead
           icon="📚"
@@ -257,8 +265,8 @@ export default function SavedTab() {
                               </IconBtn>
                             </span>
                           </TableCell>
-                          <TableCell className="py-3" title="Điểm luyện gần nhất">
-                            <ScoreCell value={sv} label={scorePct(w)} />
+                          <TableCell className="py-3" title={`Độ thành thạo — điểm gần nhất ${scorePct(w)}`}>
+                            <MasteryStars value={sv} />
                           </TableCell>
                           <TableCell className="py-3 text-xs tabular-nums text-muted-foreground">
                             {w.saved_at ? new Date(w.saved_at).toLocaleDateString('vi-VN') : ''}
@@ -338,19 +346,46 @@ export default function SavedTab() {
   );
 }
 
-/** Điểm luyện gần nhất dạng pill — dễ quét mắt hơn text trần. */
-function ScoreCell({ value, label }: { value: number | null; label: string }) {
+/** Mức thành thạo dạng SAO (game hóa) — dễ tạo cảm giác tiến bộ hơn con số %. */
+function MasteryStars({ value }: { value: number | null }) {
   if (value == null) return <span className="text-sm text-muted-foreground">—</span>;
-  const tone =
-    value >= 0.8
-      ? 'bg-emerald-50 dark:bg-emerald-950/40'
-      : value >= 0.6
-        ? 'bg-amber-50 dark:bg-amber-950/40'
-        : 'bg-rose-50 dark:bg-rose-950/40';
+  const n = masteryStars(value);
   return (
-    <span className={`inline-block rounded-md px-2 py-0.5 text-sm font-semibold tabular-nums ${tone} ${scoreTone(value)}`}>
-      {label}
+    <span className="inline-flex items-center gap-0.5" aria-label={`${n}/3 sao`}>
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className={i < n ? 'text-amber-500 dark:text-amber-400' : 'text-muted-foreground/30'}
+        >
+          ★
+        </span>
+      ))}
     </span>
+  );
+}
+
+/** Dải hồ sơ luyện tập ở đầu tab: XP + streak + huy hiệu (server là nguồn sự thật). */
+function GamifyHeader() {
+  const data = useXp((s) => s.data);
+  if (!data) return null;
+  const badges = data.badges?.map((b) => b.id) ?? [];
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-col gap-4 bg-gradient-to-r from-indigo-50 to-purple-50 p-5 dark:from-indigo-950/30 dark:to-purple-950/20">
+        <div className="flex flex-wrap items-center gap-4">
+          <XpBar className="min-w-[220px] flex-1" />
+          {data.streak && (
+            <StreakFlame days={data.streak.streak_days} longest={data.streak.longest_streak} />
+          )}
+        </div>
+        {badges.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">Huy hiệu:</span>
+            <BadgeGrid earned={badges} compact />
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 

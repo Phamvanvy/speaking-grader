@@ -12,6 +12,9 @@ import { hasHangul } from '@/lib/config';
 import { useUiStore } from '@/store/ui';
 import { usePractice } from '@/store/practice';
 import { useSavedWords, syncBookmarkButtons } from '@/store/savedWords';
+import { useXp } from '@/store/xp';
+import { celebrateGood, celebratePerfect } from '@/lib/celebrate';
+import { playSfx } from '@/lib/sfx';
 import { phonemeTip } from '@/lib/phonemeTips';
 import { ipaStressString, toBritishWord } from '@/legacy/render';
 
@@ -236,6 +239,12 @@ export default function PracticeDialog() {
         text: pct >= 80 ? `Tuyệt vời — ${pct}%! 🎉` : `Được ${pct}% — nghe mẫu 🔊 rồi thử lại nhé.`,
         kind: pct >= 80 ? 'good' : '',
       });
+      // Game hóa: ăn mừng theo mức điểm (1 SFX/lần chấm).
+      if (pct === 100) celebratePerfect();
+      else if (pct >= 80) celebrateGood();
+      else if (pct < 50) playSfx('wrong');
+      // Cộng XP luyện từ — client CHỈ gửi event+score, backend tự tính (RB#5) + cap ngày.
+      useXp.getState().award('word_practice', pct / 100);
       // Từ đã lưu → cập nhật điểm + snapshot phonemes mới (im lặng).
       if (useSavedWords.getState().has(d.word)) {
         swAdd({ word: d.word, last_score: pct / 100, phonemes: merged }).catch(() => {});

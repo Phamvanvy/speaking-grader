@@ -1,5 +1,6 @@
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom';
 import ThemeToggle from './components/ThemeToggle';
+import SoundToggle from './components/SoundToggle';
 import AuthWidget from './components/AuthWidget';
 import GradingTab from './features/grading/GradingTab';
 import HomePage from './features/home/HomePage';
@@ -30,6 +31,7 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={200}>
       <ThemeToggle />
+      <SoundToggle />
       <a
         className="feedback-btn"
         href="https://www.facebook.com/myengbuddy/"

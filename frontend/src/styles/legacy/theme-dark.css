@@ -23,6 +23,12 @@
     transform: scale(1.08);
 }
 
+/* Nút bật/tắt tiếng SFX game hóa — tái dùng style .theme-toggle, dời sang slot kế
+   (sau theme 1rem, feedback 4.2rem, addwords 7.4rem). */
+.sound-toggle {
+    right: 10.6rem;
+}
+
 /* ── Feedback / help button ──────────────────────────────────────────── */
 .feedback-btn {
     position: fixed;

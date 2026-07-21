@@ -198,6 +198,22 @@ def list_words(cfg: Config, user_id: str) -> dict:
         conn.close()
 
 
+def count_words_at_mastery(cfg: Config, user_id: str, min_score: float) -> int:
+    """Số TỪ DUY NHẤT của user có last_score >= min_score (dùng cho huy hiệu khóa
+    học). Đếm theo từ (PK user_id,word) — KHÔNG phải số lần luyện → không farm được
+    bằng cách luyện đi luyện lại cùng một từ. NULL last_score không tính."""
+    conn = _connect(cfg)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM saved_words "
+            "WHERE user_id = ? AND last_score IS NOT NULL AND last_score >= ?",
+            (user_id, min_score),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+    finally:
+        conn.close()
+
+
 def upsert_word(
     cfg: Config,
     user_id: str,

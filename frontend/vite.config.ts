@@ -39,6 +39,9 @@ export default defineConfig({
       workbox: {
         navigateFallback: '/index.html',
         cleanupOutdatedCaches: true,
+        // Mặc định Workbox KHÔNG glob audio → thêm wav để SFX game hóa (public/sounds/*)
+        // được precache, phát được cả khi offline (PWA).
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,wav}'],
         // Không cache các route API (giữ đúng hành vi legacy sw.js).
         navigateFallbackDenylist: [
           /^\/(grade|grade-batch|exam|auth|history|words|word-info|tts|settings|suggest|health|docs|openapi)/,

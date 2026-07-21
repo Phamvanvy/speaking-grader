@@ -1526,15 +1526,51 @@ async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
 def course_get(
     user_id: str, exam: str = "toeic", authorization: str | None = Header(None)
 ) -> dict:
-    """Giáo trình cá nhân hóa + trạng thái từng lesson + tiến độ + streak."""
+    """Giáo trình cá nhân hóa + trạng thái từng lesson + tiến độ + streak + XP."""
     user_id = _resolve_read_user_id(authorization, user_id)
     try:
-        return course.get_course(_BASE_CONFIG, user_id, exam)
+        result = course.get_course(_BASE_CONFIG, user_id, exam)
+        # Kèm trạng thái XP/level/huy hiệu (gamification) để đỡ 1 round-trip khi
+        # mở tab. No-op nếu tắt cờ COURSE_XP_ENABLED (get_xp trả {enabled:False}).
+        result["xp"] = course.get_xp(_BASE_CONFIG, user_id)
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:  # noqa: BLE001
         logger.exception("Lỗi dựng khóa học")
         raise HTTPException(status_code=500, detail=f"Lỗi khóa học: {e}") from e
+
+
+@app.get("/course/xp")
+def course_xp_get(
+    user_id: str, authorization: str | None = Header(None)
+) -> dict:
+    """Trạng thái XP/level/huy hiệu của user (no-op nếu tắt cờ COURSE_XP_ENABLED)."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.get_xp(_BASE_CONFIG, user_id)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi lấy XP")
+        raise HTTPException(status_code=500, detail=f"Lỗi XP: {e}") from e
+
+
+@app.post("/course/xp/award")
+def course_xp_award(
+    user_id: str = Form(...),
+    event: str = Form(..., description="Sự kiện luyện (hiện: word_practice)"),
+    score: float = Form(..., description="Điểm đã CHUẨN HÓA 0-1 của lần luyện"),
+    authorization: str | None = Header(None),
+) -> dict:
+    """Cấp XP cho 1 sự kiện luyện. Client CHỈ gửi event + score — backend TỰ tính
+    XP (RB#5); quota ngày tổng chống farm. No-op nếu tắt cờ COURSE_XP_ENABLED."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.award_practice_xp(_BASE_CONFIG, user_id, event, score)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi award XP")
+        raise HTTPException(status_code=500, detail=f"Lỗi award XP: {e}") from e
 
 
 @app.post("/course/refresh")

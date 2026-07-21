@@ -22,6 +22,7 @@ from . import content as _content
 from . import generate
 from . import practice as _practice
 from . import profile, store
+from . import xp as _xp
 from .generate import DONE_THRESHOLD
 from .syllabus import SUPPORTED_EXAMS, get_lesson
 
@@ -37,6 +38,8 @@ __all__ = [
     "refresh",
     "mark_lesson_complete",
     "merge_user",
+    "get_xp",
+    "award_practice_xp",
 ]
 
 
@@ -144,7 +147,42 @@ def mark_lesson_complete(
         cfg, user_id, lesson_id, status="done" if done else "in_progress", score=score
     )
     streak = store.bump_streak(cfg, user_id) if done else store.get_activity(cfg, user_id)
-    return {"lesson_id": lesson_id, "done": done, "progress": prog, "streak": streak}
+    result = {"lesson_id": lesson_id, "done": done, "progress": prog, "streak": streak}
+    # XP/huy hiệu CHỈ award khi CHUYỂN trạng thái lần đầu sang done (first-transition)
+    # → luyện thêm lesson đã done không farm được (RB#3). Streak giữ nguyên hành vi
+    # cũ (bump mỗi lần done) vì đã idempotent 1/ngày và phản ánh "học hôm nay".
+    if prog.get("just_completed") and cfg.course_xp_enabled:
+        xp_state = _xp.award_lesson_xp(
+            cfg, user_id, score, int(streak.get("streak_days", 0) or 0)
+        )
+        result["xp"] = xp_state
+        result["new_badges"] = xp_state.get("new_badges", [])
+    return result
+
+
+def get_xp(cfg: Config, user_id: str) -> dict:
+    """Trạng thái XP/level/huy hiệu + streak (no-op nếu tắt cờ COURSE_XP_ENABLED).
+
+    Kèm streak để tab "Từ đã lưu" hiện ngọn lửa mà không phải gọi /course/state
+    (vốn refresh mastery, nặng hơn)."""
+    if not cfg.course_xp_enabled:
+        return {"enabled": False}
+    state = _xp.get_xp_state(cfg, user_id)
+    state["enabled"] = True
+    state["streak"] = store.get_activity(cfg, user_id)
+    return state
+
+
+def award_practice_xp(cfg: Config, user_id: str, event: str, score: float) -> dict:
+    """Cấp XP cho 1 sự kiện luyện (hiện: 'word_practice'). Backend TỰ tính XP từ
+    score (client không gửi XP — RB#5); quota ngày tổng chống farm. No-op nếu tắt cờ."""
+    if not cfg.course_xp_enabled:
+        return {"enabled": False}
+    if (event or "").strip() != "word_practice":
+        raise ValueError(f"event không hợp lệ: '{event}'. Hợp lệ: word_practice.")
+    state = _xp.award_practice_xp(cfg, user_id, score)
+    state["enabled"] = True
+    return state
 
 
 def merge_user(cfg: Config, from_user_id: str, to_user_id: str) -> int:

@@ -17,6 +17,9 @@ import { apiFetch } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
 import { useUiStore } from '@/store/ui';
 import { usePractice } from '@/store/practice';
+import { useXp } from '@/store/xp';
+import { celebrateComplete } from '@/lib/celebrate';
+import { playSfx } from '@/lib/sfx';
 import {
   getLesson,
   completeLesson,
@@ -51,7 +54,11 @@ export default function LessonView() {
     try {
       const res = await completeLesson(lessonId, score, lesson?.exam || 'toeic');
       qc.invalidateQueries({ queryKey: ['course'] });
+      // XP/level/huy hiệu (chỉ có khi first-transition). ingest tự ăn mừng level-up/badge.
+      if (res.xp) useXp.getState().ingest(res.xp);
       if (res.done) {
+        // Tránh chồng hiệu ứng: chỉ confetti+SFX hoàn thành khi KHÔNG lên cấp/huy hiệu.
+        if (!res.xp?.leveled_up && !res.xp?.new_badges?.length) celebrateComplete();
         toast.success(`Hoàn thành bài! 🎉 Chuỗi ${res.streak.streak_days} ngày.`);
         navigate('/course');
       } else {
@@ -70,8 +77,11 @@ export default function LessonView() {
       return;
     }
     const pct = Math.round(res.score * 100);
-    if (res.progress?.done) {
-      toast.success(`Đạt ${pct}% — hoàn thành bài! 🎉 Chuỗi ${res.progress.streak.streak_days} ngày.`);
+    const cr = res.progress;
+    if (cr?.xp) useXp.getState().ingest(cr.xp);
+    if (cr?.done) {
+      if (!cr.xp?.leveled_up && !cr.xp?.new_badges?.length) celebrateComplete();
+      toast.success(`Đạt ${pct}% — hoàn thành bài! 🎉 Chuỗi ${cr.streak.streak_days} ngày.`);
       navigate('/course');
     } else {
       toast(`Được ${pct}% — cần ${Math.round((lesson?.done_threshold || 0.67) * 100)}% để xong. Thử lại nhé.`);
@@ -180,6 +190,8 @@ function PronBody({ lesson, onCompleted }: { lesson: LessonContent; onCompleted:
         return;
       }
       setStatus(pct >= 80 ? `Tuyệt vời — ${pct}%! 🎉` : `Được ${pct}% — luyện thêm rồi thử lại nhé.`);
+      // 1 SFX/đợt: chưa đạt ngưỡng → tiếng "sai"; đạt → confetti+SFX ở onCompleted.
+      if (pct / 100 < lesson.done_threshold) playSfx('wrong');
       onCompleted(pct / 100);
     } catch (e: any) {
       setStatus(`Lỗi chấm: ${e.message || e}`);
@@ -414,6 +426,8 @@ function PracticeRecorder({
     try {
       const res = await gradeLessonPractice(lesson.id, blob, mime, accent);
       setStatus(res.score == null ? 'Chưa chấm được — thử nói dài & rõ hơn.' : `Điểm: ${Math.round(res.score * 100)}%.`);
+      // Chưa đạt → tiếng "sai" (đạt → confetti+SFX ở onGraded).
+      if (res.score != null && !res.progress?.done) playSfx('wrong');
       onGraded(res);
     } catch (e: any) {
       setStatus(`Lỗi chấm: ${e.message || e}`);

@@ -35,7 +35,7 @@ from ..history import validate_user_id
 
 logger = logging.getLogger("toeic.course.store")
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS criterion_stats (
@@ -97,6 +97,30 @@ CREATE TABLE IF NOT EXISTS lesson_content_cache (
   model         TEXT,
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
   PRIMARY KEY (lesson_id, lang)
+);
+
+-- ── Gamification XP/level/huy hiệu (schema v2) — lớp CỘNG THÊM, không đụng chấm ──
+-- Tổng XP tích lũy per-user; level suy ra ở xp.py (backend là nguồn sự thật).
+CREATE TABLE IF NOT EXISTS user_xp (
+  user_id    TEXT PRIMARY KEY,
+  xp         INTEGER NOT NULL DEFAULT 0,
+  coins      INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT
+);
+-- Huy hiệu đã mở khóa (idempotent qua PK) — earned_at để hiển thị.
+CREATE TABLE IF NOT EXISTS user_badges (
+  user_id   TEXT NOT NULL,
+  badge_id  TEXT NOT NULL,
+  earned_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (user_id, badge_id)
+);
+-- Chống farm: QUOTA XP-practice TỔNG theo ngày (một hạn mức chung, KHÔNG tách
+-- theo source → không bypass được bằng cách chia nhiều nguồn).
+CREATE TABLE IF NOT EXISTS xp_daily (
+  user_id     TEXT NOT NULL,
+  day         TEXT NOT NULL,                      -- 'YYYY-MM-DD' UTC
+  practice_xp INTEGER NOT NULL DEFAULT 0,         -- tổng XP practice đã cấp trong ngày
+  PRIMARY KEY (user_id, day)
 );
 """
 
@@ -311,10 +335,20 @@ def upsert_lesson_progress(
     - best_score giữ max giữa cũ và score mới (COALESCE để lần đầu không NULL).
     - status: 'done' ghi đè & set completed_at; 'in_progress' KHÔNG hạ 'done'
       đã có (đã hoàn thành thì vẫn hoàn thành, chỉ cập nhật best_score/attempts).
+
+    Trả kèm khóa 'just_completed' = True CHỈ khi lần gọi này CHUYỂN trạng thái
+    từ chưa-done sang done (dùng để award XP/streak/badge đúng 1 lần — không
+    award lại khi luyện thêm lesson đã done). So status TRƯỚC/SAU trong CÙNG
+    transaction để nhất quán với guard idempotent của các store khác.
     """
     conn = _connect(cfg)
     try:
         with conn:
+            prev = conn.execute(
+                "SELECT status FROM lesson_progress WHERE user_id = ? AND lesson_id = ?",
+                (user_id, lesson_id),
+            ).fetchone()
+            was_done = bool(prev) and prev["status"] == "done"
             conn.execute(
                 """
                 INSERT INTO lesson_progress
@@ -348,7 +382,9 @@ def upsert_lesson_progress(
                 "FROM lesson_progress WHERE user_id = ? AND lesson_id = ?",
                 (user_id, lesson_id),
             ).fetchone()
-        return dict(row)
+        out = dict(row)
+        out["just_completed"] = (not was_done) and out["status"] == "done"
+        return out
     finally:
         conn.close()
 
@@ -541,6 +577,11 @@ def merge_user(cfg: Config, from_user_id: str, to_user_id: str) -> int:
                     f"DELETE FROM {table} WHERE user_id IN (?, ?)",
                     (from_user_id, to_user_id),
                 )
+            # XP/huy hiệu/quota ngày: gộp trong CÙNG transaction (cùng course.db).
+            # Import cục bộ tránh vòng lặp import (xp.py phụ thuộc khái niệm store).
+            from . import xp as _xp
+
+            _xp.merge_user_xp(conn, from_user_id, to_user_id)
         return moved
     finally:
         conn.close()

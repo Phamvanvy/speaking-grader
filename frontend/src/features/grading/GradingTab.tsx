@@ -11,7 +11,8 @@ import {
   setPlaybackUrlFn,
 } from '../../legacy/render';
 import { setPlaybackUrl, setPlaybackAccent } from './playback';
-import { printSingleReport, printBatchReport, downloadBlob, downloadBlobsSequentially } from '../../legacy/report';
+import { printSingleReport, printBatchReport, downloadBlob } from '../../legacy/report';
+import { downloadZipFromBlobs } from '../../lib/zip';
 import {
   saveRecording,
   listRecordings,
@@ -778,8 +779,9 @@ export default function GradingTab() {
                 <button
                   className="btn btn-secondary"
                   onClick={() =>
-                    downloadBlobsSequentially(
+                    downloadZipFromBlobs(
                       batchFilesRef.current.map((f, i) => ({ blob: f, filename: `${String(i + 1).padStart(2, '0')}-${f.name || 'recording'}` })),
+                      'audio-batch',
                     )
                   }
                   style={{ width: 'auto', padding: '0.5rem 1rem' }}

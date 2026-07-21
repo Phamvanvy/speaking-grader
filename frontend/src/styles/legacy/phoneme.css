@@ -265,16 +265,47 @@ body.dark .phoneme-sev--low {
 
 .phoneme-more__summary {
     cursor: pointer;
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
     color: #4338ca;
     font-size: 0.82rem;
     font-weight: 600;
     padding: 0.2rem 0.5rem;
     border-radius: 6px;
+    list-style: none;
+}
+
+/* Bỏ tam giác disclosure mặc định của <summary>. */
+.phoneme-more__summary::-webkit-details-marker {
+    display: none;
 }
 
 .phoneme-more__summary:hover {
     background: rgba(67, 56, 202, 0.08);
+}
+
+.phoneme-more__icon {
+    display: inline-block;
+    transition: transform 0.15s ease;
+    font-size: 0.7rem;
+}
+
+.phoneme-more[open] .phoneme-more__icon {
+    transform: rotate(90deg);
+}
+
+/* Đóng: hiện nhãn "hiện …". Mở: hiện nhãn "ẩn …". */
+.phoneme-more__label--hide {
+    display: none;
+}
+
+.phoneme-more[open] .phoneme-more__label--show {
+    display: none;
+}
+
+.phoneme-more[open] .phoneme-more__label--hide {
+    display: inline;
 }
 
 /* Nhiễu nhận dạng: khối phụ, phải NHÌN RA là phụ (nền chìm, chữ nhỏ). */

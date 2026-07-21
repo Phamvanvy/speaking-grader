@@ -4,6 +4,7 @@
 
 import { apiFetch, apiGet, apiPostForm } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
+import type { XpState } from '@/store/xp';
 
 export type Dimension = 'pronunciation' | 'rubric' | 'question_type';
 export type LessonStatus = 'locked' | 'available' | 'in_progress' | 'done';
@@ -44,6 +45,9 @@ export interface CourseView {
     total_completed: number;
   };
   units: UnitView[];
+  // Trạng thái XP/level/huy hiệu (gamification) — kèm sẵn để đỡ round-trip.
+  // undefined/enabled=false khi tắt cờ COURSE_XP_ENABLED.
+  xp?: XpState;
 }
 
 export interface PronWord {
@@ -110,6 +114,9 @@ export interface CompleteResult {
   done: boolean;
   progress: { status: LessonStatus; best_score: number | null; attempts: number };
   streak: { streak_days: number; longest_streak: number; total_completed: number };
+  // Chỉ có khi lesson CHUYỂN sang done lần đầu (first-transition award).
+  xp?: XpState;
+  new_badges?: string[];
 }
 
 /** score đã CHUẨN HÓA 0-1 (server so ngưỡng theo dimension). */

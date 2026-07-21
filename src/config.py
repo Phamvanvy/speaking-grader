@@ -295,6 +295,11 @@ class Config:
     # trỏ vào subtree đã mount để sống qua rebuild. Xem src/course/. Qua
     # TOEIC_COURSE_DB_PATH.
     course_db_path: str = "data/course.db"
+    # Hệ thưởng XP/level/huy hiệu của khóa học (gamification). Lớp CỘNG THÊM,
+    # KHÔNG đụng đường chấm điểm. Mặc định BẬT; tắt (COURSE_XP_ENABLED=0) → endpoint
+    # /course/xp + award trả no-op và frontend ẩn XP → rollback nhanh không cần
+    # gỡ code. Qua COURSE_XP_ENABLED.
+    course_xp_enabled: bool = True
     # ── IPA lookup cache (Cambridge-augmented, on-demand) ────────────────
     # Dịch vụ tra IPA có cache SQLite bền: cascade cache → CMUdict → Cambridge
     # → eSpeak (xem src/ipa_resolve.py). MASTER FLAG mặc định TẮT: khi tắt,
@@ -645,6 +650,9 @@ def load_config() -> Config:
         course_db_path=(
             os.getenv("TOEIC_COURSE_DB_PATH", "data/course.db") or "data/course.db"
         ),
+        course_xp_enabled=(
+            os.getenv("COURSE_XP_ENABLED", "true") or "true"
+        ).strip().lower() in {"1", "true", "yes", "on"},
         ipa_cache_enabled=(
             os.getenv("TOEIC_IPA_CACHE_ENABLED", "false") or "false"
         ).strip().lower() in {"1", "true", "yes", "on"},

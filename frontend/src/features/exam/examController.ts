@@ -8,7 +8,7 @@
 import { apiFetch } from '../../lib/api';
 import { examConfig } from '../../lib/config';
 import { getUserId, historySaveEnabled } from '../../lib/identity';
-import { downloadBlobsSequentially } from '../../legacy/report';
+import { downloadZipFromBlobs } from '../../lib/zip';
 
 async function examParseResponse(res) {
   const raw = await res.text();
@@ -801,8 +801,10 @@ export class ExamController {
       alert('Chưa có audio nào để tải.');
       return;
     }
-    return downloadBlobsSequentially(
+    const stem = (examConfig(this.exam).label || 'exam').replace(/[^A-Za-z0-9_-]+/g, '-');
+    return downloadZipFromBlobs(
       items.map((q) => ({ blob: q._recBlob, filename: this._recordingFilename(q) })),
+      `audio-${stem}`,
     );
   }
 

@@ -286,7 +286,7 @@ export function phonemeErrorsHtml(phoneme, opts: any = {}) {
   const head = dispWords.slice(0, CAP).map((w, i) => cardHtml(w, words[i])).join('');
   const rest = dispWords.slice(CAP);
   const moreCards = rest.length
-    ? `<details class="phoneme-more"><summary class="phoneme-more__summary">hiện ${rest.length} từ nữa</summary><div class="phoneme-words">${rest.map((w, i) => cardHtml(w, words[CAP + i])).join('')}</div></details>`
+    ? `<details class="phoneme-more"><summary class="phoneme-more__summary"><span class="phoneme-more__icon" aria-hidden="true">▸</span><span class="phoneme-more__label phoneme-more__label--show">hiện ${rest.length} từ nữa</span><span class="phoneme-more__label phoneme-more__label--hide">ẩn ${rest.length} từ</span></summary><div class="phoneme-words">${rest.map((w, i) => cardHtml(w, words[CAP + i])).join('')}</div></details>`
     : '';
 
   const sevRank = { high: 2, medium: 1, low: 0 };
