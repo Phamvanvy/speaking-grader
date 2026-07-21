@@ -47,7 +47,11 @@ logger = logging.getLogger("toeic.tts")
 # thị → token phoneme espeak (r→ɹ, e→ɛ trừ 'eɪ', g→ɡ) rồi tái dùng phonemes_to_ids
 # + phoneme_ids_to_audio của Piper — KHÁC hẳn cách v5 đã bỏ (đó là chèn ˈ vào rồi
 # tổng hợp không chuẩn hoá ký hiệu). Nhánh ipa nằm sau flag TTS_IPA_SYNTH.
-CACHE_VERSION = "v6"
+# v7: map ɝ→ɜ (NURSE r-hóa giọng Mỹ, Cambridge us_ipa) trong _ipa_to_phoneme_tokens
+# — trước đây ɝ bị bỏ, "church" /tʃɝːtʃ/ mất nguyên âm đọc thành "ch-ch". Bump để bust
+# audio ɝ hỏng đang cache ở client (URL /tts?...&v= gắn version). Phải khớp
+# TTS_AUDIO_VERSION ở frontend/src/features/grading/playback.ts.
+CACHE_VERSION = "v7"
 
 # Trần độ dài text TTS (ký tự). Đây là mức từ/cụm ngắn, không phải câu — đủ rộng cho
 # cụm nhiều từ nhưng vẫn chặn lạm dụng. (Endpoint cũng validate; đây là lớp thứ hai.)
@@ -155,9 +159,13 @@ def _synthesize_wav_bytes(voice, text: str) -> bytes:
 #   (rr Tây Ban Nha); phụ âm gần đúng của tiếng Anh là 'ɹ'.
 # - 'g' (U+0067): script-g IPA là 'ɡ' (U+0261); 'g' Latin không có trong bảng.
 # - ':' ASCII: dấu kéo dài phải là 'ː' (U+02D0).
+# - 'ɝ' (U+025D): nguyên âm NURSE r-hóa có nhấn (giọng Mỹ, ví dụ church /tʃɝːtʃ/).
+#   Bảng espeak của cả amy(US) lẫn alan(GB) KHÔNG có 'ɝ' (chỉ có 'ɜ' + 'ɚ') → nếu để
+#   nguyên thì bị bỏ hẳn, nguyên âm biến mất ("church" đọc thành "ch-ch"). Map về 'ɜ'
+#   (base NURSE espeak thật có). 'ɚ' (schwa r-hóa không nhấn) đã có sẵn trong bảng.
 # KHÔNG "sửa" các khác biệt thuần phong cách (ɚ↔əɹ, ɜː độ rhotic…) vì mục tiêu là
 # đọc ĐÚNG IPA đang hiển thị cho người học, không phải bản espeak-native.
-_IPA_CHAR_SUBS = {"r": "ɹ", "g": "ɡ", ":": "ː"}
+_IPA_CHAR_SUBS = {"r": "ɹ", "g": "ɡ", ":": "ː", "ɝ": "ɜ"}
 
 # Ký tự bao/ngăn cách KHÔNG phải phoneme — bỏ trước khi map (dấu /…/, ngoặc, dấu
 # chấm ngắt âm tiết, nửa-dài ˑ, tie-bar). Dấu nhấn ˈ/ˌ GIỮ (Piper có trong bảng).

@@ -51,6 +51,65 @@ def test_parse_takes_first_ipa_per_region_only():
     assert entry.us_ipa is None
 
 
+def test_parse_extracts_weak_form_from_trailing_bare_span():
+    # "at": weak nằm trong <span> TRẦN sau vùng dpron-i, phân biệt bằng nhãn lab.
+    html = """
+    <div class="pos-header">
+      <span class="uk dpron-i"><span class="region">uk</span>
+        <span class="pron dpron"><span class="lab dlab">strong</span> /<span class="ipa dipa">æt</span>/</span>
+      </span>
+      <span><span class="pron dpron"><span class="lab dlab">weak</span> /<span class="ipa dipa">ət</span>/</span></span>
+      <span class="us dpron-i"><span class="region">us</span>
+        <span class="pron dpron"><span class="lab dlab">strong</span> /<span class="ipa dipa">æt</span>/</span>
+      </span>
+      <span><span class="pron dpron"><span class="lab dlab">weak</span> /<span class="ipa dipa">ət</span>/</span></span>
+    </div>
+    """
+    entry = parse_html("at", html)
+    assert entry is not None
+    assert entry.uk_ipa == "æt" and entry.uk_ipa_weak == "ət"
+    assert entry.us_ipa == "æt" and entry.us_ipa_weak == "ət"
+    assert entry.uk_ipa_alt is None and entry.us_ipa_alt is None
+
+
+def test_parse_routes_unlabeled_variant_to_alt_not_weak():
+    # "marry": biến thể us thứ 2 KHÔNG có nhãn → slot alt, KHÔNG phải weak.
+    html = """
+    <div class="pos-header">
+      <span class="uk dpron-i"><span class="region">uk</span>
+        <span class="pron dpron">/<span class="ipa dipa">ˈmær.i</span>/</span>
+      </span>
+      <span class="us dpron-i"><span class="region">us</span>
+        <span class="pron dpron">/<span class="ipa dipa">ˈmer.i</span>/</span>
+      </span>
+      <span><span class="pron dpron">/<span class="ipa dipa">ˈmær.i</span>/</span></span>
+    </div>
+    """
+    entry = parse_html("marry", html)
+    assert entry is not None
+    assert entry.us_ipa == "ˈmer.i"
+    assert entry.us_ipa_alt == "ˈmær.i"
+    assert entry.us_ipa_weak is None
+
+
+def test_parse_ignores_pron_outside_header_block():
+    # `pron dpron` của mục phái sinh (ngoài <div> header) KHÔNG được nhặt vào slot.
+    html = """
+    <div class="pos-header">
+      <span class="us dpron-i"><span class="region">us</span>
+        <span class="pron dpron">/<span class="ipa dipa">wɜːd</span>/</span>
+      </span>
+    </div>
+    <div class="runon">
+      <span><span class="pron dpron"><span class="lab dlab">weak</span> /<span class="ipa dipa">zzz</span>/</span></span>
+    </div>
+    """
+    entry = parse_html("word", html)
+    assert entry is not None
+    assert entry.us_ipa == "wɜːd"
+    assert entry.us_ipa_weak is None  # 'zzz' ngoài khối header → bỏ
+
+
 def test_parse_returns_none_on_spellcheck_page():
     assert parse_html("asdfqwer", _SPELLCHECK) is None
 

@@ -41,8 +41,12 @@ _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 @dataclass
 class CambridgeEntry:
     word: str
-    uk_ipa: str | None = None
+    uk_ipa: str | None = None          # phiên âm CHÍNH (strong / biến thể đầu) mỗi vùng
     us_ipa: str | None = None
+    uk_ipa_weak: str | None = None     # dạng weak (chỉ khi có nhãn <span class="lab">weak</span>)
+    us_ipa_weak: str | None = None
+    uk_ipa_alt: str | None = None      # biến thể phụ KHÔNG nhãn (vd "marry" us /ˈmær.i/)
+    us_ipa_alt: str | None = None
 
 
 @dataclass
@@ -58,72 +62,129 @@ class CambridgeResult:
 
 
 class _CambridgeHTMLParser(HTMLParser):
-    """Rút UK/US IPA từ HTML trang Cambridge.
+    """Rút UK/US IPA (chính + weak + biến thể phụ) từ HTML trang Cambridge.
 
     Cấu trúc mục tiêu (khoan dung theo class token, không phụ thuộc thứ tự thuộc tính):
-      <span class="uk dpron-i"> ... <span class="ipa dipa ...">prəˈnaʊns</span> ... </span>
+      <span class="uk dpron-i"><span class="region">uk</span> [audio]
+        <span class="pron dpron"><span class="lab">strong</span> /<span class="ipa">æt</span>/</span>
+      </span>
+      <span><span class="pron dpron"><span class="lab">weak</span> /<span class="ipa">ət</span>/</span></span>
       <span class="us dpron-i"> ... (tương tự) ... </span>
-    Chỉ lấy phiên âm ĐẦU TIÊN của mỗi vùng uk/us (các biến thể sau bỏ qua).
+
+    Ba điểm mấu chốt về markup Cambridge:
+    - Dạng WEAK và các biến thể phụ nằm trong `<span>` TRẦN đứng SAU vùng dpron-i
+      (không có class uk/us riêng) → phải LATCH vùng: giữ 'uk' cho tới khi gặp
+      dpron-i của vùng khác, thay vì reset khi span dpron-i đóng.
+    - Phân loại strong/weak DỰA VÀO nhãn `<span class="lab">`, KHÔNG dựa vào vị trí:
+      biến thể phụ không nhãn (vd "marry" us /ˈmær.i/) trông y hệt weak về cấu trúc,
+      chỉ khác ở chỗ thiếu nhãn — route theo vị trí sẽ nhét nhầm nó vào slot weak.
+    - Chỉ đọc trong KHỐI phiên âm header (bao bởi 1 <div>): mốc bằng độ sâu div lúc
+      mở dpron-i đầu tiên; khi <div> đó đóng thì DỪNG, để không ăn nhầm `pron` của
+      mục phái sinh / nghĩa khác bên dưới.
+
+    Mỗi slot chỉ giữ giá trị ĐẦU TIÊN (idempotent với biến thể lặp).
     """
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.uk_ipa: str | None = None
         self.us_ipa: str | None = None
+        self.uk_ipa_weak: str | None = None
+        self.us_ipa_weak: str | None = None
+        self.uk_ipa_alt: str | None = None
+        self.us_ipa_alt: str | None = None
         self._span_depth = 0
-        self._region: str | None = None       # 'uk' | 'us'
-        self._region_depth: int | None = None  # span_depth lúc mở vùng
+        self._div_depth = 0
+        self._region: str | None = None        # 'uk' | 'us' — latched tới dpron-i kế
+        self._group_floor: int | None = None    # div_depth lúc mở dpron-i đầu tiên
+        self._group_done = False                 # đã ra khỏi khối header → thôi đọc
+        self._label: str | None = None           # nhãn lab của pron block hiện tại
+        self._in_lab = False
+        self._lab_depth: int | None = None
+        self._lab_buf: list[str] = []
         self._in_ipa = False
         self._ipa_depth: int | None = None
         self._ipa_buf: list[str] = []
 
+    @property
+    def _active(self) -> bool:
+        """Đang ở trong khối phiên âm header (được phép đọc)."""
+        return self._group_floor is not None and not self._group_done
+
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "div":
+            self._div_depth += 1
+            return
         if tag != "span":
             return
         ad = {k: (v or "") for k, v in attrs}
         classes = ad.get("class", "").split()
         self._span_depth += 1
-        if "dpron-i" in classes and self._region is None:
+        if "dpron-i" in classes and not self._group_done:
+            # Vào 1 vùng phiên âm: latch region + mở khối header ở dpron-i ĐẦU TIÊN.
             if "uk" in classes:
-                self._region, self._region_depth = "uk", self._span_depth
+                self._region = "uk"
             elif "us" in classes:
-                self._region, self._region_depth = "us", self._span_depth
-        if (
-            self._region
-            and "ipa" in classes
-            and not self._in_ipa
-            and self._region_ipa() is None
-        ):
+                self._region = "us"
+            if self._group_floor is None:
+                self._group_floor = self._div_depth
+        if not self._active or self._region is None:
+            return
+        if "pron" in classes:
+            self._label = None  # mỗi pron block bắt đầu với nhãn rỗng
+        if "lab" in classes and not self._in_lab:
+            self._in_lab = True
+            self._lab_depth = self._span_depth
+            self._lab_buf = []
+        if "ipa" in classes and not self._in_ipa:
             self._in_ipa = True
             self._ipa_depth = self._span_depth
             self._ipa_buf = []
 
     def handle_endtag(self, tag: str) -> None:
+        if tag == "div":
+            self._div_depth -= 1
+            # Khối header đóng khi ra ngoài độ sâu div lúc mở → dừng đọc vĩnh viễn.
+            if self._group_floor is not None and self._div_depth < self._group_floor:
+                self._group_done = True
+            return
         if tag != "span":
             return
+        if self._in_lab and self._span_depth == self._lab_depth:
+            self._label = "".join(self._lab_buf).strip().lower() or None
+            self._in_lab = False
+            self._lab_depth = None
         if self._in_ipa and self._span_depth == self._ipa_depth:
-            self._set_ipa("".join(self._ipa_buf).strip())
+            self._route_ipa("".join(self._ipa_buf).strip())
             self._in_ipa = False
             self._ipa_depth = None
-        if self._region is not None and self._span_depth == self._region_depth:
-            self._region = None
-            self._region_depth = None
         self._span_depth -= 1
 
     def handle_data(self, data: str) -> None:
         if self._in_ipa:
             self._ipa_buf.append(data)
+        elif self._in_lab:
+            self._lab_buf.append(data)
 
-    def _region_ipa(self) -> str | None:
-        return self.uk_ipa if self._region == "uk" else self.us_ipa
+    def _route_ipa(self, value: str) -> None:
+        """Gán 1 phiên âm vào slot theo (vùng, nhãn). Mỗi slot chỉ nhận giá trị đầu.
 
-    def _set_ipa(self, value: str) -> None:
-        if not value:
+        - nhãn 'weak'        → slot weak
+        - nhãn khác / không  → slot chính (nếu trống) rồi mới tới slot phụ (alt)
+        """
+        if not value or self._region is None:
             return
-        if self._region == "uk" and self.uk_ipa is None:
-            self.uk_ipa = value
-        elif self._region == "us" and self.us_ipa is None:
-            self.us_ipa = value
+        r = self._region
+        if self._label == "weak":
+            self._fill(f"{r}_ipa_weak", value)
+        elif getattr(self, f"{r}_ipa") is None:
+            self._fill(f"{r}_ipa", value)
+        else:
+            self._fill(f"{r}_ipa_alt", value)
+
+    def _fill(self, attr: str, value: str) -> None:
+        if getattr(self, attr) is None:
+            setattr(self, attr, value)
 
 
 def parse_html(word: str, html: str) -> CambridgeEntry | None:
@@ -137,7 +198,12 @@ def parse_html(word: str, html: str) -> CambridgeEntry | None:
         return None
     if not (p.uk_ipa or p.us_ipa):
         return None
-    return CambridgeEntry(word=word, uk_ipa=p.uk_ipa, us_ipa=p.us_ipa)
+    return CambridgeEntry(
+        word=word,
+        uk_ipa=p.uk_ipa, us_ipa=p.us_ipa,
+        uk_ipa_weak=p.uk_ipa_weak, us_ipa_weak=p.us_ipa_weak,
+        uk_ipa_alt=p.uk_ipa_alt, us_ipa_alt=p.us_ipa_alt,
+    )
 
 
 def fetch_cambridge(word: str, cfg: Config) -> CambridgeResult:

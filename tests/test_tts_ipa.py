@@ -32,6 +32,15 @@ def test_lone_e_becomes_dress_but_ei_kept():
     assert _toks("beɪk")[:3] == ["b", "e", "ɪ"]          # bake: eɪ giữ nguyên
 
 
+def test_us_nurse_vowel_mapped_not_dropped():
+    # 'ɝ' (NURSE r-hóa giọng Mỹ, Cambridge us_ipa) KHÔNG có trong bảng espeak của
+    # voice (amy/alan chỉ có 'ɜ'+'ɚ') → phải map về 'ɜ', KHÔNG để bị bỏ (nếu bỏ thì
+    # "church" /tʃɝːtʃ/ mất nguyên âm, đọc thành "ch-ch"). Xem _IPA_CHAR_SUBS.
+    kept, dropped = _ipa_to_phoneme_tokens("tʃɝːtʃ", _FAKE_MAP)
+    assert kept == ["t", "ʃ", "ɜ", "ː", "t", "ʃ", "."]
+    assert "ɝ" not in dropped and "ɝ" not in kept
+
+
 def test_stress_moves_to_nucleus():
     # ˈ ở onset ('ˈdʒeriː') dời về ngay TRƯỚC nguyên âm 'ɛ'.
     assert _toks("ˈdʒeriː") == ["d", "ʒ", "ˈ", "ɛ", "ɹ", "i", "ː", "."]

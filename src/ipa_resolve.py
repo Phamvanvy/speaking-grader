@@ -54,6 +54,10 @@ class IPAResult:
     word: str
     uk_ipa: str | None = None
     us_ipa: str | None = None
+    uk_ipa_weak: str | None = None
+    us_ipa_weak: str | None = None
+    uk_ipa_alt: str | None = None
+    us_ipa_alt: str | None = None
     source: str | None = None
     cached: bool = False
     # Chuỗi IPA hiển thị gọn (tương thích word_ipa_display) cho cột saved_words.ipa.
@@ -63,6 +67,11 @@ class IPAResult:
         return {
             "uk_ipa": self.uk_ipa,
             "us_ipa": self.us_ipa,
+            # weak/alt CHỈ có từ Cambridge; None ở nhánh CMUdict/eSpeak — frontend ẩn.
+            "uk_ipa_weak": self.uk_ipa_weak,
+            "us_ipa_weak": self.us_ipa_weak,
+            "uk_ipa_alt": self.uk_ipa_alt,
+            "us_ipa_alt": self.us_ipa_alt,
             "ipa_source": self.source,
             "ipa_cached": self.cached,
         }
@@ -88,6 +97,8 @@ def _row_to_result(row: IPACacheRow, *, cached: bool) -> IPAResult:
     display = row.us_ipa or row.uk_ipa or ""
     return IPAResult(
         word=row.word, uk_ipa=row.uk_ipa, us_ipa=row.us_ipa,
+        uk_ipa_weak=row.uk_ipa_weak, us_ipa_weak=row.us_ipa_weak,
+        uk_ipa_alt=row.uk_ipa_alt, us_ipa_alt=row.us_ipa_alt,
         source=row.source, cached=cached, display=display,
     )
 
@@ -162,6 +173,8 @@ def _resolve_core(word: str, cfg: Config) -> tuple[IPAResult, bool]:
             e = res.entry
             new = IPACacheRow(
                 word=word, uk_ipa=e.uk_ipa, us_ipa=e.us_ipa,
+                uk_ipa_weak=e.uk_ipa_weak, us_ipa_weak=e.us_ipa_weak,
+                uk_ipa_alt=e.uk_ipa_alt, us_ipa_alt=e.us_ipa_alt,
                 source="cambridge", cambridge_status=CAMBRIDGE_SUCCESS,
             )
             ipa_cache.put(cfg, new)
@@ -189,6 +202,8 @@ def _warm_sync(word: str, cfg: Config) -> None:
         e = res.entry
         ipa_cache.put(cfg, IPACacheRow(
             word=word, uk_ipa=e.uk_ipa, us_ipa=e.us_ipa,
+            uk_ipa_weak=e.uk_ipa_weak, us_ipa_weak=e.us_ipa_weak,
+            uk_ipa_alt=e.uk_ipa_alt, us_ipa_alt=e.us_ipa_alt,
             source="cambridge", cambridge_status=CAMBRIDGE_SUCCESS,
         ))
     elif res.status == "not_found":

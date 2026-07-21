@@ -81,6 +81,15 @@ td .practice-open:hover { text-decoration: underline; color: #4338ca; }
 }
 body.dark .practice-ipa__accent { color: #c7d2fe; background: #312e81; }
 
+/* Hàng biến thể (weak / variant không nhãn) — nhạt + thụt nhẹ để phụ thuộc hàng chính. */
+.practice-ipa__row--variant { font-size: 0.88rem; color: #6b7280; padding-left: 1.6rem; }
+body.dark .practice-ipa__row--variant { color: #9ca3af; }
+.practice-ipa__variant-tag {
+    font-size: 0.66rem; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase;
+    color: #6b7280; background: #f1f5f9; border-radius: 5px; padding: 0.05rem 0.3rem;
+}
+body.dark .practice-ipa__variant-tag { color: #cbd5e1; background: #334155; }
+
 /* Định nghĩa + ví dụ (LLM, lazy) */
 .practice-info {
     background: #f8fafc; border: 1px solid #eef2f7; border-radius: 12px;
