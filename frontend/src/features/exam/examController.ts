@@ -214,7 +214,11 @@ export class ExamController {
     this.manualTotal = 0;
     this.manualTimeUp = false;
     // options chấm (M1: mặc định; M2 nối form dùng chung)
-    this.mode = 'practice';
+    // Thi cả đề = chấm như thi thật: mock_test → ASR tốt nhất (WhisperX) + BẮT BUỘC
+    // phân tích âm vị (phoneme=True) nên mỗi câu luôn có chi tiết "BẠN ĐỌC". Lane
+    // practice KHÔNG ép phoneme (chỉ chạy khi cờ server bật / tín hiệu kém escalate)
+    // → báo cáo tổng hay thiếu phần phoneme. Chậm hơn practice nhưng đúng bản chất bài thi.
+    this.mode = 'mock_test';
     this.feedbackLang = '';
     this.accent = 'default';
     // private
