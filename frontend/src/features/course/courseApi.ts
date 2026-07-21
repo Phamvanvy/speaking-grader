@@ -65,6 +65,8 @@ export interface PracticeTask {
   reference: string;
   provided_info: string;
   target_criterion?: string; // chỉ lesson rubric
+  image_b64?: string; // dạng tả tranh: ảnh đề (inline base64)
+  image_media_type?: string;
 }
 
 export interface LessonContent {

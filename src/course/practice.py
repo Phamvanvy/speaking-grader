@@ -23,9 +23,11 @@ endpoint POST /course/lesson/{id}/grade.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime, timezone
 
+from .. import questions as _questions
 from ..config import Config
 from ..rubrics import EXAM_REGISTRIES, resolve_question_type
 from ..rubrics.base import QuestionType
@@ -48,30 +50,41 @@ def _is_text_gradable(qt: QuestionType) -> bool:
     return "image" not in qt.required_inputs
 
 
+def _needs_image(qt: QuestionType) -> bool:
+    """Dạng câu bắt buộc có ảnh đề (vd Describe Picture) → lấy ảnh từ ngân hàng."""
+    return "image" in qt.required_inputs
+
+
 def _qtype_for_criterion(exam: str, criterion: str) -> QuestionType | None:
-    """Dạng câu đại diện (text-gradable) chứa `criterion`; None nếu không có."""
+    """Dạng câu đại diện chứa `criterion`; None nếu không có.
+
+    Ưu tiên dạng CHẤM-TỪ-TEXT (đề sinh LLM, không phụ thuộc ngân hàng ảnh); nếu
+    tiêu chí CHỈ có ở dạng cần ảnh (vd cohesion chỉ thuộc describe_picture) thì
+    dùng dạng ảnh — ảnh lấy từ ngân hàng đề (build_practice)."""
     reg = EXAM_REGISTRIES.get(exam, {})
-    cands = [
-        qt
-        for qt in reg.values()
-        if _is_text_gradable(qt) and any(c.key == criterion for c in qt.criteria)
-    ]
-    if not cands:
-        return None
-    if criterion in _DELIVERY_CRITERIA:
-        for qt in cands:
-            if qt.key == "read_aloud":
-                return qt
-    # Đề mở giàu ngữ cảnh (nhiều tiêu chí nhất) chấm nội dung tốt hơn; tie-break
-    # theo key cho tất định.
-    return sorted(cands, key=lambda qt: (-len(qt.criteria), qt.key))[0]
+    with_crit = [qt for qt in reg.values() if any(c.key == criterion for c in qt.criteria)]
+    text_cands = [qt for qt in with_crit if _is_text_gradable(qt)]
+    if text_cands:
+        if criterion in _DELIVERY_CRITERIA:
+            for qt in text_cands:
+                if qt.key == "read_aloud":
+                    return qt
+        # Đề mở giàu ngữ cảnh (nhiều tiêu chí nhất) chấm nội dung tốt hơn;
+        # tie-break theo key cho tất định.
+        return sorted(text_cands, key=lambda qt: (-len(qt.criteria), qt.key))[0]
+    # Chỉ còn dạng cần ảnh → chọn richest (ảnh lấy từ ngân hàng ở build_practice).
+    if with_crit:
+        return sorted(with_crit, key=lambda qt: (-len(qt.criteria), qt.key))[0]
+    return None
 
 
 def qtype_for_lesson(lesson: Lesson) -> QuestionType | None:
-    """Dạng câu dùng để chấm practice của `lesson`; None nếu không chấm từ text."""
+    """Dạng câu dùng để chấm practice của `lesson`; None nếu không xác định được.
+
+    Dạng cần ảnh KHÔNG bị loại ở đây (ảnh lấy từ ngân hàng đề); build_practice
+    trả None nếu không tìm được ảnh dùng được."""
     if lesson.dimension == "question_type":
-        qt = resolve_question_type(lesson.target, lesson.exam)
-        return qt if _is_text_gradable(qt) else None
+        return resolve_question_type(lesson.target, lesson.exam)
     if lesson.dimension == "rubric":
         return _qtype_for_criterion(lesson.exam, lesson.target)
     return None  # pronunciation dùng đường chấm phoneme riêng
@@ -137,19 +150,47 @@ def _get_or_generate_task(
     return content
 
 
+def _bank_image_task(lesson: Lesson, qt: QuestionType) -> dict | None:
+    """Đề tả tranh lấy từ NGÂN HÀNG đề (data/questions) — kèm ảnh thật (base64).
+
+    Chọn TẤT ĐỊNH theo lesson.id (md5) trong số câu hỏi cùng dạng có ảnh TỒN TẠI,
+    để ảnh HIỂN THỊ (get_lesson_content) trùng ảnh CHẤM (endpoint grade — cùng
+    lesson gọi lại hàm này). None nếu ngân hàng không có câu dùng được."""
+    usable: list[tuple[str, str, str, str]] = []  # (prompt, provided_info, b64, media)
+    for q in _questions.list_questions(lesson.exam, qtype=qt.key):
+        b64, media = _questions.load_image_b64(q.image_path)
+        if b64:
+            usable.append((q.prompt or "", q.provided_info or "", b64, media or "image/jpeg"))
+    if not usable:
+        return None
+    idx = int(hashlib.md5(lesson.id.encode()).hexdigest(), 16) % len(usable)
+    prompt, provided_info, b64, media = usable[idx]
+    return {
+        "prompt": prompt,
+        "reference": "",
+        "provided_info": provided_info,
+        "image_b64": b64,
+        "image_media_type": media,
+    }
+
+
 def build_practice(
     cfg: Config, config: Config, lesson: Lesson, lang: str
 ) -> dict | None:
-    """Đề luyện đầy đủ cho lesson rubric/dạng câu; None nếu không chấm được từ text.
+    """Đề luyện đầy đủ cho lesson rubric/dạng câu; None nếu không dựng được đề.
 
-    Trả {'question_type', 'prompt', 'reference', 'provided_info'} và với lesson
-    rubric kèm 'target_criterion' (tiêu chí cần trích điểm). Frontend gửi lại các
-    field này về POST /course/lesson/{id}/grade.
+    - Dạng cần ảnh (Describe Picture...) → lấy đề + ẢNH thật từ ngân hàng đề.
+    - Dạng khác → đề sinh LLM (cache). Trả {'question_type', 'prompt', 'reference',
+      'provided_info'} (+ 'image_b64'/'image_media_type' nếu có ảnh) và với lesson
+      rubric kèm 'target_criterion'. Endpoint grade gọi lại hàm này để lấy cùng đề.
     """
     qt = qtype_for_lesson(lesson)
     if qt is None:
         return None
-    content = _get_or_generate_task(cfg, config, lesson, qt, lang)
+    if _needs_image(qt):
+        content = _bank_image_task(lesson, qt)
+    else:
+        content = _get_or_generate_task(cfg, config, lesson, qt, lang)
     if content is None:
         return None
     out = {
@@ -158,6 +199,9 @@ def build_practice(
         "reference": content.get("reference", ""),
         "provided_info": content.get("provided_info", ""),
     }
+    if content.get("image_b64"):
+        out["image_b64"] = content["image_b64"]
+        out["image_media_type"] = content.get("image_media_type", "image/jpeg")
     if lesson.dimension == "rubric":
         out["target_criterion"] = lesson.target
     return out

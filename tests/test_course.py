@@ -519,18 +519,18 @@ class _FakeAns:
     target_band = "200"
 
 
-def test_qtype_for_lesson_selects_text_gradable():
-    # Dạng cần ảnh (describe_picture) → không chấm được từ text.
-    assert qtype_for_lesson(get_lesson("toeic.qtype.describe_picture")) is None
+def test_qtype_for_lesson_selects_representative():
+    # Dạng cần ảnh vẫn trả về (ảnh lấy từ ngân hàng ở build_practice).
+    assert qtype_for_lesson(get_lesson("toeic.qtype.describe_picture")).key == "describe_picture"
     # Dạng mở → chính nó.
     assert qtype_for_lesson(get_lesson("toeic.qtype.express_opinion")).key == "express_opinion"
     # Tiêu chí phát âm/ngữ điệu → ưu tiên read_aloud (bằng chứng khách quan).
     assert qtype_for_lesson(get_lesson("toeic.rubric.pronunciation")).key == "read_aloud"
     assert qtype_for_lesson(get_lesson("toeic.rubric.intonation_stress")).key == "read_aloud"
-    # Tiêu chí nội dung → dạng mở giàu ngữ cảnh.
+    # Tiêu chí nội dung → dạng mở text-gradable giàu ngữ cảnh.
     assert qtype_for_lesson(get_lesson("toeic.rubric.grammar")).key == "express_opinion"
-    # cohesion chỉ có ở describe_picture (cần ảnh) → không chấm được từ text.
-    assert qtype_for_lesson(get_lesson("toeic.rubric.cohesion")) is None
+    # cohesion CHỈ thuộc describe_picture → dùng dạng ảnh (chấm được nhờ ngân hàng ảnh).
+    assert qtype_for_lesson(get_lesson("toeic.rubric.cohesion")).key == "describe_picture"
 
 
 def test_practice_score_normalizes_per_dimension():
@@ -593,15 +593,34 @@ def test_build_practice_read_aloud_requires_reference(cfg, monkeypatch):
     assert p and p["reference"].startswith("The meeting")
 
 
-def test_build_practice_describe_picture_none_without_llm(cfg, monkeypatch):
+def test_build_practice_describe_picture_uses_bank_image(cfg, monkeypatch):
     called = []
     monkeypatch.setattr(
         "src.course.practice.suggest_practice_task",
         lambda config, qt: called.append(qt.key),
     )
-    # Dạng cần ảnh → None NGAY, không tốn LLM.
-    assert build_practice(cfg, cfg, get_lesson("toeic.qtype.describe_picture"), "vi") is None
+    p = build_practice(cfg, cfg, get_lesson("toeic.qtype.describe_picture"), "vi")
+    # Dạng tả tranh → lấy đề + ẢNH THẬT từ ngân hàng, KHÔNG gọi LLM.
+    assert p is not None
+    assert p["question_type"] == "describe_picture"
+    assert p["image_b64"] and p["image_media_type"].startswith("image/")
+    assert p["prompt"]  # "Describe the picture."
     assert not called
+
+
+def test_build_practice_describe_picture_deterministic(cfg):
+    # Cùng lesson → cùng ảnh (đảm bảo ảnh hiển thị == ảnh chấm ở endpoint grade).
+    a = build_practice(cfg, cfg, get_lesson("toeic.qtype.describe_picture"), "vi")
+    b = build_practice(cfg, cfg, get_lesson("toeic.qtype.describe_picture"), "vi")
+    assert a["image_b64"] == b["image_b64"]
+
+
+def test_build_practice_cohesion_rubric_uses_image(cfg):
+    # cohesion chỉ thuộc describe_picture → practice ảnh + trích tiêu chí cohesion.
+    p = build_practice(cfg, cfg, get_lesson("toeic.rubric.cohesion"), "vi")
+    assert p["question_type"] == "describe_picture"
+    assert p["target_criterion"] == "cohesion"
+    assert p["image_b64"]
 
 
 def test_lesson_content_includes_practice(cfg, monkeypatch):

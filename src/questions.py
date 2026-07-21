@@ -6,6 +6,7 @@ Mỗi kỳ thi có NHIỀU bộ đề (set) để người dùng chọn trước
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +14,13 @@ from pathlib import Path
 from .rubrics.base import Exam
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "questions"
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SET = "set1"
+
+_IMAGE_MEDIA_TYPES: dict[str, str] = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".png": "image/png", ".webp": "image/webp", ".gif": "image/gif",
+}
 
 
 @dataclass(frozen=True)
@@ -75,6 +82,38 @@ def _load_set(exam: str, set_id: str = DEFAULT_SET) -> tuple[str, dict[str, Ques
 def _load_all(exam: str = Exam.TOEIC.value, set_id: str = DEFAULT_SET) -> dict[str, Question]:
     _, questions = _load_set(exam, set_id)
     return questions
+
+
+def list_questions(exam: str, *, qtype: str | None = None) -> list[Question]:
+    """Mọi câu hỏi của kỳ thi qua TẤT CẢ bộ đề (lọc theo qtype nếu có).
+
+    Thứ tự ổn định (set sắp theo id, câu theo thứ tự trong file) — caller có thể
+    chọn tất định theo index. Kỳ thi không có ngân hàng → []."""
+    out: list[Question] = []
+    try:
+        sets = list_sets(exam)
+    except FileNotFoundError:
+        return out
+    for s in sets:
+        _, questions = _load_set(exam, s["id"])
+        for q in questions.values():
+            if qtype is None or q.type == qtype:
+                out.append(q)
+    return out
+
+
+def load_image_b64(image_path: str | None) -> tuple[str | None, str | None]:
+    """Đọc ảnh đề (đường dẫn tương đối từ gốc project) → (base64, media_type).
+
+    Thiếu đường dẫn / file không tồn tại → (None, None). Dùng cho đề tả tranh
+    (Describe Picture) — inline vào JSON cho frontend + gửi kèm vision khi chấm."""
+    if not image_path:
+        return None, None
+    path = (_PROJECT_ROOT / image_path).resolve()
+    if not path.is_file():
+        return None, None
+    media = _IMAGE_MEDIA_TYPES.get(path.suffix.lower(), "image/jpeg")
+    return base64.b64encode(path.read_bytes()).decode("ascii"), media
 
 
 def get_question(

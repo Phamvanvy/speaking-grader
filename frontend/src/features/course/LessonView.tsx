@@ -365,6 +365,9 @@ function PracticeRecorder({
   const chunksRef = useRef<Blob[]>([]);
 
   const isRead = practice.question_type === 'read_aloud';
+  const imgSrc = practice.image_b64
+    ? `data:${practice.image_media_type || 'image/jpeg'};base64,${practice.image_b64}`
+    : null;
 
   function stopStream() {
     if (streamRef.current) {
@@ -422,21 +425,28 @@ function PracticeRecorder({
   return (
     <div className="course-practice">
       <div className="course-section-label">
-        {isRead ? 'Luyện & chấm — đọc to đoạn văn' : 'Luyện & chấm — trả lời đề dưới đây'}
+        {imgSrc
+          ? 'Luyện & chấm — nhìn tranh và mô tả'
+          : isRead
+            ? 'Luyện & chấm — đọc to đoạn văn'
+            : 'Luyện & chấm — trả lời đề dưới đây'}
       </div>
+      {imgSrc && <img className="course-practice__image" src={imgSrc} alt="Ảnh đề tả tranh" />}
       {practice.provided_info && (
         <pre className="course-practice__info">{practice.provided_info}</pre>
       )}
       {isRead ? (
         <p className="course-practice__prompt course-practice__reference">{practice.reference}</p>
       ) : (
-        <p className="course-practice__prompt">{practice.prompt}</p>
+        practice.prompt && <p className="course-practice__prompt">{practice.prompt}</p>
       )}
       <div className="course-complete">
         <div className="course-complete__hint">
-          {isRead
-            ? 'Đọc to, rõ cả đoạn.'
-            : 'Trả lời bằng lời nói, đủ ý.'}{' '}
+          {imgSrc
+            ? 'Mô tả bối cảnh + người/vật + hoạt động (30-45s).'
+            : isRead
+              ? 'Đọc to, rõ cả đoạn.'
+              : 'Trả lời bằng lời nói, đủ ý.'}{' '}
           Cần đạt {Math.round(lesson.done_threshold * 100)}% để hoàn thành.
           {done && ' ✓ Đã học xong — luyện thêm vẫn được.'}
         </div>
