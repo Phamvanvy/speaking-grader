@@ -25,6 +25,12 @@ interface WordInfo {
   // khi bật TOEIC_IPA_CACHE_ENABLED; uk_ipa thường chỉ có khi nguồn là Cambridge.
   uk_ipa?: string;
   us_ipa?: string;
+  // Dạng weak (function word: at /æt/→/ət/) + biến thể phụ (marry us /ˈmer.i/·/ˈmær.i/).
+  // CHỈ có từ nguồn Cambridge; null ở nhánh CMUdict/eSpeak → không render hàng đó.
+  uk_ipa_weak?: string | null;
+  us_ipa_weak?: string | null;
+  uk_ipa_alt?: string | null;
+  us_ipa_alt?: string | null;
 }
 
 // % chính xác: (ok + low-severity) / non-skipped — khớp ngưỡng isSignificant render.js.
@@ -272,6 +278,19 @@ export default function PracticeDialog() {
     (phonemes.length ? ipaStressString(toBritishWord({ phonemes }).phonemes) : '') ||
     ''
   ).trim();
+  // Biến thể phụ mỗi accent (weak + variant không nhãn) — CHỈ từ Cambridge (wordInfo).
+  // Lọc rỗng + trùng phiên âm chính để không hiện dòng thừa. tag → nhãn nhỏ hiển thị.
+  const extraRows = (
+    primary: string,
+    weak?: string | null,
+    alt?: string | null,
+  ): { tag: string; ipa: string }[] =>
+    [
+      { tag: 'weak', ipa: (weak || '').trim() },
+      { tag: 'var', ipa: (alt || '').trim() },
+    ].filter((v) => v.ipa && v.ipa !== primary);
+  const ukExtras = extraRows(ukIpa, wordInfo?.uk_ipa_weak, wordInfo?.uk_ipa_alt);
+  const usExtras = extraRows(usIpa, wordInfo?.us_ipa_weak, wordInfo?.us_ipa_alt);
   const pct = practicePct(phonemes);
   const bad = shown.filter(practiceIsBad);
   const skippedCount = shown.filter((p: any) => p.status === 'skipped').length;
@@ -331,6 +350,16 @@ export default function PracticeDialog() {
                 </button>
               </span>
             )}
+            {/* Biến thể UK (weak/variant) — đọc cùng giọng gb, dữ liệu = IPA của biến thể. */}
+            {ukIpa &&
+              ukExtras.map((v) => (
+                <span className="practice-ipa__row practice-ipa__row--variant" key={`uk-${v.tag}-${v.ipa}`}>
+                  <span className="practice-ipa__variant-tag">{v.tag}</span>&nbsp;/{v.ipa}/
+                  <button type="button" className="tts-play" data-word={word} data-ipa={v.ipa} data-accent="gb" title={`Nghe biến thể (${v.tag})`}>
+                    🔊
+                  </button>
+                </span>
+              ))}
             {usIpa && (
               <span className="practice-ipa__row">
                 <span className="practice-ipa__accent">US</span>&nbsp;/{usIpa}/
@@ -339,6 +368,15 @@ export default function PracticeDialog() {
                 </button>
               </span>
             )}
+            {usIpa &&
+              usExtras.map((v) => (
+                <span className="practice-ipa__row practice-ipa__row--variant" key={`us-${v.tag}-${v.ipa}`}>
+                  <span className="practice-ipa__variant-tag">{v.tag}</span>&nbsp;/{v.ipa}/
+                  <button type="button" className="tts-play" data-word={word} data-ipa={v.ipa} data-accent="us" title={`Nghe biến thể (${v.tag})`}>
+                    🔊
+                  </button>
+                </span>
+              ))}
           </div>
         )}
 
