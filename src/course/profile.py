@@ -32,8 +32,8 @@ from . import store
 logger = logging.getLogger("toeic.course.profile")
 
 # Thang điểm TỐI ĐA của MỖI tiêu chí theo kỳ thi (khác max điểm TỔNG). Chỉ các
-# kỳ có khóa học (TOEIC+IELTS); exam khác → bỏ qua tally (chưa hỗ trợ).
-CRITERION_MAX: dict[str, float] = {"toeic": 3.0, "ielts": 9.0}
+# kỳ có khóa học; exam khác → bỏ qua tally (chưa hỗ trợ). TOPIK: rubric 0-5.
+CRITERION_MAX: dict[str, float] = {"toeic": 3.0, "ielts": 9.0, "topik": 5.0}
 
 # Ngưỡng đủ mẫu để coi mastery là đáng tin (dưới ngưỡng → weakness=None =
 # "chưa đủ dữ liệu"); thấp hơn phoneme (âm cần nhiều mẫu hơn tiêu chí/bài).

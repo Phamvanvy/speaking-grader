@@ -29,7 +29,7 @@ const STATUS_META: Record<LessonStatus, { label: string; cls: string }> = {
   done: { label: '✓ Đã xong', cls: 'done' },
 };
 
-const EXAMS: CourseExam[] = ['toeic', 'ielts'];
+const EXAMS: CourseExam[] = ['toeic', 'ielts', 'topik'];
 
 export default function CourseTab() {
   const exam = useCourseStore((s) => s.exam);

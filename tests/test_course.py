@@ -53,6 +53,7 @@ def _result(exam, question_type, criteria, overall):
     field = {
         "toeic": "estimated_toeic_score",
         "ielts": "estimated_ielts_band",
+        "topik": "estimated_topik_score",
     }[exam]
     return {
         "exam": exam,
@@ -149,15 +150,15 @@ def test_apply_mastery_tallies_concurrent_guard(cfg):
     ] == pytest.approx(1.0)
 
 
-def test_topik_result_not_tallied(cfg):
+def test_unsupported_exam_not_tallied(cfg):
     uid = "u1"
     _insert(cfg, uid, _recent(1), "aaa",
-            {"exam": "topik", "question_type": "read_aloud_ko",
-             "scores": {"criteria": [{"criterion": "pronunciation", "score": 3}],
-                        "estimated_topik_score": 120}})
+            {"exam": "toefl", "question_type": "speaking_1",
+             "scores": {"criteria": [{"criterion": "delivery", "score": 3}],
+                        "estimated_toefl_score": 25}})
     profile.refresh_mastery(cfg, uid)
-    # topik chưa có khóa học → không tally (CRITERION_MAX không chứa topik).
-    assert store.get_mastery_stats(cfg, uid, "topik") == {"criteria": {}, "question_types": {}}
+    # toefl chưa có khóa học → không tally (CRITERION_MAX không chứa toefl).
+    assert store.get_mastery_stats(cfg, uid, "toefl") == {"criteria": {}, "question_types": {}}
 
 
 # ── Tiến độ + streak ──────────────────────────────────────────────────────
@@ -320,7 +321,36 @@ def test_merge_user_moves_progress_wipes_mastery(cfg):
 
 
 def test_supported_exams():
-    assert SUPPORTED_EXAMS == ("toeic", "ielts")
+    assert SUPPORTED_EXAMS == ("toeic", "ielts", "topik")
+
+
+# ── TOPIK (Phase 3a: rubric + dạng câu, không phát âm) ───────────────────
+
+
+def test_topik_mastery_normalized_by_five(cfg):
+    uid = "u1"
+    # TOPIK criterion 0-5: delivery 4/5 = 0.8; overall 150/200 = 0.75.
+    _insert(cfg, uid, _recent(1), "aaa",
+            _result("topik", "q1_answer_question",
+                    [("delivery", 4.0), ("content_task", 2.5)], 150))
+    profile.refresh_mastery(cfg, uid)
+    m = profile.get_mastery(cfg, uid, "topik")
+    assert m["criteria"]["delivery"]["mastery"] == pytest.approx(0.8)
+    assert m["criteria"]["content_task"]["mastery"] == pytest.approx(0.5)
+    assert m["question_types"]["q1_answer_question"]["mastery"] == pytest.approx(0.75)
+
+
+def test_build_course_topik_has_no_pronunciation():
+    course = generate.build_course("topik", _empty_mastery(), [], {}, {})
+    dims = [u["dimension"] for u in course["units"]]
+    assert "pronunciation" not in dims
+    assert set(dims) == {"rubric", "question_type"}
+    assert course["progress"]["total"] == len(all_lessons("topik")) == 10
+
+
+def test_topik_mark_complete_rubric_threshold(cfg):
+    r = mark_lesson_complete(cfg, "u1", "topik.rubric.delivery", 0.7, "topik")
+    assert r["done"] is True  # rubric threshold 0.67
 
 
 # ── Nội dung bài (content.py) ─────────────────────────────────────────────

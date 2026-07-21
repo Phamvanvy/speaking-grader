@@ -4,13 +4,13 @@
 
 import { create } from 'zustand';
 
-export type CourseExam = 'toeic' | 'ielts';
+export type CourseExam = 'toeic' | 'ielts' | 'topik';
 
 const EXAM_KEY = 'course-exam';
 
 function initialExam(): CourseExam {
   const v = localStorage.getItem(EXAM_KEY);
-  return v === 'ielts' ? 'ielts' : 'toeic';
+  return v === 'ielts' || v === 'topik' ? v : 'toeic';
 }
 
 interface CourseState {

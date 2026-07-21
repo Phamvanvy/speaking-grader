@@ -107,6 +107,19 @@ _CRITERION_TIPS: dict[str, tuple[str, ...]] = {
         "Trộn câu đơn và câu phức (mệnh đề quan hệ, điều kiện).",
         "Giữ đúng thì khi kể/mô tả.",
     ),
+    # TOPIK 말하기 (3 tiêu chí NIIED)
+    "content_task": (
+        "Trả lời đúng trọng tâm đề, đủ ý và đủ độ dài yêu cầu.",
+        "Triển khai mạch lạc theo trình tự (그래서, 그런데, -고 나서...).",
+    ),
+    "language_use": (
+        "Chính xác từ vựng/ngữ pháp; dùng đúng đuôi câu (-아요/-습니다).",
+        "Mức kính ngữ (높임말) phù hợp quan hệ vai.",
+    ),
+    "delivery": (
+        "Phát âm chuẩn 표준 발음법: biến âm 연음/비음화/경음화.",
+        "Phân biệt âm thường/căng/bật hơi (ㄱ/ㄲ/ㅋ), ngữ điệu tự nhiên.",
+    ),
 }
 
 
@@ -195,12 +208,21 @@ def _question_type_unit(exam: str) -> Unit:
 
 def _build_syllabus() -> dict[str, list[Unit]]:
     out: dict[str, list[Unit]] = {}
+    # TOEIC/IELTS (tiếng Anh): đủ 3 mảng.
     for exam in ("toeic", "ielts"):
         out[exam] = [
             _pronunciation_unit(exam),
             _rubric_unit(exam),
             _question_type_unit(exam),
         ]
+    # TOPIK (tiếng Hàn): CHỈ rubric + dạng câu. Mảng phát âm tiếng Hàn chưa hỗ trợ
+    # (word_suggest/FALLBACK_WEAK_PHONEMES là index tiếng Anh — cần nguồn từ luyện
+    # + nhóm âm Hàn riêng, để mốc sau). Không có PHONEME_GROUPS Hàn nên KHÔNG thêm
+    # Unit phát âm ở đây.
+    out["topik"] = [
+        _rubric_unit("topik"),
+        _question_type_unit("topik"),
+    ]
     return out
 
 
