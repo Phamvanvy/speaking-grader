@@ -326,6 +326,10 @@ export default function GradingTab() {
       setPlaybackUrlFn(() => singleUrlRef.current);
     }
     appendCommonFields(fd);
+    // Chỉ CHẤM LẺ (1 file) mới tôn trọng lựa chọn practice/mock_test của người dùng.
+    // Chấm cả lớp (batch) luôn chạy mock_test → mọi bài đều có phân tích âm vị ("BẠN ĐỌC"),
+    // đồng bộ với exam/course/luyện-từ (đều mock_test); chỉ chấm lẻ được chọn practice.
+    if (isBatch) fd.set('mode', 'mock_test');
     const endpoint = isBatch ? '/grade-batch' : '/grade';
     try {
       const res = await apiFetch(endpoint, { method: 'POST', body: fd });
