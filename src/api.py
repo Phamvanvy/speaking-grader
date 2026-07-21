@@ -45,7 +45,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import auth, history, word_suggest, words
+from . import auth, course, history, word_suggest, words
 from .ipa_resolve import resolve_ipa, resolve_ipa_display
 from .admission import admission_slot, admission_stats
 from .config import Config, load_config
@@ -1199,8 +1199,21 @@ def auth_claim(body: _ClaimBody, authorization: str | None = Header(None)) -> di
         )
     records = history.reassign_user(_BASE_CONFIG, anon, uid) if _BASE_CONFIG.history_enabled else 0
     words_moved = words.merge_user(_BASE_CONFIG, anon, uid)
-    logger.info("Claim: gộp %d bản ghi + %d từ từ %s → %s", records, words_moved, anon, uid)
-    return {"records": records, "words": words_moved, "user_id": uid}
+    # Tiến độ khóa học: chuyển lesson_progress/streak + wipe mastery để rebuild từ
+    # history đã gộp (xem course/store.merge_user). Lỗi không được chặn claim.
+    try:
+        lessons_moved = course.merge_user(_BASE_CONFIG, anon, uid)
+    except Exception:  # noqa: BLE001
+        logger.exception("Lỗi gộp tiến độ khóa học khi claim (bỏ qua)")
+        lessons_moved = 0
+    logger.info(
+        "Claim: gộp %d bản ghi + %d từ + %d lesson từ %s → %s",
+        records, words_moved, lessons_moved, anon, uid,
+    )
+    return {
+        "records": records, "words": words_moved,
+        "lessons": lessons_moved, "user_id": uid,
+    }
 
 
 # ── Lịch sử chấm bài ─────────────────────────────────────────────────────
@@ -1496,6 +1509,60 @@ async def word_info_endpoint(word: str, lang: str | None = None) -> dict:
         "example_en": info.example_en, "meaning": info.meaning,
         **ipa_fields, "cached": False,
     }
+
+
+# ── Khóa học cá nhân hóa (course) ────────────────────────────────────────
+# Giáo trình Unit → Lesson cá nhân hóa theo kết quả test của user. Delegate sang
+# src/course/ (mirror cách /words → words.py). ĐĂNG KÝ TRƯỚC catch-all SPA phía
+# dưới. Path literal (/course, /course/refresh) so /course/lesson/{id} không nuốt
+# nhau (cùng lý do /history/list, /words/suggestions ở trên).
+
+
+@app.get("/course")
+def course_get(
+    user_id: str, exam: str = "toeic", authorization: str | None = Header(None)
+) -> dict:
+    """Giáo trình cá nhân hóa + trạng thái từng lesson + tiến độ + streak."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.get_course(_BASE_CONFIG, user_id, exam)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi dựng khóa học")
+        raise HTTPException(status_code=500, detail=f"Lỗi khóa học: {e}") from e
+
+
+@app.post("/course/refresh")
+def course_refresh(
+    user_id: str = Form(...), authorization: str | None = Header(None)
+) -> dict:
+    """Ép quét lại history vào hồ sơ mastery (GET /course cũng tự refresh)."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.refresh(_BASE_CONFIG, user_id)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi refresh khóa học")
+        raise HTTPException(status_code=500, detail=f"Lỗi refresh khóa học: {e}") from e
+
+
+@app.post("/course/lesson/{lesson_id}/complete")
+def course_lesson_complete(
+    lesson_id: str,
+    user_id: str = Form(...),
+    score: float = Form(..., description="Điểm luyện đã CHUẨN HÓA 0-1"),
+    exam: str = Form("toeic"),
+    authorization: str | None = Header(None),
+) -> dict:
+    """Ghi kết quả luyện 1 lesson; đạt ngưỡng theo dimension → done + streak."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.mark_lesson_complete(_BASE_CONFIG, user_id, lesson_id, score, exam)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi ghi hoàn thành lesson")
+        raise HTTPException(status_code=500, detail=f"Lỗi ghi lesson: {e}") from e
 
 
 # Phục vụ frontend tĩnh + fallback SPA ở "/" — PHẢI đăng ký SAU mọi route API ở

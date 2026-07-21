@@ -289,6 +289,12 @@ class Config:
     # Từ đã lưu để luyện tập (per-user) + cache định nghĩa LLM — DB file riêng
     # (không đụng schema versioning của history.db). Xem src/words.py.
     words_db_path: str = "data/words.db"
+    # Khóa học cá nhân hóa (mastery per-user + tiến độ/streak per-user) — DB file
+    # RIÊNG (lineage schema versioning độc lập với history.db/words.db). Tiến độ
+    # phải sống sót retention capping của history nên KHÔNG dùng chung DB. Docker
+    # trỏ vào subtree đã mount để sống qua rebuild. Xem src/course/. Qua
+    # TOEIC_COURSE_DB_PATH.
+    course_db_path: str = "data/course.db"
     # ── IPA lookup cache (Cambridge-augmented, on-demand) ────────────────
     # Dịch vụ tra IPA có cache SQLite bền: cascade cache → CMUdict → Cambridge
     # → eSpeak (xem src/ipa_resolve.py). MASTER FLAG mặc định TẮT: khi tắt,
@@ -635,6 +641,9 @@ def load_config() -> Config:
         ),
         words_db_path=(
             os.getenv("TOEIC_WORDS_DB_PATH", "data/words.db") or "data/words.db"
+        ),
+        course_db_path=(
+            os.getenv("TOEIC_COURSE_DB_PATH", "data/course.db") or "data/course.db"
         ),
         ipa_cache_enabled=(
             os.getenv("TOEIC_IPA_CACHE_ENABLED", "false") or "false"
