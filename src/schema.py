@@ -96,6 +96,41 @@ class SampleAnswer(BaseModel):
     )
 
 
+class PracticeTask(BaseModel):
+    """Đề luyện tập (task-context) cho 1 dạng câu — dùng để CHẤM THẬT lesson
+    rubric/dạng câu (khóa học P2), thay nút "Đã học xong" thủ công.
+
+    Do LLM sinh 1 lần rồi cache user-agnostic theo (lesson_id, lang) trong
+    course.db (xem src/course/practice.py). Chỉ điền field liên quan dạng câu:
+    read_aloud → `reference`; respond_with_info → `provided_info` + `prompt`;
+    các dạng mở khác → chỉ `prompt`.
+    """
+
+    prompt: str = Field(
+        default="",
+        description=(
+            "Đề bài / câu hỏi mà thí sinh phải TRẢ LỜI BẰNG LỜI NÓI. Với dạng "
+            "đọc to (read_aloud) để trống (đề là `reference`). Viết bằng ngôn ngữ "
+            "của kỳ thi (TOEIC/IELTS: tiếng Anh; TOPIK: tiếng Hàn)."
+        ),
+    )
+    reference: str = Field(
+        default="",
+        description=(
+            "CHỈ dạng đọc to (read_aloud): đoạn văn (2-4 câu) để thí sinh đọc to. "
+            "Các dạng khác để rỗng."
+        ),
+    )
+    provided_info: str = Field(
+        default="",
+        description=(
+            "CHỈ dạng trả lời theo tài liệu (respond_with_info): tài liệu cho sẵn "
+            "dạng text (lịch trình/agenda/bảng thông tin) để thí sinh dựa vào mà "
+            "trả lời `prompt`. Các dạng khác để rỗng."
+        ),
+    )
+
+
 class WordInfo(BaseModel):
     """Định nghĩa + ví dụ cho 1 từ (popup luyện phát âm, kiểu ELSA).
 

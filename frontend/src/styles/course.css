@@ -224,3 +224,29 @@
   font-size: 0.9rem;
   font-weight: 600;
 }
+
+/* Đề luyện chấm thật (task-context) cho lesson rubric/dạng câu */
+.course-practice {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border, #e2e8f0);
+}
+.course-practice__prompt {
+  white-space: pre-wrap;
+  line-height: 1.5;
+  font-weight: 600;
+}
+.course-practice__reference {
+  font-weight: 500;
+  font-style: italic;
+}
+.course-practice__info {
+  white-space: pre-wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  background: var(--surface-2, #f1f5f9);
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  margin: 0 0 0.6rem;
+  overflow-x: auto;
+}

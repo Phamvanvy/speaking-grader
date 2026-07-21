@@ -14,7 +14,7 @@ import logging
 
 from .config import Config, resolve_language_name
 from .rubrics.base import Exam, QuestionType
-from .schema import SampleAnswer, WordInfo
+from .schema import PracticeTask, SampleAnswer, WordInfo
 from .scoring.backends import generate
 
 logger = logging.getLogger("toeic.suggest")
@@ -148,6 +148,65 @@ def suggest_answer(
     # Bảo đảm target_band luôn có giá trị có nghĩa kể cả khi model bỏ trống.
     if not (result.target_band or "").strip():
         result.target_band = target
+    return result
+
+
+def suggest_practice_task(config: Config, qt: QuestionType) -> PracticeTask:
+    """Sinh MỘT đề luyện tập (task-context) cho dạng câu `qt` — để chấm thật lesson.
+
+    Khác `suggest_answer` (sinh bài MẪU để tham khảo): ở đây sinh ĐỀ BÀI cho học
+    viên tự trả lời rồi hệ thống chấm. Điền field theo dạng câu:
+    - read_aloud → `reference` (đoạn văn để đọc to), `prompt` để trống.
+    - respond_with_info → `prompt` (câu hỏi) + `provided_info` (tài liệu nguồn).
+    - dạng mở khác → chỉ `prompt`.
+    Caller (course/practice.py) chỉ dùng cho dạng câu KHÔNG cần ảnh.
+    """
+    is_topik = qt.exam == Exam.TOPIK.value
+    is_ielts = qt.exam == Exam.IELTS.value
+    exam_label = (
+        "IELTS" if is_ielts
+        else "TOPIK Speaking (한국어 말하기)" if is_topik
+        else "TOEIC"
+    )
+    task_language = "KOREAN (한국어)" if is_topik else "ENGLISH"
+
+    if qt.key == "read_aloud":
+        field_instr = (
+            "This is a READ-ALOUD task. Put a short passage (2-4 sentences, "
+            f"natural {task_language}, suitable to read aloud in ~30-45s) in "
+            "`reference`. Leave `prompt` and `provided_info` EMPTY."
+        )
+    elif qt.uses_provided_info or "provided_info" in qt.required_inputs:
+        field_instr = (
+            "This task gives the test-taker source material to answer FROM. Put a "
+            f"compact piece of source material (a schedule / agenda / info table, "
+            f"in {task_language}, as plain text lines) in `provided_info`, and ONE "
+            "specific question that must be answered USING that material in "
+            "`prompt`. Leave `reference` EMPTY."
+        )
+    else:
+        field_instr = (
+            "Put ONE realistic test question/instruction the test-taker must "
+            f"answer by SPEAKING in `prompt` (natural {task_language}). Leave "
+            "`reference` and `provided_info` EMPTY."
+        )
+
+    system_prompt = (
+        f"You are an expert {exam_label} Speaking test writer. Produce ONE fresh, "
+        f"realistic PRACTICE TASK for the task type ({qt.label}) that a learner "
+        "will attempt by speaking, and that our system will then grade.\n\n"
+        "TASK TYPE EXPECTATIONS (so the task fits the type):\n"
+        f"{qt.guidance}\n\n"
+        "OUTPUT FIELDS:\n"
+        f"{field_instr}\n\n"
+        "Keep it self-contained (no image needed), unambiguous, and answerable in "
+        "one short spoken turn. Output structured JSON only."
+    )
+    user_prompt = (
+        f"Create one {exam_label} '{qt.label}' practice task now, as structured JSON."
+    )
+    result, _meta = generate(config, system_prompt, user_prompt, PracticeTask)
+    assert isinstance(result, PracticeTask)
     return result
 
 

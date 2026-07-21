@@ -25,6 +25,7 @@ from ..phoneme.ipa.phoneme_set import normalize_ipa
 from ..rubrics import resolve_question_type
 from ..rubrics.base import exam_language
 from ..suggest import suggest_answer
+from . import practice as _practice
 from . import store
 from .generate import DONE_THRESHOLD
 from .syllabus import KOREAN_PRACTICE_WORDS, PHONEME_GROUPS, get_lesson
@@ -64,8 +65,10 @@ def get_lesson_content(
         base.update(_pron_content(cfg, config, user_id, lesson, lang))
     elif lesson.dimension == "rubric":
         base.update(_rubric_content(cfg, user_id, lesson))
+        base["practice"] = _practice.build_practice(cfg, config, lesson, lang)
     else:  # question_type
         base.update(_qtype_content(cfg, config, lesson, lang))
+        base["practice"] = _practice.build_practice(cfg, config, lesson, lang)
     return base
 
 

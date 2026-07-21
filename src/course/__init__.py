@@ -19,7 +19,9 @@ from ..config import Config
 from ..phoneme_profile import get_weak_phonemes
 from ..rubrics.base import exam_language
 from . import content as _content
-from . import generate, profile, store
+from . import generate
+from . import practice as _practice
+from . import profile, store
 from .generate import DONE_THRESHOLD
 from .syllabus import SUPPORTED_EXAMS, get_lesson
 
@@ -29,6 +31,9 @@ __all__ = [
     "SUPPORTED_EXAMS",
     "get_course",
     "get_lesson_content",
+    "build_practice_task",
+    "score_practice",
+    "lesson_exam",
     "refresh",
     "mark_lesson_complete",
     "merge_user",
@@ -76,6 +81,39 @@ def get_lesson_content(
 ) -> dict:
     """Nội dung 1 lesson (từ luyện / tips / bài mẫu) — xem course/content.py."""
     return _content.get_lesson_content(cfg, config, user_id, lesson_id, lang)
+
+
+def build_practice_task(
+    cfg: Config, config: Config, user_id: str, lesson_id: str, lang: str
+) -> dict | None:
+    """Đề luyện task-context cho lesson rubric/dạng câu (None nếu không chấm được
+    chỉ từ text, vd dạng cần ảnh). user_id giữ trong chữ ký cho nhất quán dù đề
+    hiện user-agnostic (cache theo lesson_id, lang). Xem course/practice.py."""
+    lesson = get_lesson(lesson_id)
+    if lesson is None:
+        raise ValueError(f"Không có lesson '{lesson_id}'.")
+    return _practice.build_practice(cfg, config, lesson, lang)
+
+
+def score_practice(lesson_id: str, result: dict) -> float | None:
+    """Điểm practice chuẩn hóa 0-1 của 1 lesson từ output chấm; None nếu thiếu."""
+    lesson = get_lesson(lesson_id)
+    if lesson is None:
+        raise ValueError(f"Không có lesson '{lesson_id}'.")
+    return profile.practice_score(
+        result,
+        lesson.exam,
+        lesson.dimension,
+        lesson.target if lesson.dimension == "rubric" else None,
+    )
+
+
+def lesson_exam(lesson_id: str) -> str:
+    """Kỳ thi của lesson (để endpoint chấm chọn pipeline đúng)."""
+    lesson = get_lesson(lesson_id)
+    if lesson is None:
+        raise ValueError(f"Không có lesson '{lesson_id}'.")
+    return lesson.exam
 
 
 def refresh(cfg: Config, user_id: str) -> dict:

@@ -67,6 +67,25 @@ def _norm_overall(result: dict, exam: str) -> float | None:
     return max(0.0, min(1.0, raw / exam_score_max(exam)))
 
 
+def practice_score(
+    result: dict, exam: str, dimension: str, criterion: str | None
+) -> float | None:
+    """Điểm practice chuẩn hóa 0-1 của 1 lesson từ output chấm (None nếu thiếu).
+
+    - question_type → điểm TỔNG chuẩn hóa (như mastery dạng câu).
+    - rubric → điểm tiêu chí `criterion` chuẩn hóa (như mastery tiêu chí).
+    Dùng CHUNG normalizer với mastery (_norm_overall/_norm_criteria) nên điểm
+    hoàn thành lesson và điểm tích lũy mastery luôn cùng thang — một nguồn chân lý.
+    """
+    if dimension == "question_type":
+        return _norm_overall(result, exam)
+    if dimension == "rubric":
+        for name, norm in _norm_criteria(result, exam):
+            if name == criterion:
+                return norm
+    return None
+
+
 def _tally_result(
     result: dict,
     crit_t: dict[tuple[str, str], dict],

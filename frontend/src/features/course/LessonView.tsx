@@ -1,10 +1,13 @@
 // Màn hình 1 bài học (/course/lesson/:id). Render theo dimension:
 //  • pronunciation: từ luyện (🔊 qua playback delegation, ⭐ mở popup luyện) + ghi âm
 //    đọc các từ → /grade → tự hoàn thành theo % phoneme.
-//  • rubric: tips + gợi ý/sửa lỗi từ chính bài chấm của user → "Đã học xong".
-//  • question_type: bài nói mẫu + thang điểm + hướng dẫn → "Đã học xong".
-// Hoàn thành gọi POST /course/lesson/:id/complete (score chuẩn hóa 0-1) rồi
-// invalidate query khóa học.
+//  • rubric: tips + gợi ý/sửa lỗi từ chính bài chấm của user + đề luyện chấm thật.
+//  • question_type: bài nói mẫu + thang điểm + hướng dẫn + đề luyện chấm thật.
+// Hoàn thành:
+//  - có lesson.practice (đề task-context) → PracticeRecorder ghi âm → POST
+//    /course/lesson/:id/grade (server chấm + chuẩn hóa + tự hoàn thành + streak).
+//  - không (dạng chỉ chấm bằng ảnh) → nút "Đã học xong" thủ công gọi
+//    POST /course/lesson/:id/complete (score 1). Cả hai đều invalidate query khóa học.
 
 import { useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -14,7 +17,14 @@ import { apiFetch } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
 import { useUiStore } from '@/store/ui';
 import { usePractice } from '@/store/practice';
-import { getLesson, completeLesson, type LessonContent } from './courseApi';
+import {
+  getLesson,
+  completeLesson,
+  gradeLessonPractice,
+  type LessonContent,
+  type LessonGradeResult,
+  type PracticeTask,
+} from './courseApi';
 
 // % chính xác: (ok + low-severity) / non-skipped — khớp practicePct của PracticeDialog.
 function practicePct(phonemes: any[]): number | null {
@@ -52,6 +62,22 @@ export default function LessonView() {
     }
   }
 
+  // Chấm THẬT (server đã lưu tiến độ + streak) — chỉ hiển thị kết quả & điều hướng.
+  function onGraded(res: LessonGradeResult) {
+    qc.invalidateQueries({ queryKey: ['course'] });
+    if (res.score == null) {
+      toast('Chưa chấm được tiêu chí này — hãy nói dài & rõ hơn rồi thử lại.');
+      return;
+    }
+    const pct = Math.round(res.score * 100);
+    if (res.progress?.done) {
+      toast.success(`Đạt ${pct}% — hoàn thành bài! 🎉 Chuỗi ${res.progress.streak.streak_days} ngày.`);
+      navigate('/course');
+    } else {
+      toast(`Được ${pct}% — cần ${Math.round((lesson?.done_threshold || 0.67) * 100)}% để xong. Thử lại nhé.`);
+    }
+  }
+
   return (
     <div id="mode-course-lesson">
       <div className="card">
@@ -67,8 +93,8 @@ export default function LessonView() {
           <>
             {lesson.description && <p className="course-lesson-desc">{lesson.description}</p>}
             {lesson.dimension === 'pronunciation' && <PronBody lesson={lesson} onCompleted={onCompleted} />}
-            {lesson.dimension === 'rubric' && <RubricBody lesson={lesson} onCompleted={onCompleted} />}
-            {lesson.dimension === 'question_type' && <QtypeBody lesson={lesson} onCompleted={onCompleted} />}
+            {lesson.dimension === 'rubric' && <RubricBody lesson={lesson} onCompleted={onCompleted} onGraded={onGraded} />}
+            {lesson.dimension === 'question_type' && <QtypeBody lesson={lesson} onCompleted={onCompleted} onGraded={onGraded} />}
           </>
         )}
       </div>
@@ -215,7 +241,15 @@ function PronBody({ lesson, onCompleted }: { lesson: LessonContent; onCompleted:
 
 // ── Tiêu chí rubric ──────────────────────────────────────────────────────────
 
-function RubricBody({ lesson, onCompleted }: { lesson: LessonContent; onCompleted: (s: number) => void }) {
+function RubricBody({
+  lesson,
+  onCompleted,
+  onGraded,
+}: {
+  lesson: LessonContent;
+  onCompleted: (s: number) => void;
+  onGraded: (r: LessonGradeResult) => void;
+}) {
   const tips = lesson.tips || [];
   const suggestions = lesson.learner_suggestions || [];
   const corrections = lesson.corrections || [];
@@ -251,14 +285,26 @@ function RubricBody({ lesson, onCompleted }: { lesson: LessonContent; onComplete
           Chưa có dữ liệu từ bài chấm cho tiêu chí này. Làm vài bài ở tab “Thi cả đề” để nhận gợi ý cá nhân hóa.
         </p>
       )}
-      <MarkDoneButton lesson={lesson} onCompleted={onCompleted} />
+      {lesson.practice ? (
+        <PracticeRecorder lesson={lesson} practice={lesson.practice} onGraded={onGraded} />
+      ) : (
+        <MarkDoneButton lesson={lesson} onCompleted={onCompleted} />
+      )}
     </>
   );
 }
 
 // ── Dạng câu ─────────────────────────────────────────────────────────────────
 
-function QtypeBody({ lesson, onCompleted }: { lesson: LessonContent; onCompleted: (s: number) => void }) {
+function QtypeBody({
+  lesson,
+  onCompleted,
+  onGraded,
+}: {
+  lesson: LessonContent;
+  onCompleted: (s: number) => void;
+  onGraded: (r: LessonGradeResult) => void;
+}) {
   const sample = lesson.sample_answer;
   return (
     <>
@@ -288,8 +334,124 @@ function QtypeBody({ lesson, onCompleted }: { lesson: LessonContent; onCompleted
       ) : (
         <p className="course-note">Chưa tạo được bài mẫu (dịch vụ AI tạm bận). Bạn vẫn có thể đọc phần yêu cầu trên.</p>
       )}
-      <MarkDoneButton lesson={lesson} onCompleted={onCompleted} />
+      {lesson.practice ? (
+        <PracticeRecorder lesson={lesson} practice={lesson.practice} onGraded={onGraded} />
+      ) : (
+        <MarkDoneButton lesson={lesson} onCompleted={onCompleted} />
+      )}
     </>
+  );
+}
+
+// ── Đề luyện chấm thật (task-context) ────────────────────────────────────────
+// Hiển thị đề luyện của lesson rubric/dạng câu (do server sinh) + ghi âm → chấm
+// qua POST /course/lesson/:id/grade (server tự chuẩn hóa điểm + hoàn thành + streak).
+function PracticeRecorder({
+  lesson,
+  practice,
+  onGraded,
+}: {
+  lesson: LessonContent;
+  practice: PracticeTask;
+  onGraded: (r: LessonGradeResult) => void;
+}) {
+  const accent = useUiStore((s) => s.accent);
+  const done = lesson.progress?.status === 'done';
+  const [recording, setRecording] = useState(false);
+  const [grading, setGrading] = useState(false);
+  const [status, setStatus] = useState('');
+  const recRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  const isRead = practice.question_type === 'read_aloud';
+
+  function stopStream() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setRecording(false);
+  }
+
+  async function toggle() {
+    if (grading) return;
+    if (recording) {
+      recRef.current?.stop();
+      return;
+    }
+    try {
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setStatus('Không truy cập được micro — kiểm tra quyền trình duyệt.');
+      return;
+    }
+    chunksRef.current = [];
+    const rec = new MediaRecorder(streamRef.current);
+    recRef.current = rec;
+    rec.addEventListener('dataavailable', (e) => e.data?.size && chunksRef.current.push(e.data));
+    rec.addEventListener('stop', () => {
+      const mime = rec.mimeType || 'audio/webm';
+      const blob = new Blob(chunksRef.current, { type: mime });
+      stopStream();
+      grade(blob, mime);
+    });
+    rec.start();
+    setRecording(true);
+    setStatus('Đang ghi âm… bấm lần nữa để dừng.');
+  }
+
+  async function grade(blob: Blob, mime: string) {
+    if (!blob || blob.size < 1024) {
+      setStatus('Ghi âm quá ngắn — bấm 🎙️, trả lời rồi bấm dừng.');
+      return;
+    }
+    setGrading(true);
+    setStatus('Đang chấm…');
+    try {
+      const res = await gradeLessonPractice(lesson.id, blob, mime, accent);
+      setStatus(res.score == null ? 'Chưa chấm được — thử nói dài & rõ hơn.' : `Điểm: ${Math.round(res.score * 100)}%.`);
+      onGraded(res);
+    } catch (e: any) {
+      setStatus(`Lỗi chấm: ${e.message || e}`);
+    } finally {
+      setGrading(false);
+    }
+  }
+
+  return (
+    <div className="course-practice">
+      <div className="course-section-label">
+        {isRead ? 'Luyện & chấm — đọc to đoạn văn' : 'Luyện & chấm — trả lời đề dưới đây'}
+      </div>
+      {practice.provided_info && (
+        <pre className="course-practice__info">{practice.provided_info}</pre>
+      )}
+      {isRead ? (
+        <p className="course-practice__prompt course-practice__reference">{practice.reference}</p>
+      ) : (
+        <p className="course-practice__prompt">{practice.prompt}</p>
+      )}
+      <div className="course-complete">
+        <div className="course-complete__hint">
+          {isRead
+            ? 'Đọc to, rõ cả đoạn.'
+            : 'Trả lời bằng lời nói, đủ ý.'}{' '}
+          Cần đạt {Math.round(lesson.done_threshold * 100)}% để hoàn thành.
+          {done && ' ✓ Đã học xong — luyện thêm vẫn được.'}
+        </div>
+        <button
+          type="button"
+          className={'practice-mic' + (recording ? ' recording' : '')}
+          onClick={toggle}
+          disabled={grading}
+          title="Ghi âm trả lời"
+        >
+          🎙️
+        </button>
+        {status && <div className="course-complete__status">{status}</div>}
+      </div>
+    </div>
   );
 }
 

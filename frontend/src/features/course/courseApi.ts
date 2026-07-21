@@ -1,7 +1,7 @@
 // API layer cho tab "Khóa học" — bám apiGet/apiPostForm (lib/api.ts) + getUserId.
 // Backend: src/course/ (GET /course, GET /course/lesson/{id}, POST .../complete).
 
-import { apiGet, apiPostForm } from '@/lib/api';
+import { apiFetch, apiGet, apiPostForm } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
 
 export type Dimension = 'pronunciation' | 'rubric' | 'question_type';
@@ -59,6 +59,14 @@ export interface SampleAnswer {
   target_band: string;
 }
 
+export interface PracticeTask {
+  question_type: string;
+  prompt: string;
+  reference: string;
+  provided_info: string;
+  target_criterion?: string; // chỉ lesson rubric
+}
+
 export interface LessonContent {
   id: string;
   title: string;
@@ -80,6 +88,8 @@ export interface LessonContent {
   sample_answer?: SampleAnswer | null;
   scale_description?: string;
   guidance?: string;
+  // rubric + question_type: đề luyện chấm thật (null nếu dạng chỉ chấm bằng ảnh)
+  practice?: PracticeTask | null;
 }
 
 export function getCourse(exam: string): Promise<CourseView> {
@@ -107,4 +117,41 @@ export function completeLesson(lessonId: string, score: number, exam: string): P
   fd.append('score', String(score));
   fd.append('exam', exam);
   return apiPostForm<CompleteResult>(`/course/lesson/${encodeURIComponent(lessonId)}/complete`, fd);
+}
+
+export interface LessonGradeResult {
+  // score: điểm lesson chuẩn hóa 0-1 (null nếu bài chấm thiếu tiêu chí đích).
+  score: number | null;
+  // progress: kết quả mark_lesson_complete (null nếu score null); done + streak.
+  progress: CompleteResult | null;
+  // result: output chấm đầy đủ (transcript/scores) — hiện chưa render chi tiết.
+  result: any;
+}
+
+/** Chấm THẬT lesson rubric/dạng câu qua đề luyện task-context (server tự hoàn thành). */
+export async function gradeLessonPractice(
+  lessonId: string,
+  blob: Blob,
+  mime: string,
+  accent: string,
+): Promise<LessonGradeResult> {
+  const uid = getUserId();
+  const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : 'webm';
+  const fd = new FormData();
+  fd.append('audio', new File([blob], `lesson-${lessonId}.${ext}`, { type: mime }));
+  fd.append('user_id', uid);
+  fd.append('accent', accent);
+  const res = await apiFetch(`/course/lesson/${encodeURIComponent(lessonId)}/grade`, {
+    method: 'POST',
+    body: fd,
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      if (j?.detail) detail = j.detail;
+    } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  return res.json() as Promise<LessonGradeResult>;
 }

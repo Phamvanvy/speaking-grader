@@ -27,7 +27,9 @@ from src.course import (
     profile,
     store,
 )
-from src.course.syllabus import SUPPORTED_EXAMS, all_lessons
+from src.course.practice import build_practice, qtype_for_lesson
+from src.course.syllabus import SUPPORTED_EXAMS, all_lessons, get_lesson
+from src.schema import PracticeTask
 
 
 @pytest.fixture()
@@ -505,6 +507,113 @@ def test_auto_complete_does_not_bump_streak(cfg):
     store.auto_complete_lesson(cfg, uid, "toeic.rubric.grammar", 0.9)
     # Streak chỉ cho hành động luyện chủ động (mark_lesson_complete), không phải auto.
     assert store.get_activity(cfg, uid)["streak_days"] == 0
+
+
+# ── P2: đề luyện chấm thật (task-context) ────────────────────────────────
+
+
+class _FakeAns:
+    answer = "A model answer."
+    outline = ["intro"]
+    highlights = ["strong collocation"]
+    target_band = "200"
+
+
+def test_qtype_for_lesson_selects_text_gradable():
+    # Dạng cần ảnh (describe_picture) → không chấm được từ text.
+    assert qtype_for_lesson(get_lesson("toeic.qtype.describe_picture")) is None
+    # Dạng mở → chính nó.
+    assert qtype_for_lesson(get_lesson("toeic.qtype.express_opinion")).key == "express_opinion"
+    # Tiêu chí phát âm/ngữ điệu → ưu tiên read_aloud (bằng chứng khách quan).
+    assert qtype_for_lesson(get_lesson("toeic.rubric.pronunciation")).key == "read_aloud"
+    assert qtype_for_lesson(get_lesson("toeic.rubric.intonation_stress")).key == "read_aloud"
+    # Tiêu chí nội dung → dạng mở giàu ngữ cảnh.
+    assert qtype_for_lesson(get_lesson("toeic.rubric.grammar")).key == "express_opinion"
+    # cohesion chỉ có ở describe_picture (cần ảnh) → không chấm được từ text.
+    assert qtype_for_lesson(get_lesson("toeic.rubric.cohesion")) is None
+
+
+def test_practice_score_normalizes_per_dimension():
+    from src.course import score_practice
+
+    r = _result("toeic", "express_opinion", [("grammar", 3.0), ("vocabulary", 1.5)], 200)
+    # question_type → điểm tổng / max.
+    assert score_practice("toeic.qtype.express_opinion", r) == pytest.approx(1.0)
+    # rubric → điểm tiêu chí đích / crit_max (3).
+    assert score_practice("toeic.rubric.grammar", r) == pytest.approx(1.0)
+    assert score_practice("toeic.rubric.vocabulary", r) == pytest.approx(0.5)
+    # Tiêu chí không có trong bài → None (frontend không hoàn thành).
+    assert score_practice("toeic.rubric.relevance", r) is None
+
+    r_half = _result("toeic", "express_opinion", [("grammar", 3.0)], 100)
+    assert score_practice("toeic.qtype.express_opinion", r_half) == pytest.approx(0.5)
+
+
+def test_build_practice_qtype_generates_and_caches(cfg, monkeypatch):
+    calls = []
+
+    def fake_task(config, qt):
+        calls.append(qt.key)
+        return PracticeTask(prompt="Do you prefer tea or coffee? Why?")
+
+    monkeypatch.setattr("src.course.practice.suggest_practice_task", fake_task)
+    lesson = get_lesson("toeic.qtype.express_opinion")
+    p1 = build_practice(cfg, cfg, lesson, "vi")
+    p2 = build_practice(cfg, cfg, lesson, "vi")
+    assert p1["question_type"] == "express_opinion"
+    assert p1["prompt"].startswith("Do you prefer")
+    assert "target_criterion" not in p1  # chỉ lesson rubric mới có
+    assert calls == ["express_opinion"]  # lần 2 đọc cache
+    assert p2["prompt"] == p1["prompt"]
+
+
+def test_build_practice_rubric_carries_target_criterion(cfg, monkeypatch):
+    monkeypatch.setattr(
+        "src.course.practice.suggest_practice_task",
+        lambda config, qt: PracticeTask(prompt="State and defend your opinion on X."),
+    )
+    p = build_practice(cfg, cfg, get_lesson("toeic.rubric.grammar"), "vi")
+    assert p["question_type"] == "express_opinion"
+    assert p["target_criterion"] == "grammar"
+
+
+def test_build_practice_read_aloud_requires_reference(cfg, monkeypatch):
+    # LLM trả đề đọc-to thiếu `reference` → coi như không hợp lệ → None (fallback thủ công).
+    monkeypatch.setattr(
+        "src.course.practice.suggest_practice_task",
+        lambda config, qt: PracticeTask(prompt="", reference=""),
+    )
+    assert build_practice(cfg, cfg, get_lesson("toeic.qtype.read_aloud"), "vi") is None
+    # Có reference → hợp lệ.
+    monkeypatch.setattr(
+        "src.course.practice.suggest_practice_task",
+        lambda config, qt: PracticeTask(reference="The meeting starts at nine."),
+    )
+    p = build_practice(cfg, cfg, get_lesson("toeic.qtype.read_aloud"), "vi")
+    assert p and p["reference"].startswith("The meeting")
+
+
+def test_build_practice_describe_picture_none_without_llm(cfg, monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        "src.course.practice.suggest_practice_task",
+        lambda config, qt: called.append(qt.key),
+    )
+    # Dạng cần ảnh → None NGAY, không tốn LLM.
+    assert build_practice(cfg, cfg, get_lesson("toeic.qtype.describe_picture"), "vi") is None
+    assert not called
+
+
+def test_lesson_content_includes_practice(cfg, monkeypatch):
+    monkeypatch.setattr(content, "suggest_answer", lambda config, qt, **k: _FakeAns())
+    monkeypatch.setattr(
+        "src.course.practice.suggest_practice_task",
+        lambda config, qt: PracticeTask(prompt="Describe your daily routine."),
+    )
+    qt_out = get_lesson_content(cfg, cfg, "u1", "toeic.qtype.express_opinion", "vi")
+    assert qt_out["practice"]["prompt"] == "Describe your daily routine."
+    rub_out = get_lesson_content(cfg, cfg, "u1", "toeic.rubric.grammar", "vi")
+    assert rub_out["practice"]["target_criterion"] == "grammar"
 
 
 def test_get_course_auto_completes_from_real_grades(cfg):

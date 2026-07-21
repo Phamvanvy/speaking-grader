@@ -1585,6 +1585,110 @@ def course_lesson_complete(
         raise HTTPException(status_code=500, detail=f"Lỗi ghi lesson: {e}") from e
 
 
+@app.post("/course/lesson/{lesson_id}/grade")
+async def course_lesson_grade(
+    lesson_id: str,
+    audio: UploadFile = File(..., description="Ghi âm trả lời đề luyện của lesson"),
+    user_id: str = Form(...),
+    feedback_lang: str | None = Form(None),
+    accent: str = Form("default"),
+    authorization: str | None = Header(None),
+) -> dict:
+    """Chấm THẬT 1 lesson rubric/dạng câu qua đề luyện có task-context (P2).
+
+    Lấy đề luyện đã sinh cho lesson (build_practice_task), chấm audio qua pipeline
+    đầy đủ với đúng dạng câu + đề bài, chuẩn hóa điểm về 0-1 theo dimension, lưu
+    lịch sử (để tích lũy mastery) rồi cập nhật tiến độ lesson (done nếu đạt ngưỡng).
+    """
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        exam = _validate_exam(course.lesson_exam(lesson_id))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    _ensure_exam_lang_enabled(exam, _BASE_CONFIG)
+    accent = _validate_accent(accent)
+    config = _resolve_config(feedback_lang)
+    # Cache đề luyện keyed theo feedback_lang — KHỚP get_lesson_content (content.py).
+    lang_key = (config.feedback_lang or "vi").strip().lower()
+
+    # Đề luyện có thể chạm LLM (lần đầu, chưa cache) → threadpool.
+    try:
+        practice = await run_in_threadpool(
+            course.build_practice_task, _BASE_CONFIG, config, user_id, lesson_id, lang_key
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    if not practice:
+        raise HTTPException(
+            status_code=400,
+            detail="Lesson này chưa hỗ trợ chấm tự động — dùng nút 'Đã học xong'.",
+        )
+    qt = _resolve(practice["question_type"], exam)
+
+    suffix = _audio_suffix(audio.filename)
+    audio_bytes = await audio.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="File audio rỗng.")
+
+    async with admission_slot(config) as queue_wait_ms:
+        try:
+            output = await run_in_threadpool(
+                _grade_bytes,
+                audio_bytes,
+                suffix,
+                config,
+                qt,
+                reference_script=practice.get("reference") or None,
+                image_b64=None,
+                image_media_type=None,
+                expected_duration_sec=None,
+                prompt=practice.get("prompt") or "",
+                provided_info=practice.get("provided_info") or None,
+                no_ai=False,
+                mode="mock_test",
+                user_requested_review=False,
+                accent=accent,
+                phoneme_strict=False,
+            )
+        except Exception as e:  # noqa: BLE001 - trả lỗi gọn cho client
+            logger.exception("Lỗi khi chấm đề luyện lesson")
+            if _is_audio_decode_error(e):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Không đọc được file ghi âm (hỏng hoặc quá ngắn) — hãy ghi âm lại.",
+                ) from e
+            raise HTTPException(status_code=500, detail=f"Lỗi khi chấm: {e}") from e
+    output.setdefault("telemetry", {})["queue_wait_ms"] = queue_wait_ms
+
+    score = course.score_practice(lesson_id, output)
+
+    # Lưu lịch sử (best-effort) — bài luyện có task-context tính như bằng chứng
+    # mastery (refresh sau tự tally vào criterion_stats/qtype_stats).
+    await run_in_threadpool(
+        _history_save,
+        history.save_single,
+        user_id=user_id,
+        filename=audio.filename,
+        mode=_normalize_mode("mock_test"),
+        audio_bytes=audio_bytes,
+        suffix=suffix,
+        result=output,
+    )
+
+    # Cập nhật tiến độ lesson khi chấm được điểm (đạt ngưỡng → done + streak).
+    progress = None
+    if score is not None:
+        try:
+            progress = course.mark_lesson_complete(
+                _BASE_CONFIG, user_id, lesson_id, score, exam
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Lỗi ghi tiến độ lesson sau chấm")
+            raise HTTPException(status_code=500, detail=f"Lỗi ghi lesson: {e}") from e
+
+    return {"result": output, "score": score, "progress": progress}
+
+
 # Phục vụ frontend tĩnh + fallback SPA ở "/" — PHẢI đăng ký SAU mọi route API ở
 # trên. Starlette so khớp route theo thứ tự đăng ký, nên /grade, /health, /docs...
 # (đăng ký trước) được ưu tiên; catch-all này chỉ bắt phần còn lại.
