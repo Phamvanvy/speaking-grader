@@ -13,13 +13,15 @@ import { useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { apiFetch } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
 import { useUiStore } from '@/store/ui';
 import { usePractice } from '@/store/practice';
 import { useXp } from '@/store/xp';
 import { celebrateComplete } from '@/lib/celebrate';
 import { playSfx } from '@/lib/sfx';
+import { COURSE_GAME_ENABLED } from '@/lib/config';
+import { useLessonPronGrade } from './useLessonPronGrade';
+import CourseGameSession from './game/CourseGameSession';
 import {
   getLesson,
   completeLesson,
@@ -29,12 +31,13 @@ import {
   type PracticeTask,
 } from './courseApi';
 
-// % chính xác: (ok + low-severity) / non-skipped — khớp practicePct của PracticeDialog.
-function practicePct(phonemes: any[]): number | null {
-  const scored = (phonemes || []).filter((p) => p.status !== 'skipped');
-  if (!scored.length) return null;
-  const pass = scored.filter((p) => p.status === 'ok' || p.severity === 'low').length;
-  return Math.round((100 * pass) / scored.length);
+// Vòng chơi thay ruột lesson phát âm khi: cờ bật, đủ từ cho mini-game, và không
+// phải tiếng Hàn (mini-game 4-lựa-chọn dựa từ điển EN). Không thì fallback PronBody.
+const MIN_WORDS_FOR_GAME = 4;
+function shouldUseCourseGame(lesson: LessonContent): boolean {
+  const words = lesson.words || [];
+  const isKo = lesson.exam === 'topik';
+  return COURSE_GAME_ENABLED && !isKo && words.length >= MIN_WORDS_FOR_GAME;
 }
 
 export default function LessonView() {
@@ -102,7 +105,7 @@ export default function LessonView() {
         {lesson && (
           <>
             {lesson.description && <p className="course-lesson-desc">{lesson.description}</p>}
-            {lesson.dimension === 'pronunciation' && <PronBody lesson={lesson} onCompleted={onCompleted} />}
+            {lesson.dimension === 'pronunciation' && <PronDimension lesson={lesson} onCompleted={onCompleted} />}
             {lesson.dimension === 'rubric' && <RubricBody lesson={lesson} onCompleted={onCompleted} onGraded={onGraded} />}
             {lesson.dimension === 'question_type' && <QtypeBody lesson={lesson} onCompleted={onCompleted} onGraded={onGraded} />}
           </>
@@ -114,91 +117,24 @@ export default function LessonView() {
 
 // ── Phát âm ────────────────────────────────────────────────────────────────
 
+// Chọn giữa vòng chơi (CourseGameSession) và màn cũ (PronBody, fallback). Cả hai
+// kết thúc bằng CÙNG bước chấm speak → onCompleted, nên hoàn thành lesson không đổi.
+function PronDimension({ lesson, onCompleted }: { lesson: LessonContent; onCompleted: (s: number) => void }) {
+  const useGame = shouldUseCourseGame(lesson);
+  return useGame ? (
+    <CourseGameSession lesson={lesson} onCompleted={onCompleted} />
+  ) : (
+    <PronBody lesson={lesson} onCompleted={onCompleted} />
+  );
+}
+
 function PronBody({ lesson, onCompleted }: { lesson: LessonContent; onCompleted: (s: number) => void }) {
-  const accent = useUiStore((s) => s.accent);
   const openPractice = usePractice((s) => s.openPractice);
   const words = lesson.words || [];
-  const [recording, setRecording] = useState(false);
-  const [grading, setGrading] = useState(false);
-  const [status, setStatus] = useState('');
-  const recRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-
-  const drill = words.map((w) => w.word).join(' ');
-
-  function stopStream() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    setRecording(false);
-  }
-
-  async function toggle() {
-    if (grading) return;
-    if (recording) {
-      recRef.current?.stop();
-      return;
-    }
-    try {
-      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      setStatus('Không truy cập được micro — kiểm tra quyền trình duyệt.');
-      return;
-    }
-    chunksRef.current = [];
-    const rec = new MediaRecorder(streamRef.current);
-    recRef.current = rec;
-    rec.addEventListener('dataavailable', (e) => e.data?.size && chunksRef.current.push(e.data));
-    rec.addEventListener('stop', () => {
-      const mime = rec.mimeType || 'audio/webm';
-      const blob = new Blob(chunksRef.current, { type: mime });
-      stopStream();
-      grade(blob, mime);
-    });
-    rec.start();
-    setRecording(true);
-    setStatus('Đang ghi âm… bấm lần nữa để dừng.');
-  }
-
-  async function grade(blob: Blob, mime: string) {
-    if (!blob || blob.size < 1024) {
-      setStatus('Ghi âm quá ngắn — bấm 🎙️, đọc rõ các từ, rồi bấm dừng.');
-      return;
-    }
-    setGrading(true);
-    setStatus('Đang chấm…');
-    try {
-      const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : 'webm';
-      const fd = new FormData();
-      fd.append('audio', new File([blob], `lesson-${lesson.id}.${ext}`, { type: mime }));
-      fd.append('text', drill);
-      fd.append('mode', 'mock_test');
-      fd.append('no_ai', 'true');
-      fd.append('strict', 'true');
-      fd.append('accent', accent);
-      if (lesson.exam === 'topik') fd.append('exam', 'topik'); // pipeline tiếng Hàn
-      const res = await apiFetch('/grade', { method: 'POST', body: fd });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const result = await res.json();
-      const ws = result?.phoneme?.score?.words || [];
-      const merged = ws.flatMap((w: any) => w.phonemes || []);
-      const pct = practicePct(merged);
-      if (pct == null) {
-        setStatus('Chưa nghe rõ — hãy đọc to, rõ từng từ rồi thử lại.');
-        return;
-      }
-      setStatus(pct >= 80 ? `Tuyệt vời — ${pct}%! 🎉` : `Được ${pct}% — luyện thêm rồi thử lại nhé.`);
-      // 1 SFX/đợt: chưa đạt ngưỡng → tiếng "sai"; đạt → confetti+SFX ở onCompleted.
-      if (pct / 100 < lesson.done_threshold) playSfx('wrong');
-      onCompleted(pct / 100);
-    } catch (e: any) {
-      setStatus(`Lỗi chấm: ${e.message || e}`);
-    } finally {
-      setGrading(false);
-    }
-  }
+  // Đường chấm DÙNG CHUNG với bước Boss (một hook duy nhất, không nhánh chấm thứ hai).
+  const { recording, grading, status, toggle } = useLessonPronGrade(lesson, words, (pct) =>
+    onCompleted(pct / 100),
+  );
 
   return (
     <>

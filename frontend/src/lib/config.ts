@@ -88,3 +88,8 @@ export const VALID_ACCENTS: Accent[] = ['default', 'gb', 'us'];
 export function hasHangul(s: string | null | undefined): boolean {
   return /[가-힣]/.test(s || '');
 }
+
+// Cờ vòng chơi khóa học (Phase 1 — game hóa lesson phát âm). Mặc định BẬT; tắt
+// bằng VITE_COURSE_GAME=0 khi build/dev. Khi tắt → fallback màn PronBody cũ. Vì
+// bước Boss dùng đúng đường /grade cũ nên hoàn thành lesson không đổi dù bật/tắt.
+export const COURSE_GAME_ENABLED = import.meta.env.VITE_COURSE_GAME !== '0';

@@ -257,3 +257,35 @@
   margin: 0 0 0.6rem;
   overflow-x: auto;
 }
+
+/* Vòng chơi (Phase 1: Learn → Play → Review → Boss) */
+.course-game {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.course-game__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.82rem;
+  color: var(--muted, #64748b);
+  font-weight: 600;
+}
+.course-game__combo {
+  color: #d97706;
+}
+.course-game__stage {
+  min-height: 12rem;
+  padding: 0.4rem 0;
+}
+.course-game__boss-words {
+  text-align: center;
+  font-weight: 600;
+  font-size: 1.05rem;
+  line-height: 1.7;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface-2, #f1f5f9);
+  border-radius: 10px;
+  margin: 0 0 0.4rem;
+}
