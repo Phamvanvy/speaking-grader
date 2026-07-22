@@ -14,13 +14,13 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { getUserId } from '@/lib/identity';
-import { examConfig } from '@/lib/config';
+import { examConfig, COURSE_BOSS_ENABLED } from '@/lib/config';
 import { useCourseStore, type CourseExam } from '@/store/course';
 import { useXp } from '@/store/xp';
 import XpBar from '@/features/gamify/XpBar';
 import StreakFlame from '@/features/gamify/StreakFlame';
 import BadgeGrid from '@/features/gamify/BadgeGrid';
-import { getCourse, type CourseView, type LessonView, type LessonStatus } from './courseApi';
+import { getCourse, type CourseView, type LessonView, type LessonStatus, type UnitView } from './courseApi';
 
 const DIM_ICON: Record<string, string> = {
   pronunciation: '🗣️',
@@ -100,7 +100,11 @@ export default function CourseTab() {
               <span className="text-xs font-bold text-muted-foreground">Chặng {ui + 1}</span>
               {unit.title}
             </h3>
-            <LessonPath lessons={unit.lessons} onOpen={(id) => navigate(`/course/lesson/${id}`)} />
+            <LessonPath
+              unit={unit}
+              onOpen={(id) => navigate(`/course/lesson/${id}`)}
+              onOpenBoss={() => navigate(`/course/unit/${unit.id}/boss`)}
+            />
           </Card>
         ))}
     </div>
@@ -145,7 +149,16 @@ function CourseHeader({ course, badges }: { course: CourseView; badges: string[]
 
 // ── Learning path: node zig-zag ──────────────────────────────────────────
 
-function LessonPath({ lessons, onOpen }: { lessons: LessonView[]; onOpen: (id: string) => void }) {
+function LessonPath({
+  unit,
+  onOpen,
+  onOpenBoss,
+}: {
+  unit: UnitView;
+  onOpen: (id: string) => void;
+  onOpenBoss: () => void;
+}) {
+  const lessons = unit.lessons;
   return (
     <div className="flex flex-col items-stretch gap-1 px-5 py-6">
       {lessons.map((ls, i) => (
@@ -157,6 +170,48 @@ function LessonPath({ lessons, onOpen }: { lessons: LessonView[]; onOpen: (id: s
           <LessonNode lesson={ls} index={i} onOpen={() => onOpen(ls.id)} />
         </div>
       ))}
+      {COURSE_BOSS_ENABLED && unit.boss && (
+        <div className="mt-1 flex items-center justify-center">
+          <BossNodeView boss={unit.boss} onOpen={onOpenBoss} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Node Boss cuối chặng (👾) — style riêng nổi bật; locked đến khi mọi lesson done.
+function BossNodeView({ boss, onOpen }: { boss: NonNullable<UnitView['boss']>; onOpen: () => void }) {
+  const locked = boss.status === 'locked';
+  const done = boss.status === 'done';
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <motion.button
+        type="button"
+        disabled={locked}
+        onClick={onOpen}
+        title={locked ? 'Hoàn thành tất cả bài trong chặng để mở Boss' : boss.title}
+        whileHover={locked ? {} : { scale: 1.08 }}
+        whileTap={locked ? {} : { scale: 0.94 }}
+        animate={!locked && !done ? { scale: [1, 1.06, 1] } : {}}
+        transition={!locked && !done ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : {}}
+        className={`relative flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-2xl border-2 text-3xl ${
+          done
+            ? 'border-emerald-400 bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-md'
+            : locked
+              ? 'cursor-not-allowed border-border bg-muted text-muted-foreground'
+              : 'cursor-pointer border-rose-400 bg-gradient-to-br from-rose-400 to-fuchsia-600 text-white shadow-lg ring-4 ring-rose-300/50'
+        }`}
+      >
+        {done ? <Check className="h-8 w-8" strokeWidth={3} /> : locked ? <Lock className="h-6 w-6" /> : '👾'}
+        {boss.best_score != null && (
+          <span className="absolute -bottom-1 -right-1 rounded-full bg-background px-1 text-[0.6rem] font-bold tabular-nums text-foreground shadow ring-1 ring-border">
+            {Math.round(boss.best_score * 100)}%
+          </span>
+        )}
+      </motion.button>
+      <span className={`text-xs font-bold ${locked ? 'text-muted-foreground' : 'text-rose-500'}`}>
+        {done ? 'Đã hạ Boss' : locked ? 'Boss (khóa)' : '👾 Boss chặng'}
+      </span>
     </div>
   );
 }

@@ -4,7 +4,13 @@
 // bài; TẤT CẢ tham số /grade (mode/no_ai/strict/accent + exam topik) giữ nguyên.
 
 import { apiFetch } from '@/lib/api';
-import type { LessonContent } from './courseApi';
+
+// Chỉ cần id (đặt tên file) + exam (chọn pipeline topik). Nhận cả LessonContent lẫn
+// context Boss tối giản {id, exam} → dùng chung cho lesson-Boss và unit-Boss.
+export interface GradeContext {
+  id: string;
+  exam: string;
+}
 
 // % chính xác: (ok + low-severity) / non-skipped — khớp practicePct của PracticeDialog.
 export function practicePct(phonemes: any[]): number | null {
@@ -24,7 +30,7 @@ export function pickExt(mime: string): string {
  * Shadowing). KHÔNG đổi tham số nào khác — đây là hợp đồng "một đường chấm".
  */
 export async function gradePronunciation(
-  lesson: LessonContent,
+  lesson: GradeContext,
   text: string,
   blob: Blob,
   mime: string,

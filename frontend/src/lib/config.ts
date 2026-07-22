@@ -100,3 +100,7 @@ export const COURSE_GAME_ENABLED = import.meta.env.VITE_COURSE_GAME !== '0';
 // không đổi hoàn thành lesson. Tắt: VITE_COURSE_GAME_DICTATION=0 / _SHADOWING=0.
 export const COURSE_GAME_DICTATION = import.meta.env.VITE_COURSE_GAME_DICTATION !== '0';
 export const COURSE_GAME_SHADOWING = import.meta.env.VITE_COURSE_GAME_SHADOWING !== '0';
+
+// Phase 3A — Boss cuối chặng. KHÔNG cần LLM (đọc-to nội dung đã học) → default BẬT.
+// Tắt: VITE_COURSE_BOSS=0 → node Boss ẩn, path khóa học nguyên vẹn.
+export const COURSE_BOSS_ENABLED = import.meta.env.VITE_COURSE_BOSS !== '0';

@@ -289,3 +289,28 @@
   border-radius: 10px;
   margin: 0 0 0.4rem;
 }
+
+/* Boss cuối chặng (Phase 3A) — thanh máu + đoạn đọc-to */
+.course-boss-hp {
+  height: 0.9rem;
+  border-radius: 999px;
+  background: var(--surface-2, #f1f5f9);
+  overflow: hidden;
+  margin: 0.2rem 0 0.6rem;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+.course-boss-hp__fill {
+  height: 100%;
+  background: linear-gradient(90deg, #fb7185, #e11d48);
+  transition: width 0.5s ease;
+}
+.course-boss-words {
+  text-align: center;
+  font-weight: 600;
+  font-size: 1.05rem;
+  line-height: 1.7;
+  padding: 0.7rem 0.9rem;
+  background: var(--surface-2, #f1f5f9);
+  border-radius: 10px;
+  margin: 0 0 0.6rem;
+}

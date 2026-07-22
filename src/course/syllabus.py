@@ -281,6 +281,11 @@ def get_lesson(lesson_id: str) -> Lesson | None:
     return _LESSON_INDEX.get(lesson_id)
 
 
+def get_unit(unit_id: str) -> Unit | None:
+    """Unit theo id (vd 'toeic.pron'); None nếu không có. Dùng cho Boss cuối chặng."""
+    return _UNIT_INDEX.get(unit_id)
+
+
 def _build_index() -> dict[str, Lesson]:
     index: dict[str, Lesson] = {}
     for exam, units in SYLLABUS.items():
@@ -296,3 +301,6 @@ def _build_index() -> dict[str, Lesson]:
 
 
 _LESSON_INDEX: dict[str, Lesson] = _build_index()
+_UNIT_INDEX: dict[str, Unit] = {
+    unit.id: unit for units in SYLLABUS.values() for unit in units
+}

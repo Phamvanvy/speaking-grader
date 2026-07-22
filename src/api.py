@@ -1713,6 +1713,50 @@ def course_lesson_complete(
         raise HTTPException(status_code=500, detail=f"Lỗi ghi lesson: {e}") from e
 
 
+@app.get("/course/unit/{unit_id}/boss/content")
+async def course_unit_boss_content(
+    unit_id: str, user_id: str, lang: str | None = None,
+    authorization: str | None = Header(None),
+) -> dict:
+    """Nội dung Boss cuối chặng (đoạn đọc-to tổng hợp). 403 nếu chưa mở khóa (còn
+    lesson chưa done). Có thể chạm cache/index → threadpool."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    config = _resolve_config(lang)
+    lang_key = (config.feedback_lang or "vi").strip().lower()
+    try:
+        return await run_in_threadpool(
+            course.get_unit_boss_content, _BASE_CONFIG, config, user_id, unit_id, lang_key
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi lấy nội dung Boss")
+        raise HTTPException(status_code=500, detail=f"Lỗi nội dung Boss: {e}") from e
+
+
+@app.post("/course/unit/{unit_id}/boss/complete")
+def course_unit_boss_complete(
+    unit_id: str,
+    user_id: str = Form(...),
+    score: float = Form(..., description="Điểm hạ Boss đã CHUẨN HÓA 0-1"),
+    authorization: str | None = Header(None),
+) -> dict:
+    """Ghi kết quả hạ Boss (bonus — XP/xu/huy hiệu MỘT LẦN, không đụng mastery).
+    Server gate lại all-lessons-done + clamp + ngưỡng. 403 nếu chưa mở khóa."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.complete_unit_boss(_BASE_CONFIG, user_id, unit_id, score)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi ghi hoàn thành Boss")
+        raise HTTPException(status_code=500, detail=f"Lỗi ghi Boss: {e}") from e
+
+
 @app.post("/course/lesson/{lesson_id}/grade")
 async def course_lesson_grade(
     lesson_id: str,

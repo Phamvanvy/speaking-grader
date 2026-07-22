@@ -18,13 +18,14 @@ import logging
 from ..config import Config
 from ..phoneme_profile import get_weak_phonemes
 from ..rubrics.base import exam_language
+from . import boss as _boss
 from . import content as _content
 from . import generate
 from . import practice as _practice
 from . import profile, store
 from . import xp as _xp
-from .generate import DONE_THRESHOLD
-from .syllabus import SUPPORTED_EXAMS, get_lesson
+from .generate import BOSS_DONE_THRESHOLD, DONE_THRESHOLD
+from .syllabus import SUPPORTED_EXAMS, Unit, get_lesson, get_unit
 
 logger = logging.getLogger("toeic.course")
 
@@ -37,6 +38,8 @@ __all__ = [
     "lesson_exam",
     "refresh",
     "mark_lesson_complete",
+    "get_unit_boss_content",
+    "complete_unit_boss",
     "merge_user",
     "get_xp",
     "award_practice_xp",
@@ -81,7 +84,8 @@ def get_course(cfg: Config, user_id: str, exam: str = "toeic") -> dict:
         store.auto_complete_lesson(cfg, user_id, lid, score)
     progress = store.get_progress(cfg, user_id)
     activity = store.get_activity(cfg, user_id)
-    return generate.build_course(exam, mastery, weak, progress, activity)
+    boss_states = store.get_boss_states(cfg, user_id)
+    return generate.build_course(exam, mastery, weak, progress, activity, boss_states)
 
 
 def get_lesson_content(
@@ -162,6 +166,76 @@ def mark_lesson_complete(
         )
         result["xp"] = xp_state
         result["new_badges"] = xp_state.get("new_badges", [])
+    return result
+
+
+# ── Boss cuối chặng (Phase 3A) — BONUS, tách khỏi mastery/hoàn thành lesson ──
+
+
+def _all_lessons_done(unit: Unit, progress: dict[str, dict]) -> bool:
+    """True khi MỌI lesson trong unit đã done (điều kiện mở khóa + gate Boss)."""
+    return all(
+        (progress.get(ls.id) or {}).get("status") == "done" for ls in unit.lessons
+    )
+
+
+def get_unit_boss_content(
+    cfg: Config, config: Config, user_id: str, unit_id: str, lang: str
+) -> dict:
+    """Nội dung Boss của 1 chặng (đoạn đọc-to tổng hợp). Raise ValueError nếu unit
+    sai; PermissionError nếu chưa mở khóa (còn lesson chưa done)."""
+    unit = get_unit(unit_id)
+    if unit is None:
+        raise ValueError(f"Không có chặng '{unit_id}'.")
+    if not _all_lessons_done(unit, store.get_progress(cfg, user_id)):
+        raise PermissionError("Chưa mở khóa Boss — hoàn thành tất cả bài trong chặng.")
+    content = _boss.build_boss(cfg, config, user_id, unit, lang)
+    beaten = store.get_boss_states(cfg, user_id).get(f"{unit_id}.boss")
+    return {
+        "boss_id": f"{unit_id}.boss",
+        "unit_id": unit_id,
+        "title": f"Boss: {unit.title}",
+        "exam": unit.exam,
+        "dimension": unit.dimension,
+        "threshold": BOSS_DONE_THRESHOLD,
+        "reference_text": content["reference_text"],
+        "words": content["words"],
+        "best_score": (beaten or {}).get("best_score"),
+        "done": beaten is not None,
+    }
+
+
+def complete_unit_boss(
+    cfg: Config, user_id: str, unit_id: str, score: float
+) -> dict:
+    """Ghi kết quả hạ Boss. score đã CHUẨN HÓA 0-1 (client chấm qua /grade).
+
+    P0 chống gian lận (server-side): (1) gate lại all-lessons-done → PermissionError;
+    (2) clamp score; (3) chỉ mark beaten + award khi score >= BOSS_DONE_THRESHOLD.
+    XP/huy hiệu qua kênh RIÊNG award_bonus_xp, MỘT LẦN (mark_boss_beaten trả True ở
+    lần đầu). KHÔNG đụng lesson_progress/mastery/streak. Trả {done, best_score, xp?}.
+    """
+    unit = get_unit(unit_id)
+    if unit is None:
+        raise ValueError(f"Không có chặng '{unit_id}'.")
+    try:
+        score = float(score)
+    except (TypeError, ValueError) as e:
+        raise ValueError("score phải là số 0-1.") from e
+    score = max(0.0, min(1.0, score))
+    if not _all_lessons_done(unit, store.get_progress(cfg, user_id)):
+        raise PermissionError("Chưa mở khóa Boss — hoàn thành tất cả bài trong chặng.")
+    boss_id = f"{unit_id}.boss"
+    passed = score >= BOSS_DONE_THRESHOLD
+    result: dict = {"boss_id": boss_id, "done": passed, "score": score}
+    if passed:
+        first = store.mark_boss_beaten(cfg, user_id, boss_id, score)
+        beaten = store.get_boss_states(cfg, user_id).get(boss_id)
+        result["best_score"] = (beaten or {}).get("best_score")
+        if first and cfg.course_xp_enabled:
+            xp_state = _xp.award_bonus_xp(cfg, user_id, "boss", score)
+            result["xp"] = xp_state
+            result["new_badges"] = xp_state.get("new_badges", [])
     return result
 
 

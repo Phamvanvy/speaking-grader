@@ -23,11 +23,21 @@ export interface LessonView {
   attempts: number;
 }
 
+// Boss cuối chặng (Phase 3A) — node bonus sau các lesson của Unit.
+export interface BossNode {
+  id: string;
+  title: string;
+  status: LessonStatus; // locked (còn lesson chưa done) | available | done
+  threshold: number;
+  best_score: number | null;
+}
+
 export interface UnitView {
   id: string;
   title: string;
   dimension: Dimension;
   lessons: LessonView[];
+  boss?: BossNode;
 }
 
 export interface CourseView {
@@ -127,6 +137,49 @@ export function completeLesson(lessonId: string, score: number, exam: string): P
   fd.append('score', String(score));
   fd.append('exam', exam);
   return apiPostForm<CompleteResult>(`/course/lesson/${encodeURIComponent(lessonId)}/complete`, fd);
+}
+
+// ── Boss cuối chặng (Phase 3A) ───────────────────────────────────────────
+
+export interface BossContent {
+  boss_id: string;
+  unit_id: string;
+  title: string;
+  exam: string;
+  dimension: Dimension;
+  threshold: number;
+  reference_text: string;
+  words: PronWord[];
+  best_score: number | null;
+  done: boolean;
+}
+
+export interface BossCompleteResult {
+  boss_id: string;
+  done: boolean;
+  score: number;
+  best_score?: number | null;
+  xp?: XpState; // chỉ khi lần đầu hạ Boss (first-transition award)
+  new_badges?: string[];
+}
+
+export function getBossContent(unitId: string): Promise<BossContent> {
+  const uid = getUserId();
+  return apiGet<BossContent>(
+    `/course/unit/${encodeURIComponent(unitId)}/boss/content?user_id=${encodeURIComponent(uid)}`,
+  );
+}
+
+/** score đã CHUẨN HÓA 0-1 (client chấm qua /grade; server gate + clamp + ngưỡng). */
+export function completeBoss(unitId: string, score: number): Promise<BossCompleteResult> {
+  const uid = getUserId();
+  const fd = new FormData();
+  fd.append('user_id', uid);
+  fd.append('score', String(score));
+  return apiPostForm<BossCompleteResult>(
+    `/course/unit/${encodeURIComponent(unitId)}/boss/complete`,
+    fd,
+  );
 }
 
 export interface LessonGradeResult {

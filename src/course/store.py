@@ -35,7 +35,7 @@ from ..history import validate_user_id
 
 logger = logging.getLogger("toeic.course.store")
 
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS criterion_stats (
@@ -141,6 +141,19 @@ CREATE TABLE IF NOT EXISTS user_inventory (
   PRIMARY KEY (user_id, item_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_inventory_user ON user_inventory(user_id);
+
+-- ── Boss cuối chặng (schema v6, Phase 3A) — lớp BONUS, TÁCH khỏi lesson_progress ──
+-- Trạng thái đã-hạ-Boss của mỗi Unit, per-user. KHÔNG dùng lesson_progress để
+-- không làm sai progress.done/total + gate mở khóa lesson (Boss là bonus, không
+-- tính vào tiến độ khóa học). not_beaten = KHÔNG có hàng.
+CREATE TABLE IF NOT EXISTS unit_boss (
+  user_id    TEXT NOT NULL,
+  boss_id    TEXT NOT NULL,                      -- '<unit_id>.boss'
+  best_score REAL,                               -- best NORMALIZED (0-1)
+  beaten_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (user_id, boss_id)
+);
+CREATE INDEX IF NOT EXISTS idx_unit_boss_user ON unit_boss(user_id);
 """
 
 # ── Migrations cộng dồn (ALTER cho DB đã tồn tại — _DDL dùng IF NOT EXISTS nên
@@ -153,6 +166,8 @@ _MIGRATIONS: list[str] = [
     # v4 → v5: opt-in bảng xếp hạng tuần (Phase 5). (user_inventory ở v4 là bảng
     # mới nên _DDL tự tạo, không cần ALTER.)
     "ALTER TABLE user_xp ADD COLUMN leaderboard_opt_in INTEGER NOT NULL DEFAULT 0",
+    # v5 → v6: unit_boss (Phase 3A) là bảng MỚI → _DDL tự tạo qua IF NOT EXISTS,
+    # không cần ALTER ở đây.
 ]
 
 
@@ -320,6 +335,64 @@ def get_progress(cfg: Config, user_id: str) -> dict[str, dict]:
             }
             for r in rows
         }
+    finally:
+        conn.close()
+
+
+def get_boss_states(cfg: Config, user_id: str) -> dict[str, dict]:
+    """{boss_id: {best_score, beaten_at}} các Boss user ĐÃ hạ (Phase 3A).
+
+    Bảng RIÊNG unit_boss — không đụng lesson_progress/mastery (Boss là bonus).
+    """
+    conn = _connect(cfg)
+    try:
+        rows = conn.execute(
+            "SELECT boss_id, best_score, beaten_at FROM unit_boss WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        return {
+            r["boss_id"]: {"best_score": r["best_score"], "beaten_at": r["beaten_at"]}
+            for r in rows
+        }
+    finally:
+        conn.close()
+
+
+def mark_boss_beaten(
+    cfg: Config, user_id: str, boss_id: str, score: float
+) -> bool:
+    """Ghi Boss `boss_id` đã hạ với `score` (0-1). Idempotent + first-transition:
+
+    - Chưa có hàng → chèn, trả True (lần đầu hạ — caller cấp XP/badge một lần).
+    - Đã có → chỉ nâng best_score nếu score cao hơn, trả False (KHÔNG cấp lại XP).
+
+    KHÔNG bump streak, KHÔNG đụng lesson_progress/mastery (Boss là bonus).
+    """
+    try:
+        score = max(0.0, min(1.0, float(score)))
+    except (TypeError, ValueError):
+        score = 0.0
+    conn = _connect(cfg)
+    try:
+        with conn:
+            row = conn.execute(
+                "SELECT best_score FROM unit_boss WHERE user_id = ? AND boss_id = ?",
+                (user_id, boss_id),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO unit_boss (user_id, boss_id, best_score, beaten_at) "
+                    "VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                    (user_id, boss_id, score),
+                )
+                return True
+            prev = row["best_score"]
+            if prev is None or score > prev:
+                conn.execute(
+                    "UPDATE unit_boss SET best_score = ? WHERE user_id = ? AND boss_id = ?",
+                    (score, user_id, boss_id),
+                )
+            return False
     finally:
         conn.close()
 

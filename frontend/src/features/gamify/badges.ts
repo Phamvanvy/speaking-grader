@@ -21,6 +21,8 @@ export const BADGE_ORDER = [
   'perfect_10',
   'level_5',
   'level_10',
+  'boss_1',
+  'boss_5',
 ] as const;
 
 const META: Record<string, BadgeMeta> = {
@@ -34,6 +36,8 @@ const META: Record<string, BadgeMeta> = {
   perfect_10: { id: 'perfect_10', icon: '💯', label: 'Hoàn hảo x10', desc: '10 từ từng đạt 100%' },
   level_5: { id: 'level_5', icon: '⭐', label: 'Cấp 5', desc: 'Đạt cấp độ 5' },
   level_10: { id: 'level_10', icon: '🌟', label: 'Cấp 10', desc: 'Đạt cấp độ 10' },
+  boss_1: { id: 'boss_1', icon: '👾', label: 'Hạ Boss', desc: 'Hạ Boss cuối chặng đầu tiên' },
+  boss_5: { id: 'boss_5', icon: '⚔️', label: 'Thợ săn Boss', desc: 'Hạ 5 Boss cuối chặng' },
 };
 
 export function badgeMeta(id: string): BadgeMeta {

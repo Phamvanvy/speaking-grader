@@ -36,6 +36,11 @@ DONE_THRESHOLD: dict[str, float] = {
     "question_type": 0.67,
 }
 
+# Ngưỡng hạ Boss cuối chặng (Phase 3A) — chấm phát âm read-aloud trên đoạn tổng
+# hợp dài hơn nên nới nhẹ so với lesson phát âm (0.80). Endpoint boss/complete +
+# frontend BossSession dùng chung hằng này.
+BOSS_DONE_THRESHOLD = 0.75
+
 # Số lesson gắn badge "Nên học" (ưu tiên cao nhất, đang mở).
 _PRIORITY_BADGE_K = 3
 # Số lần chấm thật tối thiểu để TỰ ĐỘNG hoàn thành 1 lesson rubric/qtype từ
@@ -119,14 +124,35 @@ def auto_completions(exam: str, mastery: dict) -> list[tuple[str, float]]:
     return out
 
 
+def _boss_view(unit: Unit, lesson_views: list[dict], boss_states: dict[str, dict]) -> dict:
+    """Node Boss cuối chặng (Phase 3A). status:
+    - `done`   : đã hạ (có trong boss_states).
+    - `available`: mọi lesson trong unit đã done (mở khóa).
+    - `locked` : còn lesson chưa done.
+    Boss là BONUS — KHÔNG tính vào progress.done/total (đếm ở lesson thôi)."""
+    boss_id = f"{unit.id}.boss"
+    beaten = boss_states.get(boss_id)
+    all_done = bool(lesson_views) and all(v["status"] == "done" for v in lesson_views)
+    status = "done" if beaten else ("available" if all_done else "locked")
+    return {
+        "id": boss_id,
+        "title": f"Boss: {unit.title}",
+        "status": status,
+        "threshold": BOSS_DONE_THRESHOLD,
+        "best_score": (beaten or {}).get("best_score"),
+    }
+
+
 def build_course(
     exam: str,
     mastery: dict,
     weak_phonemes: list[dict],
     progress: dict[str, dict],
     activity: dict,
+    boss_states: dict[str, dict] | None = None,
 ) -> dict:
     """View model khóa học cá nhân hóa cho 1 kỳ thi."""
+    boss_states = boss_states or {}
     weak = _weak_map(weak_phonemes)
     lang = exam_language(exam)
     units_src: list[Unit] = SYLLABUS.get(exam, [])
@@ -187,6 +213,7 @@ def build_course(
             "title": unit.title,
             "dimension": unit.dimension,
             "lessons": lesson_views,
+            "boss": _boss_view(unit, lesson_views, boss_states),
         })
 
     # 4) Badge "Nên học": top-K lesson đang mở (available/in_progress) yếu nhất.

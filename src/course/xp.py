@@ -40,6 +40,12 @@ WORD_XP_MIN = 2
 # XP hoàn thành 1 lesson (chỉ first-transition) = LESSON_XP_BASE + round(score*BONUS).
 LESSON_XP_BASE = 50
 LESSON_XP_SCORE_BONUS = 50
+# XP+xu thưởng khi hoàn thành Boss/Quest (Phase 3) — KÊNH RIÊNG, KHÔNG dính quota
+# practice, cấp MỘT LẦN (caller đảm bảo idempotent qua bảng state). Cao hơn lesson
+# vì là thử thách tổng hợp; kèm xu (nguồn xu mới ngoài nhiệm vụ ngày).
+BONUS_XP_BASE = 60
+BONUS_XP_SCORE_BONUS = 40
+BONUS_COINS = 20
 # Thử thách tuần: mục tiêu XP-practice trong cửa sổ 7 ngày (chỉ để tạo động lực +
 # vẽ thanh tiến độ trên bảng xếp hạng; KHÔNG cấp huy hiệu riêng — badge tính từ dữ
 # liệu tích lũy). Trần practice 200/ngày → tối đa 1400/tuần, khó cày.
@@ -204,6 +210,9 @@ _BADGE_RULES: list[tuple[str, "callable"]] = [
     ("perfect_10", lambda c: c["words_perfect"] >= 10),
     ("level_5", lambda c: c["level"] >= 5),
     ("level_10", lambda c: c["level"] >= 10),
+    # Boss cuối chặng (Phase 3A) — số Boss ĐÃ hạ (bảng unit_boss).
+    ("boss_1", lambda c: c["bosses_beaten"] >= 1),
+    ("boss_5", lambda c: c["bosses_beaten"] >= 5),
 ]
 
 
@@ -220,6 +229,7 @@ def _badge_context(cfg: Config, user_id: str) -> dict:
         conn.close()
     progress = store.get_progress(cfg, user_id)
     lessons_done = sum(1 for p in progress.values() if p.get("status") == "done")
+    bosses_beaten = len(store.get_boss_states(cfg, user_id))
     activity = store.get_activity(cfg, user_id)
     # longest_streak (max từng đạt) để huy hiệu không "mất" khi streak rơi.
     streak = max(
@@ -231,6 +241,7 @@ def _badge_context(cfg: Config, user_id: str) -> dict:
     return {
         "level": xp_to_level(xp)["level"],
         "lessons_done": lessons_done,
+        "bosses_beaten": bosses_beaten,
         "streak": streak,
         "words_mastered": words_mastered,
         "words_perfect": words_perfect,
@@ -383,6 +394,41 @@ def award_lesson_xp(
     # Thưởng streak nhỏ (cap 7 ngày) để khuyến khích học đều mà không cày được.
     amount += min(max(0, int(streak_days)), 7) * 2
     before, after = _award_xp(cfg, user_id, amount)
+    new_badges = check_and_award_badges(cfg, user_id)
+    return _award_result(cfg, user_id, before, after, amount, new_badges)
+
+
+def award_bonus_xp(cfg: Config, user_id: str, kind: str, score: float) -> dict:
+    """XP + xu cho hoàn thành Boss/Quest (kind: 'boss'|'roleplay'|'story') — Phase 3.
+
+    KÊNH RIÊNG, cấp MỘT LẦN: caller PHẢI đảm bảo idempotent (chỉ gọi khi
+    first-transition, vd `store.mark_boss_beaten` trả True). KHÔNG dùng quota
+    practice / `word_recall` → không mở kênh farm. Backend tự tính từ score;
+    client KHÔNG gửi số XP. Trả state mới + {awarded, leveled_up, new_badges}.
+    """
+    try:
+        score = max(0.0, min(1.0, float(score)))
+    except (TypeError, ValueError):
+        score = 0.0
+    amount = BONUS_XP_BASE + round(score * BONUS_XP_SCORE_BONUS)
+    conn = _connect(cfg)
+    try:
+        with conn:
+            before, _coins = _read_xp(conn, user_id)
+            conn.execute(
+                """
+                INSERT INTO user_xp (user_id, xp, coins, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  xp = user_xp.xp + excluded.xp,
+                  coins = user_xp.coins + excluded.coins,
+                  updated_at = excluded.updated_at
+                """,
+                (user_id, amount, BONUS_COINS, _now()),
+            )
+            after = before + amount
+    finally:
+        conn.close()
     new_badges = check_and_award_badges(cfg, user_id)
     return _award_result(cfg, user_id, before, after, amount, new_badges)
 
