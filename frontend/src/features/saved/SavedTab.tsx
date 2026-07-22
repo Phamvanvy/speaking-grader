@@ -20,6 +20,7 @@ import { useXp } from '@/store/xp';
 import XpBar from '@/features/gamify/XpBar';
 import StreakFlame from '@/features/gamify/StreakFlame';
 import BadgeGrid from '@/features/gamify/BadgeGrid';
+import { DailyGoalRing, CoinChip } from '@/features/gamify/DailyGoal';
 import { useReviewToast, type ReviewSettings } from './reviewToast';
 import { useQuickReview } from '@/store/quickReview';
 import { buildReviewQueue } from './reviewQueue';
@@ -392,6 +393,8 @@ function GamifyHeader() {
       <div className="flex flex-col gap-4 bg-gradient-to-r from-indigo-50 to-purple-50 p-5 dark:from-indigo-950/30 dark:to-purple-950/20">
         <div className="flex flex-wrap items-center gap-4">
           <XpBar className="min-w-[220px] flex-1" />
+          <DailyGoalRing />
+          <CoinChip />
           {data.streak && (
             <StreakFlame days={data.streak.streak_days} longest={data.streak.longest_streak} />
           )}

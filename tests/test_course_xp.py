@@ -194,6 +194,65 @@ def test_merge_user_clamps_daily_cap(cfg):
     assert after["awarded"] == 0 and after["xp"] == before
 
 
+# ── Phase 2: nhiệm vụ ngày + xu ──────────────────────────────────────────
+
+
+def test_daily_goal_progress_and_coins_once(cfg):
+    u = "u-daily"
+    # Chưa luyện → count 0, chưa xong, chưa có xu.
+    st0 = get_xp(cfg, u)
+    assert st0["daily"] == {
+        "count": 0,
+        "goal": xp.DAILY_GOAL,
+        "coins_reward": xp.DAILY_GOAL_COINS,
+        "done": False,
+    }
+    assert st0["coins"] == 0
+    hit_events = []
+    for i in range(xp.DAILY_GOAL):
+        r = award_practice_xp(cfg, u, "word_practice", 0.9)
+        assert r["daily"]["count"] == i + 1
+        hit_events.append(r["daily_goal_hit"])
+    # daily_goal_hit CHỈ True đúng lần chạm mốc (lần thứ DAILY_GOAL).
+    assert hit_events == [False] * (xp.DAILY_GOAL - 1) + [True]
+    st = get_xp(cfg, u)
+    assert st["daily"]["done"] is True
+    assert st["coins"] == xp.DAILY_GOAL_COINS
+    # Luyện thêm KHÔNG cấp lại xu (idempotent 1/ngày) và không hit lần nữa.
+    r_extra = award_practice_xp(cfg, u, "word_practice", 0.9)
+    assert r_extra["daily_goal_hit"] is False
+    assert r_extra["daily"]["count"] == xp.DAILY_GOAL + 1
+    assert get_xp(cfg, u)["coins"] == xp.DAILY_GOAL_COINS
+
+
+def test_daily_count_increments_past_xp_cap(cfg):
+    # Nhiệm vụ ngày đếm SỐ TỪ luyện, độc lập trần XP: kịch cap XP vẫn tăng count.
+    u = "u-daily-cap"
+    for _ in range(50):
+        award_practice_xp(cfg, u, "word_practice", 1.0)
+    st = get_xp(cfg, u)
+    assert st["xp"] == xp.DAILY_PRACTICE_CAP  # XP đụng trần
+    assert st["daily"]["count"] == 50          # count vẫn đếm đủ
+    assert st["coins"] == xp.DAILY_GOAL_COINS   # xu mốc vẫn cấp đúng 1 lần
+
+
+def test_merge_user_sums_daily_count_and_coins(cfg):
+    anon, acct = "anon-d", "acct-d"
+    for _ in range(3):
+        award_practice_xp(cfg, anon, "word_practice", 0.8)  # 3 từ, chưa đủ goal
+    for _ in range(3):
+        award_practice_xp(cfg, acct, "word_practice", 0.8)  # 3 từ, chưa đủ goal
+    assert get_xp(cfg, anon)["coins"] == 0 and get_xp(cfg, acct)["coins"] == 0
+
+    merge_user(cfg, anon, acct)
+
+    merged = get_xp(cfg, acct)
+    # count cộng dồn (3+3=6 ≥ goal) và user cũ sạch.
+    assert merged["daily"]["count"] == 6
+    assert merged["daily"]["done"] is True
+    assert get_xp(cfg, anon)["daily"]["count"] == 0
+
+
 # ── Cờ COURSE_XP_ENABLED tắt → no-op ─────────────────────────────────────
 
 

@@ -9,7 +9,7 @@ import { create } from 'zustand';
 import { toast } from 'sonner';
 import { apiGet, apiPostForm } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
-import { celebrateLevelUp, celebrateBadge } from '@/lib/celebrate';
+import { celebrateLevelUp, celebrateBadge, celebrateComplete } from '@/lib/celebrate';
 import { badgeMeta } from '@/features/gamify/badges';
 
 export interface Badge {
@@ -34,10 +34,19 @@ export interface XpState {
     last_active_day: string | null;
     total_completed: number;
   };
+  // Nhiệm vụ hôm nay (luyện N/goal từ) — kèm ở mọi payload mang XpState.
+  daily?: {
+    count: number;
+    goal: number;
+    coins_reward: number;
+    done: boolean;
+  };
   // Chỉ có ở payload award/complete — dùng để quyết định ăn mừng.
   leveled_up?: boolean;
   new_badges?: string[];
   awarded?: number;
+  // True đúng LẦN award chạm mốc nhiệm vụ ngày → ăn mừng + báo thưởng xu.
+  daily_goal_hit?: boolean;
 }
 
 interface XpStore {
@@ -58,6 +67,13 @@ function celebrate(state: XpState): void {
       const m = badgeMeta(id);
       toast.success(`Mở khóa huy hiệu ${m.icon} ${m.label}!`, { description: m.desc });
     }
+  }
+  if (state.daily_goal_hit) {
+    if (!state.leveled_up && !newBadges.length) celebrateComplete();
+    const reward = state.daily?.coins_reward ?? 0;
+    toast.success('🎯 Hoàn thành nhiệm vụ hôm nay!', {
+      description: reward ? `Thưởng +${reward} 🪙 xu` : undefined,
+    });
   }
 }
 

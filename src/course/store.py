@@ -35,7 +35,7 @@ from ..history import validate_user_id
 
 logger = logging.getLogger("toeic.course.store")
 
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS criterion_stats (
@@ -120,9 +120,29 @@ CREATE TABLE IF NOT EXISTS xp_daily (
   user_id     TEXT NOT NULL,
   day         TEXT NOT NULL,                      -- 'YYYY-MM-DD' UTC
   practice_xp INTEGER NOT NULL DEFAULT 0,         -- tổng XP practice đã cấp trong ngày
+  practice_count     INTEGER NOT NULL DEFAULT 0,  -- số từ đã luyện (đếm cho nhiệm vụ ngày, KỂ CẢ khi đã kịch trần XP)
+  goal_coins_awarded INTEGER NOT NULL DEFAULT 0,  -- 1 khi đã cấp xu thưởng mốc ngày (idempotent 1/ngày)
   PRIMARY KEY (user_id, day)
 );
 """
+
+# ── Migrations cộng dồn (ALTER cho DB đã tồn tại — _DDL dùng IF NOT EXISTS nên
+# không tự thêm cột mới). Chạy trong transaction dựng schema; mỗi ALTER guard
+# "duplicate column" để idempotent nếu chạy lại. ──
+_MIGRATIONS: list[str] = [
+    # v2 → v3: nhiệm vụ ngày + xu (Phase 2 game hóa).
+    "ALTER TABLE xp_daily ADD COLUMN practice_count INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE xp_daily ADD COLUMN goal_coins_awarded INTEGER NOT NULL DEFAULT 0",
+]
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    for stmt in _MIGRATIONS:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
 
 
 # ── Kết nối / schema ─────────────────────────────────────────────────────
@@ -140,6 +160,7 @@ def _connect(cfg: Config) -> sqlite3.Connection:
     if version < _SCHEMA_VERSION:
         with conn:
             conn.executescript(_DDL)
+            _apply_migrations(conn)
             conn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
     return conn
 

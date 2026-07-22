@@ -30,6 +30,10 @@ logger = logging.getLogger("toeic.course.xp")
 LEVEL_BASE = 100
 # Trần XP practice cấp trong 1 ngày (UTC) — chống luyện lặp để cày XP.
 DAILY_PRACTICE_CAP = 200
+# Nhiệm vụ ngày: luyện đủ DAILY_GOAL từ (đếm KỂ CẢ khi đã kịch trần XP) → thưởng
+# DAILY_GOAL_COINS xu, MỘT LẦN/ngày (cột goal_coins_awarded chống cấp lại).
+DAILY_GOAL = 5
+DAILY_GOAL_COINS = 15
 # XP mỗi lần luyện 1 từ = round(score * WORD_XP_MAX), tối thiểu WORD_XP_MIN.
 WORD_XP_MAX = 20
 WORD_XP_MIN = 2
@@ -93,6 +97,21 @@ def _read_xp(conn: sqlite3.Connection, user_id: str) -> tuple[int, int]:
     return (int(row["xp"]), int(row["coins"])) if row else (0, 0)
 
 
+def _read_daily(conn: sqlite3.Connection, user_id: str) -> dict:
+    """Tiến độ nhiệm vụ HÔM NAY (UTC): {count, goal, coins_reward, done}."""
+    row = conn.execute(
+        "SELECT practice_count FROM xp_daily WHERE user_id = ? AND day = ?",
+        (user_id, _today()),
+    ).fetchone()
+    count = int(row["practice_count"]) if row else 0
+    return {
+        "count": count,
+        "goal": DAILY_GOAL,
+        "coins_reward": DAILY_GOAL_COINS,
+        "done": count >= DAILY_GOAL,
+    }
+
+
 def _list_badges(conn: sqlite3.Connection, user_id: str) -> list[dict]:
     rows = conn.execute(
         "SELECT badge_id, earned_at FROM user_badges WHERE user_id = ? "
@@ -112,11 +131,13 @@ def get_xp_state(cfg: Config, user_id: str) -> dict:
     try:
         xp, coins = _read_xp(conn, user_id)
         badges = _list_badges(conn, user_id)
+        daily = _read_daily(conn, user_id)
     finally:
         conn.close()
     state = xp_to_level(xp)
     state["coins"] = coins
     state["badges"] = badges
+    state["daily"] = daily
     return state
 
 
@@ -243,41 +264,61 @@ def award_practice_xp(cfg: Config, user_id: str, score: float) -> dict:
         score = 0.0
     computed = max(WORD_XP_MIN, round(score * WORD_XP_MAX))
     today = _today()
+    daily_goal_hit = False
     conn = _connect(cfg)
     try:
         with conn:
             before, _coins = _read_xp(conn, user_id)
-            used_row = conn.execute(
-                "SELECT practice_xp FROM xp_daily WHERE user_id = ? AND day = ?",
+            row = conn.execute(
+                "SELECT practice_xp, practice_count, goal_coins_awarded "
+                "FROM xp_daily WHERE user_id = ? AND day = ?",
                 (user_id, today),
             ).fetchone()
-            used = int(used_row["practice_xp"]) if used_row else 0
+            used = int(row["practice_xp"]) if row else 0
+            count = int(row["practice_count"]) if row else 0
+            goal_awarded = int(row["goal_coins_awarded"]) if row else 0
             remaining = max(0, DAILY_PRACTICE_CAP - used)
             grant = min(computed, remaining)
-            if grant > 0:
+            # practice_count LUÔN +1 (nhiệm vụ ngày đếm số từ luyện, độc lập trần XP).
+            new_count = count + 1
+            # Xu thưởng mốc ngày: cấp MỘT LẦN khi lần đầu chạm DAILY_GOAL trong ngày.
+            coins_reward = 0
+            if not goal_awarded and new_count >= DAILY_GOAL:
+                coins_reward = DAILY_GOAL_COINS
+                goal_awarded = 1
+                daily_goal_hit = True
+            if grant > 0 or coins_reward > 0:
                 conn.execute(
                     """
                     INSERT INTO user_xp (user_id, xp, coins, updated_at)
-                    VALUES (?, ?, 0, ?)
+                    VALUES (?, ?, ?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET
-                      xp = user_xp.xp + excluded.xp, updated_at = excluded.updated_at
+                      xp = user_xp.xp + excluded.xp,
+                      coins = user_xp.coins + excluded.coins,
+                      updated_at = excluded.updated_at
                     """,
-                    (user_id, grant, _now()),
+                    (user_id, grant, coins_reward, _now()),
                 )
-                conn.execute(
-                    """
-                    INSERT INTO xp_daily (user_id, day, practice_xp)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(user_id, day) DO UPDATE SET
-                      practice_xp = xp_daily.practice_xp + excluded.practice_xp
-                    """,
-                    (user_id, today, grant),
-                )
+            conn.execute(
+                """
+                INSERT INTO xp_daily
+                  (user_id, day, practice_xp, practice_count, goal_coins_awarded)
+                VALUES (?, ?, ?, 1, ?)
+                ON CONFLICT(user_id, day) DO UPDATE SET
+                  practice_xp = xp_daily.practice_xp + excluded.practice_xp,
+                  practice_count = xp_daily.practice_count + 1,
+                  goal_coins_awarded =
+                    MAX(xp_daily.goal_coins_awarded, excluded.goal_coins_awarded)
+                """,
+                (user_id, today, grant, goal_awarded),
+            )
             after = before + grant
     finally:
         conn.close()
     new_badges = check_and_award_badges(cfg, user_id)
-    return _award_result(cfg, user_id, before, after, grant, new_badges)
+    result = _award_result(cfg, user_id, before, after, grant, new_badges)
+    result["daily_goal_hit"] = daily_goal_hit
+    return result
 
 
 def award_lesson_xp(
@@ -350,11 +391,16 @@ def merge_user_xp(
     conn.execute("DELETE FROM user_badges WHERE user_id = ?", (from_user_id,))
     conn.execute(
         f"""
-        INSERT INTO xp_daily (user_id, day, practice_xp)
-        SELECT ?, day, practice_xp FROM xp_daily WHERE user_id = ?
+        INSERT INTO xp_daily
+          (user_id, day, practice_xp, practice_count, goal_coins_awarded)
+        SELECT ?, day, practice_xp, practice_count, goal_coins_awarded
+          FROM xp_daily WHERE user_id = ?
         ON CONFLICT(user_id, day) DO UPDATE SET
           practice_xp = MIN({DAILY_PRACTICE_CAP},
-                            xp_daily.practice_xp + excluded.practice_xp)
+                            xp_daily.practice_xp + excluded.practice_xp),
+          practice_count = xp_daily.practice_count + excluded.practice_count,
+          goal_coins_awarded =
+            MAX(xp_daily.goal_coins_awarded, excluded.goal_coins_awarded)
         """,
         (to_user_id, from_user_id),
     )
