@@ -79,7 +79,7 @@ function celebrate(state: XpState): void {
     if (!state.leveled_up && !newBadges.length) celebrateComplete();
     const reward = state.daily?.coins_reward ?? 0;
     toast.success('🎯 Hoàn thành nhiệm vụ hôm nay!', {
-      description: reward ? `Thưởng +${reward} 🪙 xu` : undefined,
+      description: reward ? `Thưởng +${reward} xu` : undefined,
     });
   }
 }

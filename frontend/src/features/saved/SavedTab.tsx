@@ -429,18 +429,24 @@ function GamifyHeader() {
   return (
     <Card className="overflow-hidden">
       <div className="flex flex-col gap-4 bg-gradient-to-r from-indigo-50 to-purple-50 p-5 dark:from-indigo-950/30 dark:to-purple-950/20">
+        {/* Hàng 1 — tiến độ chính (hero): thanh XP chiếm full, streak neo cuối hàng. */}
         <div className="flex flex-wrap items-center gap-4">
           <XpBar className="min-w-[220px] flex-1" />
-          <DailyGoalRing />
-          <CoinChip />
-          <ShopButton />
-          <LeaderboardButton />
           {data.streak && (
             <StreakFlame days={data.streak.streak_days} longest={data.streak.longest_streak} />
           )}
         </div>
+        {/* Hàng 2 — chip thống kê (trái) tách khỏi nút hành động (đẩy phải). */}
+        <div className="flex flex-wrap items-center gap-2.5 border-t border-border/60 pt-3.5">
+          <DailyGoalRing />
+          <CoinChip />
+          <div className="ml-auto flex items-center gap-2.5">
+            <ShopButton />
+            <LeaderboardButton />
+          </div>
+        </div>
         {badges.length > 0 && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 border-t border-border/60 pt-3.5">
             <span className="text-xs font-medium text-muted-foreground">Huy hiệu:</span>
             <BadgeGrid earned={badges} compact />
           </div>

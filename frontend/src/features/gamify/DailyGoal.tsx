@@ -54,7 +54,7 @@ export function DailyGoalRing({ className = '' }: { className?: string }) {
 }
 
 /** Icon xu (SVG inline — không phụ thuộc font emoji của hệ điều hành). */
-function CoinIcon({ className = '' }: { className?: string }) {
+export function CoinIcon({ className = '' }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"

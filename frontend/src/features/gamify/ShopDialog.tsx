@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Check, Loader2, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useShop, type ShopItem } from '@/store/shop';
+import { CoinIcon } from './DailyGoal';
 
 const SLOT_LABEL: Record<string, string> = {
   xp_theme: 'Thanh XP',
@@ -29,7 +30,7 @@ export default function ShopDialog() {
           <DialogTitle className="flex items-center gap-2">
             🛍️ Cửa hàng
             <span className="ml-auto flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-sm font-bold tabular-nums dark:border-amber-500/40 dark:bg-amber-950/40">
-              🪙 {data?.coins ?? 0}
+              <CoinIcon className="h-4 w-4 shrink-0" /> {data?.coins ?? 0}
             </span>
           </DialogTitle>
         </DialogHeader>
@@ -111,7 +112,7 @@ function ItemCard({ item }: { item: ShopItem }) {
           ) : item.affordable ? null : (
             <Lock className="h-4 w-4" />
           )}
-          🪙 {item.price}
+          <CoinIcon className="h-4 w-4 shrink-0" /> {item.price}
         </Button>
       )}
     </div>
