@@ -2,7 +2,7 @@
 // phía server) rồi cho chọn 1 trong 4 từ. Không có nghĩa (từ hiếm / lỗi mạng) →
 // tự lùi về "Nghe & chọn từ" để bài không bị kẹt. Mount lại mỗi bài (key=index).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/lib/api';
 import type { SavedWord } from '@/store/savedWords';
 import { buildChoices } from './wordChoice';
@@ -45,14 +45,15 @@ export default function MeaningRecall({
     };
   }, [key]);
 
+  // Bộ lựa chọn cố định theo từ (tránh reshuffle khi parent re-render lúc chấm).
+  const options = useMemo(() => buildChoices(word.word, pool, 4), [word.word, pool]);
+
   // Không có nghĩa → chơi "Nghe & chọn từ" thay thế (vẫn 1 lượt word_recall).
   if (meaning === null) return <ListenChoose word={word} pool={pool} onResult={onResult} />;
 
   if (meaning === undefined) {
     return <div className="py-8 text-center text-sm text-muted-foreground">Đang tải nghĩa…</div>;
   }
-
-  const options = buildChoices(word.word, pool, 4);
   return (
     <WordChoiceGame
       hint="🧠 Từ nào mang nghĩa này?"
