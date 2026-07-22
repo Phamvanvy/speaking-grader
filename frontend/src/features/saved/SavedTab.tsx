@@ -216,8 +216,8 @@ export default function SavedTab() {
           }
         />
 
-        <div className="p-5">
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="p-4">
+          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <AddWordInline
               onAdd={async (word) => {
                 await addWord({ word });
@@ -250,7 +250,7 @@ export default function SavedTab() {
               <div className="overflow-hidden rounded-xl border shadow-sm">
                 <Table>
                   <TableHeader>
-                    <TableRow className="border-b-2 bg-muted/60 hover:bg-muted/60 [&>th]:h-10 [&>th]:text-[0.78rem] [&>th]:font-semibold [&>th]:uppercase [&>th]:tracking-wide">
+                    <TableRow className="border-b-2 bg-muted/60 hover:bg-muted/60 [&>th]:h-9 [&>th]:text-[0.78rem] [&>th]:font-semibold [&>th]:uppercase [&>th]:tracking-wide">
                       <SortHead label="Từ" col="word" sort={sort} onSort={applySort} />
                       <TableHead>Phát âm</TableHead>
                       <SortHead label="Điểm" col="score" sort={sort} onSort={applySort} className="w-20" />
@@ -267,7 +267,7 @@ export default function SavedTab() {
                       return (
                         <TableRow key={w.word} className="group odd:bg-muted/20">
                           {/* Bấm vào từ = mở luyện tập (hàng nào cũng có nút 🎙️, nhưng từ là target to nhất). */}
-                          <TableCell className="py-3">
+                          <TableCell className="py-2">
                             <button
                               type="button"
                               className="text-[0.95rem] font-semibold text-foreground hover:text-primary hover:underline"
@@ -279,7 +279,7 @@ export default function SavedTab() {
                               {w.word}
                             </button>
                           </TableCell>
-                          <TableCell className="py-3">
+                          <TableCell className="py-2">
                             <span className="flex items-center gap-1.5">
                               <span className="rounded-md bg-muted/70 px-1.5 py-0.5 font-mono text-xs text-muted-foreground">{ipa}</span>
                               <IconBtn className="tts-play h-7 w-7" data-word={w.word} data-ipa={ipa || undefined} title="Nghe phát âm chuẩn">
@@ -287,13 +287,13 @@ export default function SavedTab() {
                               </IconBtn>
                             </span>
                           </TableCell>
-                          <TableCell className="py-3" title={`Độ thành thạo — điểm gần nhất ${scorePct(w)}`}>
+                          <TableCell className="py-2" title={`Độ thành thạo — điểm gần nhất ${scorePct(w)}`}>
                             <MasteryStars value={sv} />
                           </TableCell>
-                          <TableCell className="py-3 text-xs tabular-nums text-muted-foreground">
+                          <TableCell className="py-2 text-xs tabular-nums text-muted-foreground">
                             {w.saved_at ? new Date(w.saved_at).toLocaleDateString('vi-VN') : ''}
                           </TableCell>
-                          <TableCell className="py-3">
+                          <TableCell className="py-2">
                             <IconBtn
                               title={m ? 'Đã tắt nhắc ôn — bấm để bật lại' : 'Đang nhắc ôn — bấm để tắt nhắc từ này'}
                               onClick={() => toggleMuted(w.word)}
@@ -301,7 +301,7 @@ export default function SavedTab() {
                               {m ? <BellOff className="h-4 w-4 opacity-50" /> : <Bell className="h-4 w-4 text-primary" />}
                             </IconBtn>
                           </TableCell>
-                          <TableCell className="py-3">
+                          <TableCell className="py-2">
                             {/* Hiện mờ, rõ khi hover hàng — bảng đỡ rối vì 2 nút/hàng. */}
                             <div className="flex items-center justify-end gap-0.5 opacity-60 transition-opacity group-hover:opacity-100">
                               <IconBtn
@@ -428,29 +428,29 @@ function GamifyHeader() {
   const badges = data.badges?.map((b) => b.id) ?? [];
   return (
     <Card className="overflow-hidden">
-      <div className="flex flex-col gap-4 bg-gradient-to-r from-indigo-50 to-purple-50 p-5 dark:from-indigo-950/30 dark:to-purple-950/20">
-        {/* Hàng 1 — tiến độ chính (hero): thanh XP chiếm full, streak neo cuối hàng. */}
-        <div className="flex flex-wrap items-center gap-4">
+      <div className="flex flex-col gap-3 bg-gradient-to-r from-indigo-50 to-purple-50 p-4 dark:from-indigo-950/30 dark:to-purple-950/20">
+        {/* Hàng 1 — tiến độ chính (hero): thanh XP chiếm full, streak + chip thống kê cùng hàng khi đủ chỗ. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
           <XpBar className="min-w-[220px] flex-1" />
           {data.streak && (
             <StreakFlame days={data.streak.streak_days} longest={data.streak.longest_streak} />
           )}
-        </div>
-        {/* Hàng 2 — chip thống kê (trái) tách khỏi nút hành động (đẩy phải). */}
-        <div className="flex flex-wrap items-center gap-2.5 border-t border-border/60 pt-3.5">
           <DailyGoalRing />
           <CoinChip />
+        </div>
+        {/* Hàng 2 — nút hành động + huy hiệu, gộp trên một dải để tab ngắn lại. */}
+        <div className="flex flex-wrap items-center gap-2.5 border-t border-border/60 pt-3">
+          {badges.length > 0 && (
+            <>
+              <span className="text-xs font-medium text-muted-foreground">Huy hiệu:</span>
+              <BadgeGrid earned={badges} compact />
+            </>
+          )}
           <div className="ml-auto flex items-center gap-2.5">
             <ShopButton />
             <LeaderboardButton />
           </div>
         </div>
-        {badges.length > 0 && (
-          <div className="flex items-center gap-2 border-t border-border/60 pt-3.5">
-            <span className="text-xs font-medium text-muted-foreground">Huy hiệu:</span>
-            <BadgeGrid earned={badges} compact />
-          </div>
-        )}
       </div>
     </Card>
   );
@@ -469,13 +469,13 @@ function SectionHead({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b bg-muted/30 px-5 py-4">
-      <div>
+    <div className="flex items-start justify-between gap-3 border-b bg-muted/30 px-5 py-3">
+      <div className="min-w-0">
         <h2 className="flex items-center gap-2 text-base font-semibold">
           <span aria-hidden>{icon}</span>
           {title}
         </h2>
-        {desc && <p className="mt-1 text-sm text-muted-foreground">{desc}</p>}
+        {desc && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{desc}</p>}
       </div>
       {right && <div className="shrink-0">{right}</div>}
     </div>
@@ -645,7 +645,7 @@ function SuggestionsCard({ onPractice }: { onPractice: (d: any) => void }) {
         }
       />
 
-      <div className="p-5">
+      <div className="p-4">
         {isFetching && !data ? (
           <div className="text-sm text-muted-foreground">Đang tải gợi ý… (lần đầu có thể mất vài giây — AI chọn từ cho từng âm)</div>
         ) : !data ? (
@@ -653,15 +653,15 @@ function SuggestionsCard({ onPractice }: { onPractice: (d: any) => void }) {
         ) : (
           <>
             {/* Khối "âm yếu" tách nền riêng: đây là CHẨN ĐOÁN, khác với danh sách từ ở dưới. */}
-            <div className="mb-5 rounded-lg border bg-muted/30 p-3.5">
+            <div className="mb-4 rounded-lg border bg-muted/30 p-3">
               <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
                 <Target className="h-4 w-4 text-primary" />
                 Âm bạn hay sai
-              </p>
-              <p className="mb-2.5 text-sm text-muted-foreground">
-                {data.source === 'fallback'
-                  ? 'Chưa đủ dữ liệu chấm điểm — gợi ý theo các âm người Việt thường gặp khó. Chấm thêm bài để gợi ý bám sát bạn hơn.'
-                  : 'Tính từ lịch sử chấm — bấm chip để nghe âm mẫu trong một từ.'}
+                <span className="font-normal text-muted-foreground">
+                  {data.source === 'fallback'
+                    ? '· gợi ý theo âm người Việt hay khó (chấm thêm bài để bám sát hơn)'
+                    : '· bấm chip để nghe âm mẫu trong một từ'}
+                </span>
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {(data.weak_phonemes || []).map((w, i) => {
@@ -705,7 +705,7 @@ function SuggestionsCard({ onPractice }: { onPractice: (d: any) => void }) {
                         }
                       }}
                       title="Bấm để luyện từ này"
-                      className="group flex cursor-pointer flex-col rounded-xl border bg-muted/25 p-3.5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-card hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="group flex cursor-pointer flex-col rounded-xl border bg-muted/25 p-3 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:bg-card hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <div className="flex items-start gap-2">
                         <div className="min-w-0 flex-1">

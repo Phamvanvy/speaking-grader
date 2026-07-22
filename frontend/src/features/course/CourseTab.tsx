@@ -4,11 +4,11 @@
 // + badge "Nên học" (focus). Server state qua TanStack Query (courseApi); XP kèm sẵn
 // trong payload /course/state → ingest vào useXp (không round-trip thêm).
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { RotateCw, Check, Lock, Play } from 'lucide-react';
+import { RotateCw, Check, Lock, Play, ChevronDown } from 'lucide-react';
 import { NumberTicker } from '@/components/ui/number-ticker';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,23 @@ const DIM_ICON: Record<string, string> = {
 
 const EXAMS: CourseExam[] = ['toeic', 'ielts', 'topik'];
 
+// Tóm tắt trạng thái 1 Chặng để hiện badge trên header accordion (khỏi bung mới thấy tiến độ).
+function unitSummary(unit: UnitView) {
+  const total = unit.lessons.length;
+  const done = unit.lessons.filter((l) => l.status === 'done').length;
+  const allDone = total > 0 && done === total;
+  const allLocked = total > 0 && unit.lessons.every((l) => l.status === 'locked');
+  return { total, done, allDone, allLocked };
+}
+
+// Chặng "đang học" mở sẵn: unit đầu tiên có bài available/in_progress; fallback unit chưa xong đầu tiên.
+function activeUnitId(units: UnitView[]): string | undefined {
+  const inProgress = units.find((u) => u.lessons.some((l) => l.status === 'in_progress' || l.status === 'available'));
+  if (inProgress) return inProgress.id;
+  const notDone = units.find((u) => !unitSummary(u).allDone);
+  return (notDone ?? units[0])?.id;
+}
+
 export default function CourseTab() {
   const exam = useCourseStore((s) => s.exam);
   const setExam = useCourseStore((s) => s.setExam);
@@ -42,6 +59,23 @@ export default function CourseTab() {
     queryFn: () => getCourse(exam),
   });
   const course = q.data;
+
+  // Accordion: chỉ Chặng đang học mở sẵn; các Chặng khác gập cho tab ngắn lại.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (course?.units?.length) {
+      const id = activeUnitId(course.units);
+      setExpanded(id ? new Set([id]) : new Set());
+    }
+    // reset khi đổi kỳ thi (units mới) — bám vào chuỗi id đơn định.
+  }, [course?.units.map((u) => u.id).join('|')]);
+
+  const toggleUnit = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   // Đồng bộ XP từ payload course-state (không leveled_up/new_badges → không ăn mừng).
   useEffect(() => {
@@ -57,8 +91,7 @@ export default function CourseTab() {
           <div>
             <h2 className="flex items-center gap-2 text-lg font-bold">🎓 Khóa học cá nhân hóa</h2>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Lộ trình sắp theo điểm yếu trong bài chấm của bạn. Càng luyện, khóa học càng bám sát —
-              tiêu chí/dạng câu đã thành thạo sẽ <b>tự đánh dấu xong</b>.
+              Lộ trình sắp theo điểm yếu trong bài chấm của bạn — càng luyện càng bám sát.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => q.refetch()} className="shrink-0 gap-1.5">
@@ -91,22 +124,50 @@ export default function CourseTab() {
       </Card>
 
       {course &&
-        course.units.map((unit, ui) => (
-          <Card className="overflow-hidden" key={unit.id}>
-            <h3 className="flex items-center gap-2 border-b bg-muted/30 px-5 py-3 text-base font-semibold">
-              <span className="text-lg" aria-hidden>
-                {DIM_ICON[unit.dimension] || '•'}
-              </span>
-              <span className="text-xs font-bold text-muted-foreground">Chặng {ui + 1}</span>
-              {unit.title}
-            </h3>
-            <LessonPath
-              unit={unit}
-              onOpen={(id) => navigate(`/course/lesson/${id}`)}
-              onOpenBoss={() => navigate(`/course/unit/${unit.id}/boss`)}
-            />
-          </Card>
-        ))}
+        course.units.map((unit, ui) => {
+          const open = expanded.has(unit.id);
+          const { done, total, allDone, allLocked } = unitSummary(unit);
+          return (
+            <Card className="overflow-hidden" key={unit.id}>
+              <button
+                type="button"
+                onClick={() => toggleUnit(unit.id)}
+                aria-expanded={open}
+                className={`flex w-full items-center gap-2 px-5 py-3 text-left text-base font-semibold transition-colors hover:bg-muted/50 ${
+                  open ? 'border-b bg-muted/30' : ''
+                }`}
+              >
+                <ChevronDown
+                  className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? '' : '-rotate-90'}`}
+                />
+                <span className="text-lg" aria-hidden>
+                  {DIM_ICON[unit.dimension] || '•'}
+                </span>
+                <span className="text-xs font-bold text-muted-foreground">Chặng {ui + 1}</span>
+                <span className="min-w-0 truncate">{unit.title}</span>
+                {/* Tóm tắt tiến độ ngay trên header (không cần bung) */}
+                <span
+                  className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${
+                    allDone
+                      ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                      : allLocked
+                        ? 'bg-muted text-muted-foreground'
+                        : 'bg-primary/15 text-primary'
+                  }`}
+                >
+                  {allDone ? '✓ Xong' : allLocked ? '🔒' : `${done}/${total}`}
+                </span>
+              </button>
+              {open && (
+                <LessonPath
+                  unit={unit}
+                  onOpen={(id) => navigate(`/course/lesson/${id}`)}
+                  onOpenBoss={() => navigate(`/course/unit/${unit.id}/boss`)}
+                />
+              )}
+            </Card>
+          );
+        })}
 
       {course && (COURSE_QUEST_ROLEPLAY || COURSE_QUEST_STORY) && (
         <QuestSection
@@ -203,7 +264,7 @@ function QuestCard({ quest, onOpen }: { quest: QuestListItem; onOpen: () => void
 function CourseHeader({ course, badges }: { course: CourseView; badges: string[] }) {
   const pct = Math.round(course.progress.pct * 100);
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       {/* XP + streak + tiến độ tổng */}
       <div className="flex flex-wrap items-center gap-4">
         <XpBar className="min-w-[220px] flex-1" />
@@ -249,7 +310,7 @@ function LessonPath({
 }) {
   const lessons = unit.lessons;
   return (
-    <div className="flex flex-col items-stretch gap-1 px-5 py-6">
+    <div className="flex flex-col items-stretch gap-0.5 px-4 py-4">
       {lessons.map((ls, i) => (
         <div
           key={ls.id}
@@ -283,7 +344,7 @@ function BossNodeView({ boss, onOpen }: { boss: NonNullable<UnitView['boss']>; o
         whileTap={locked ? {} : { scale: 0.94 }}
         animate={!locked && !done ? { scale: [1, 1.06, 1] } : {}}
         transition={!locked && !done ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : {}}
-        className={`relative flex h-[4.5rem] w-[4.5rem] items-center justify-center rounded-2xl border-2 text-3xl ${
+        className={`relative flex h-16 w-16 items-center justify-center rounded-2xl border-2 text-2xl ${
           done
             ? 'border-emerald-400 bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-md'
             : locked
@@ -291,7 +352,7 @@ function BossNodeView({ boss, onOpen }: { boss: NonNullable<UnitView['boss']>; o
               : 'cursor-pointer border-rose-400 bg-gradient-to-br from-rose-400 to-fuchsia-600 text-white shadow-lg ring-4 ring-rose-300/50'
         }`}
       >
-        {done ? <Check className="h-8 w-8" strokeWidth={3} /> : locked ? <Lock className="h-6 w-6" /> : '👾'}
+        {done ? <Check className="h-7 w-7" strokeWidth={3} /> : locked ? <Lock className="h-6 w-6" /> : '👾'}
         {boss.best_score != null && (
           <span className="absolute -bottom-1 -right-1 rounded-full bg-background px-1 text-[0.6rem] font-bold tabular-nums text-foreground shadow ring-1 ring-border">
             {Math.round(boss.best_score * 100)}%
@@ -329,20 +390,20 @@ function LessonNode({ lesson, index, onOpen }: { lesson: LessonView; index: numb
         whileTap={locked ? {} : { scale: 0.94 }}
         animate={available ? { y: [0, -5, 0] } : {}}
         transition={available ? { duration: 1.6, repeat: Infinity, ease: 'easeInOut' } : {}}
-        className={`relative flex h-16 w-16 shrink-0 items-center justify-center rounded-full border-2 ${
+        className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border-2 ${
           NODE_STYLE[lesson.status]
         } ${locked ? 'cursor-not-allowed' : 'cursor-pointer'} ${
           lesson.focus ? 'ring-4 ring-amber-300/70 ring-offset-2 ring-offset-background' : ''
         }`}
       >
         {lesson.status === 'done' ? (
-          <Check className="h-7 w-7" strokeWidth={3} />
+          <Check className="h-6 w-6" strokeWidth={3} />
         ) : locked ? (
-          <Lock className="h-6 w-6" />
+          <Lock className="h-5 w-5" />
         ) : lesson.status === 'in_progress' ? (
-          <span className="text-xl font-bold">◐</span>
+          <span className="text-lg font-bold">◐</span>
         ) : (
-          <Play className="h-7 w-7 fill-current" />
+          <Play className="h-6 w-6 fill-current" />
         )}
         {lesson.best_score != null && (
           <span className="absolute -bottom-1 -right-1 rounded-full bg-background px-1 text-[0.6rem] font-bold tabular-nums text-foreground shadow ring-1 ring-border">
