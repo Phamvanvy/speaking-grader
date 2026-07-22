@@ -278,15 +278,6 @@ function CourseHeader({ course, badges }: { course: CourseView; badges: string[]
           </span>
         </div>
       </div>
-      {/* Thanh tiến độ tổng */}
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <motion.div
-          className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-teal-500"
-          initial={{ width: 0 }}
-          animate={{ width: `${pct}%` }}
-          transition={{ type: 'spring', stiffness: 120, damping: 22 }}
-        />
-      </div>
       {badges.length > 0 && (
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-muted-foreground">Huy hiệu:</span>
