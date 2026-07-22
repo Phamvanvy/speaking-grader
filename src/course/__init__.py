@@ -40,6 +40,11 @@ __all__ = [
     "merge_user",
     "get_xp",
     "award_practice_xp",
+    "get_shop",
+    "buy_shop_item",
+    "equip_shop_item",
+    "get_leaderboard",
+    "set_leaderboard_optin",
 ]
 
 
@@ -193,6 +198,92 @@ def award_practice_xp(cfg: Config, user_id: str, event: str, score: float) -> di
     state = _xp.award_practice_xp(cfg, user_id, score)
     state["enabled"] = True
     return state
+
+
+# ── Cửa hàng cosmetic (Phase 4 game hóa) ─────────────────────────────────
+
+
+def get_shop(cfg: Config, user_id: str) -> dict:
+    """Danh mục cửa hàng + xu + item đã sở hữu/trang bị (no-op nếu tắt cờ)."""
+    if not cfg.course_xp_enabled:
+        return {"enabled": False}
+    state = _xp.get_shop_state(cfg, user_id)
+    state["enabled"] = True
+    return state
+
+
+def buy_shop_item(cfg: Config, user_id: str, item_id: str) -> dict:
+    """Mua 1 item cosmetic bằng xu (backend giữ giá — RB#5). No-op nếu tắt cờ."""
+    if not cfg.course_xp_enabled:
+        return {"enabled": False}
+    state = _xp.buy_item(cfg, user_id, item_id)
+    state["enabled"] = True
+    return state
+
+
+def equip_shop_item(cfg: Config, user_id: str, item_id: str, equipped: bool) -> dict:
+    """Trang bị / tháo 1 item đã sở hữu (tối đa 1/slot). No-op nếu tắt cờ."""
+    if not cfg.course_xp_enabled:
+        return {"enabled": False}
+    state = _xp.equip_item(cfg, user_id, item_id, equipped)
+    state["enabled"] = True
+    return state
+
+
+# ── Bảng xếp hạng tuần (opt-in, chỉ tài khoản — Phase 5) ─────────────────
+
+
+def set_leaderboard_optin(cfg: Config, user_id: str, opt_in: bool) -> dict:
+    """Bật/tắt xuất hiện trên bảng xếp hạng. Gate account do api.py (chỉ tài khoản
+    đăng nhập được bật). No-op nếu tắt cờ."""
+    if not cfg.course_xp_enabled:
+        return {"enabled": False}
+    _xp.set_leaderboard_optin(cfg, user_id, opt_in)
+    return {"enabled": True, "opted_in": bool(opt_in)}
+
+
+def get_leaderboard(
+    cfg: Config, user_id: str, resolve_usernames, limit: int = 50
+) -> dict:
+    """Bảng xếp hạng theo XP-practice TUẦN (7 ngày), CHỈ tài khoản đã opt-in.
+
+    `resolve_usernames(ids) -> {id: username}` được api.py tiêm vào (giữ course
+    độc lập với auth). Người không có username (ẩn danh lỡ opt-in) bị loại. Trả
+    top `limit` + hạng của chính user (kể cả ngoài top). No-op nếu tắt cờ.
+    """
+    if not cfg.course_xp_enabled:
+        return {"enabled": False}
+    rows = _xp.weekly_leaderboard_rows(cfg)
+    names = resolve_usernames([r["user_id"] for r in rows]) or {}
+    ranked = [
+        {**r, "username": names[r["user_id"]]}
+        for r in rows
+        if r["user_id"] in names  # chỉ tài khoản có username
+    ]
+    # Hạng: XP tuần giảm dần, hòa thì theo tên (tất định).
+    ranked.sort(key=lambda x: (-x["weekly_xp"], x["username"].lower()))
+    entries: list[dict] = []
+    me: dict | None = None
+    for i, r in enumerate(ranked):
+        entry = {
+            "rank": i + 1,
+            "username": r["username"],
+            "weekly_xp": r["weekly_xp"],
+            "level": _xp.xp_to_level(r["total_xp"])["level"],
+            "is_me": r["user_id"] == user_id,
+        }
+        if entry["is_me"]:
+            me = entry
+        if i < limit:
+            entries.append(entry)
+    return {
+        "enabled": True,
+        "week_start": _xp._week_start(),
+        "goal": _xp.WEEKLY_XP_GOAL,
+        "opted_in": _xp.get_leaderboard_optin(cfg, user_id),
+        "entries": entries,
+        "me": me,  # None nếu chưa opt-in / không phải tài khoản
+    }
 
 
 def merge_user(cfg: Config, from_user_id: str, to_user_id: str) -> int:

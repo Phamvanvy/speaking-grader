@@ -1573,6 +1573,94 @@ def course_xp_award(
         raise HTTPException(status_code=500, detail=f"Lỗi award XP: {e}") from e
 
 
+@app.get("/course/shop")
+def course_shop_get(
+    user_id: str, authorization: str | None = Header(None)
+) -> dict:
+    """Danh mục cửa hàng cosmetic + xu + item đã sở hữu/trang bị (no-op nếu tắt cờ)."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.get_shop(_BASE_CONFIG, user_id)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi lấy cửa hàng")
+        raise HTTPException(status_code=500, detail=f"Lỗi cửa hàng: {e}") from e
+
+
+@app.post("/course/shop/buy")
+def course_shop_buy(
+    user_id: str = Form(...),
+    item_id: str = Form(..., description="ID vật phẩm trong catalog"),
+    authorization: str | None = Header(None),
+) -> dict:
+    """Mua 1 item cosmetic bằng xu. Client CHỈ gửi item_id — backend giữ giá (RB#5).
+    400 nếu item lạ / đã sở hữu / không đủ xu."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.buy_shop_item(_BASE_CONFIG, user_id, item_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi mua vật phẩm")
+        raise HTTPException(status_code=500, detail=f"Lỗi mua vật phẩm: {e}") from e
+
+
+@app.post("/course/shop/equip")
+def course_shop_equip(
+    user_id: str = Form(...),
+    item_id: str = Form(...),
+    equipped: bool = Form(True, description="True=trang bị, False=tháo"),
+    authorization: str | None = Header(None),
+) -> dict:
+    """Trang bị / tháo 1 item đã sở hữu (tối đa 1/slot). 400 nếu chưa sở hữu."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.equip_shop_item(_BASE_CONFIG, user_id, item_id, equipped)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi trang bị vật phẩm")
+        raise HTTPException(status_code=500, detail=f"Lỗi trang bị vật phẩm: {e}") from e
+
+
+@app.get("/course/leaderboard")
+def course_leaderboard_get(
+    user_id: str, authorization: str | None = Header(None)
+) -> dict:
+    """Bảng xếp hạng XP tuần — CHỈ tài khoản đã opt-in. Ẩn danh vẫn xem được nhưng
+    không có hạng của mình. No-op nếu tắt cờ COURSE_XP_ENABLED."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    try:
+        return course.get_leaderboard(
+            _BASE_CONFIG,
+            user_id,
+            lambda ids: auth.usernames_for(_BASE_CONFIG, ids),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi lấy bảng xếp hạng")
+        raise HTTPException(status_code=500, detail=f"Lỗi bảng xếp hạng: {e}") from e
+
+
+@app.post("/course/leaderboard/optin")
+def course_leaderboard_optin(
+    user_id: str = Form(...),
+    opt_in: bool = Form(True, description="True=tham gia, False=ẩn khỏi bảng"),
+    authorization: str | None = Header(None),
+) -> dict:
+    """Bật/tắt tham gia bảng xếp hạng. CHỈ tài khoản đăng nhập (có token) — ẩn danh
+    bị từ chối để không lộ danh tính. No-op nếu tắt cờ."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    if not auth.is_account_user_id(_BASE_CONFIG, user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Chỉ tài khoản đăng nhập mới tham gia bảng xếp hạng.",
+        )
+    try:
+        return course.set_leaderboard_optin(_BASE_CONFIG, user_id, opt_in)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("Lỗi opt-in bảng xếp hạng")
+        raise HTTPException(status_code=500, detail=f"Lỗi opt-in: {e}") from e
+
+
 @app.post("/course/refresh")
 def course_refresh(
     user_id: str = Form(...), authorization: str | None = Header(None)

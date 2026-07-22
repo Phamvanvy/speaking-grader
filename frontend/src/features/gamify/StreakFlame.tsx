@@ -2,6 +2,8 @@
 // "sống" (animate) khi streak > 0, xám khi = 0.
 
 import { motion } from 'motion/react';
+import { useXp } from '@/store/xp';
+import { flameFilter } from './cosmetics';
 
 export default function StreakFlame({
   days,
@@ -13,6 +15,8 @@ export default function StreakFlame({
   className?: string;
 }) {
   const active = days > 0;
+  const cosmetic = useXp((s) => s.data?.cosmetics?.streak_flame);
+  const tint = active ? flameFilter(cosmetic) : ''; // đổi màu lửa theo cosmetic (chỉ khi đang cháy)
   return (
     <div
       className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 ${
@@ -31,7 +35,7 @@ export default function StreakFlame({
         className="text-lg leading-none"
         animate={active ? { scale: [1, 1.18, 1], rotate: [0, -4, 4, 0] } : {}}
         transition={active ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : {}}
-        style={active ? {} : { filter: 'grayscale(1)', opacity: 0.5 }}
+        style={active ? (tint ? { filter: tint } : {}) : { filter: 'grayscale(1)', opacity: 0.5 }}
       >
         🔥
       </motion.span>

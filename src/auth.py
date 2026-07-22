@@ -425,6 +425,26 @@ def get_account(cfg: Config, user_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def usernames_for(cfg: Config, user_ids: list[str]) -> dict[str, str]:
+    """{user_id: username} cho các user_id LÀ tài khoản (bỏ qua UUID ẩn danh).
+
+    Dùng cho bảng xếp hạng: chỉ tài khoản có username mới hiển thị. Nhận danh sách
+    user_id (khử trùng), trả map chỉ gồm những id có trong bảng `users`."""
+    ids = list({u for u in user_ids if u})
+    if not ids:
+        return {}
+    conn = _connect(cfg)
+    try:
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            f"SELECT user_id, username FROM users WHERE user_id IN ({placeholders})",
+            ids,
+        ).fetchall()
+        return {r["user_id"]: r["username"] for r in rows}
+    finally:
+        conn.close()
+
+
 def is_account_user_id(cfg: Config, user_id: str) -> bool:
     """True nếu user_id thuộc 1 tài khoản (→ chỉ truy cập được khi có session token).
 

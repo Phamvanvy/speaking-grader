@@ -41,6 +41,9 @@ export interface XpState {
     coins_reward: number;
     done: boolean;
   };
+  // Cosmetic đang trang bị {slot: item_id} (Phase 4 cửa hàng) — frontend áp
+  // theme thanh XP / màu ngọn lửa. Vắng mặt = mặc định.
+  cosmetics?: Record<string, string>;
   // Chỉ có ở payload award/complete — dùng để quyết định ăn mừng.
   leveled_up?: boolean;
   new_badges?: string[];
@@ -57,6 +60,9 @@ interface XpStore {
   award: (event: 'word_practice' | 'word_recall', score: number) => Promise<void>;
   /** Nhận state XP từ payload có sẵn (course-state / lesson-complete) + ăn mừng. */
   ingest: (state: XpState | null | undefined) => void;
+  /** Cập nhật ví (xu) + cosmetic sau khi mua/trang bị ở cửa hàng — để CoinChip /
+   *  thanh XP / ngọn lửa phản ánh ngay mà không refetch. */
+  syncWallet: (coins: number, cosmetics: Record<string, string>) => void;
 }
 
 function celebrate(state: XpState): void {
@@ -104,5 +110,10 @@ export const useXp = create<XpStore>((set, get) => ({
     if (!state || !state.enabled) return;
     celebrate(state);
     set({ data: state });
+  },
+  syncWallet: (coins, cosmetics) => {
+    const cur = get().data;
+    if (!cur) return;
+    set({ data: { ...cur, coins, cosmetics } });
   },
 }));

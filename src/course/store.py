@@ -35,7 +35,7 @@ from ..history import validate_user_id
 
 logger = logging.getLogger("toeic.course.store")
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 5
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS criterion_stats (
@@ -105,6 +105,9 @@ CREATE TABLE IF NOT EXISTS user_xp (
   user_id    TEXT PRIMARY KEY,
   xp         INTEGER NOT NULL DEFAULT 0,
   coins      INTEGER NOT NULL DEFAULT 0,
+  -- Bảng xếp hạng tuần (schema v5): 1 = user CHỌN xuất hiện (opt-in). Chỉ tài
+  -- khoản đăng nhập được bật (gate ở api.py); mặc định 0 (riêng tư).
+  leaderboard_opt_in INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT
 );
 -- Huy hiệu đã mở khóa (idempotent qua PK) — earned_at để hiển thị.
@@ -124,6 +127,20 @@ CREATE TABLE IF NOT EXISTS xp_daily (
   goal_coins_awarded INTEGER NOT NULL DEFAULT 0,  -- 1 khi đã cấp xu thưởng mốc ngày (idempotent 1/ngày)
   PRIMARY KEY (user_id, day)
 );
+
+-- ── Cửa hàng cosmetic (schema v4, Phase 4 game hóa) ──────────────────────
+-- CHỈ lưu item ĐÃ MUA của user. Catalog (id/giá/slot/nhãn) là hằng số Python
+-- (xp.SHOP_ITEMS) — nguồn sự thật của GIÁ nằm ở backend, client không gửi giá
+-- (RB#5). `equipped`=1 cho item đang dùng; tối đa 1 item/slot được trang bị.
+-- Item thuần hiển thị (theme thanh XP, màu ngọn lửa) — KHÔNG chạm chấm điểm.
+CREATE TABLE IF NOT EXISTS user_inventory (
+  user_id     TEXT NOT NULL,
+  item_id     TEXT NOT NULL,
+  equipped    INTEGER NOT NULL DEFAULT 0,
+  acquired_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (user_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_inventory_user ON user_inventory(user_id);
 """
 
 # ── Migrations cộng dồn (ALTER cho DB đã tồn tại — _DDL dùng IF NOT EXISTS nên
@@ -133,6 +150,9 @@ _MIGRATIONS: list[str] = [
     # v2 → v3: nhiệm vụ ngày + xu (Phase 2 game hóa).
     "ALTER TABLE xp_daily ADD COLUMN practice_count INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE xp_daily ADD COLUMN goal_coins_awarded INTEGER NOT NULL DEFAULT 0",
+    # v4 → v5: opt-in bảng xếp hạng tuần (Phase 5). (user_inventory ở v4 là bảng
+    # mới nên _DDL tự tạo, không cần ALTER.)
+    "ALTER TABLE user_xp ADD COLUMN leaderboard_opt_in INTEGER NOT NULL DEFAULT 0",
 ]
 
 

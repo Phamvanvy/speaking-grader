@@ -53,6 +53,28 @@ export function DailyGoalRing({ className = '' }: { className?: string }) {
   );
 }
 
+/** Icon xu (SVG inline — không phụ thuộc font emoji của hệ điều hành). */
+function CoinIcon({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`text-amber-500 dark:text-amber-400 ${className}`}
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" fill="currentColor" />
+      <circle cx="12" cy="12" r="6.5" fill="none" stroke="#fff" strokeOpacity="0.55" strokeWidth="1.2" />
+      <path
+        d="M12 8.2v7.6M10.2 9.2h2.7a1.5 1.5 0 0 1 0 3h-2.4m0 0h2.7a1.5 1.5 0 0 1 0 3h-2.7"
+        fill="none"
+        stroke="#fff"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /** Chip số xu tích lũy (xu chỉ dùng cho cửa hàng cosmetic — Phase 4). */
 export function CoinChip({ className = '' }: { className?: string }) {
   const coins = useXp((s) => s.data?.coins);
@@ -62,9 +84,7 @@ export function CoinChip({ className = '' }: { className?: string }) {
       className={`flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 dark:border-amber-500/40 dark:bg-amber-950/40 ${className}`}
       title={`${coins} xu`}
     >
-      <span className="text-base leading-none" aria-hidden>
-        🪙
-      </span>
+      <CoinIcon className="h-4 w-4 shrink-0" />
       <span className="text-sm font-bold tabular-nums text-foreground">{coins}</span>
     </div>
   );

@@ -12,6 +12,7 @@ Cùng cờ COURSE_XP_ENABLED tắt → no-op. Không LLM, không server.
 from __future__ import annotations
 
 import dataclasses
+from datetime import date, timedelta
 
 import pytest
 
@@ -19,12 +20,23 @@ import src.words as words
 from src.config import load_config
 from src.course import (
     award_practice_xp,
+    buy_shop_item,
+    equip_shop_item,
+    get_leaderboard,
+    get_shop,
     get_xp,
     mark_lesson_complete,
     merge_user,
+    set_leaderboard_optin,
     store,
     xp,
 )
+
+
+def _names(*account_ids: str):
+    """Fake resolve_usernames: chỉ các id được coi là 'tài khoản' mới có username."""
+    accounts = set(account_ids)
+    return lambda ids: {u: f"user_{u}" for u in ids if u in accounts}
 
 
 @pytest.fixture()
@@ -267,6 +279,183 @@ def test_merge_user_sums_daily_count_and_coins(cfg):
     assert get_xp(cfg, anon)["daily"]["count"] == 0
 
 
+# ── Phase 4: cửa hàng cosmetic (buy/equip/merge) ─────────────────────────
+
+
+def _grant_coins(cfg, user_id: str, coins: int) -> None:
+    """Nạp xu trực tiếp cho test (xu thật chỉ từ mốc nhiệm vụ ngày, cap 1/ngày)."""
+    conn = store._connect(cfg)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO user_xp (user_id, xp, coins, updated_at) VALUES (?, 0, ?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET coins = user_xp.coins + excluded.coins",
+                (user_id, coins, xp._now()),
+            )
+    finally:
+        conn.close()
+
+
+def test_shop_buy_deducts_coins_and_grants_item(cfg):
+    u = "u-shop"
+    item = xp.SHOP_ITEMS[0]
+    _grant_coins(cfg, u, item["price"] + 5)
+    bought = xp.buy_item(cfg, u, item["id"])
+    assert bought["coins"] == 5  # trừ ĐÚNG giá catalog (client không gửi giá — RB#5)
+    row = next(i for i in bought["items"] if i["id"] == item["id"])
+    assert row["owned"] is True and row["equipped"] is False
+
+
+def test_shop_buy_insufficient_coins_rejected(cfg):
+    u = "u-poor"
+    item = xp.SHOP_ITEMS[-1]
+    _grant_coins(cfg, u, item["price"] - 1)
+    with pytest.raises(ValueError):
+        xp.buy_item(cfg, u, item["id"])
+    st = xp.get_shop_state(cfg, u)
+    assert st["coins"] == item["price"] - 1        # không trừ xu
+    assert all(not i["owned"] for i in st["items"])  # không cấp item
+
+
+def test_shop_buy_duplicate_rejected(cfg):
+    u = "u-dup"
+    item = xp.SHOP_ITEMS[0]
+    _grant_coins(cfg, u, item["price"] * 2)
+    xp.buy_item(cfg, u, item["id"])
+    with pytest.raises(ValueError):
+        xp.buy_item(cfg, u, item["id"])
+    assert xp.get_shop_state(cfg, u)["coins"] == item["price"]  # chỉ trừ 1 lần
+
+
+def test_shop_equip_one_per_slot(cfg):
+    u = "u-equip"
+    themes = [it for it in xp.SHOP_ITEMS if it["slot"] == "xp_theme"]
+    a, b = themes[0], themes[1]
+    _grant_coins(cfg, u, a["price"] + b["price"])
+    xp.buy_item(cfg, u, a["id"])
+    xp.buy_item(cfg, u, b["id"])
+    xp.equip_item(cfg, u, a["id"], True)
+    assert xp.get_xp_state(cfg, u)["cosmetics"]["xp_theme"] == a["id"]
+    # Trang bị b cùng slot → a tự tháo (bất biến tối đa 1/slot).
+    xp.equip_item(cfg, u, b["id"], True)
+    assert xp.get_xp_state(cfg, u)["cosmetics"]["xp_theme"] == b["id"]
+    # Tháo b → slot trống.
+    xp.equip_item(cfg, u, b["id"], False)
+    assert "xp_theme" not in xp.get_xp_state(cfg, u)["cosmetics"]
+
+
+def test_shop_equip_unowned_rejected(cfg):
+    with pytest.raises(ValueError):
+        xp.equip_item(cfg, "u-noown", xp.SHOP_ITEMS[0]["id"], True)
+
+
+def test_shop_buy_unknown_item_rejected(cfg):
+    _grant_coins(cfg, "u-x", 999)
+    with pytest.raises(ValueError):
+        xp.buy_item(cfg, "u-x", "no_such_item")
+
+
+def test_merge_user_unions_inventory(cfg):
+    anon, acct = "anon-inv", "acct-inv"
+    a = next(it for it in xp.SHOP_ITEMS if it["slot"] == "xp_theme")
+    b = next(it for it in xp.SHOP_ITEMS if it["slot"] == "streak_flame")
+    _grant_coins(cfg, anon, a["price"])
+    _grant_coins(cfg, acct, b["price"])
+    xp.buy_item(cfg, anon, a["id"])
+    xp.equip_item(cfg, anon, a["id"], True)
+    xp.buy_item(cfg, acct, b["id"])
+
+    merge_user(cfg, anon, acct)
+
+    owned = {i["id"] for i in xp.get_shop_state(cfg, acct)["items"] if i["owned"]}
+    assert a["id"] in owned and b["id"] in owned          # union đủ cả hai
+    assert xp.get_xp_state(cfg, acct)["cosmetics"]["xp_theme"] == a["id"]  # giữ equipped
+    assert all(not i["owned"] for i in xp.get_shop_state(cfg, anon)["items"])  # user cũ sạch
+
+
+def test_merge_user_dedupes_same_slot_equipped(cfg):
+    # Cả anon lẫn acct đều trang bị item KHÁC NHAU cùng slot 'xp_theme' trước khi
+    # gộp → sau merge chỉ còn ĐÚNG 1 item equipped ở slot đó (bất biến 1/slot).
+    anon, acct = "anon-slot", "acct-slot"
+    themes = [it for it in xp.SHOP_ITEMS if it["slot"] == "xp_theme"]
+    a, b = themes[0], themes[1]
+    _grant_coins(cfg, anon, a["price"])
+    _grant_coins(cfg, acct, b["price"])
+    xp.buy_item(cfg, anon, a["id"])
+    xp.equip_item(cfg, anon, a["id"], True)
+    xp.buy_item(cfg, acct, b["id"])
+    xp.equip_item(cfg, acct, b["id"], True)
+
+    merge_user(cfg, anon, acct)
+
+    st = xp.get_shop_state(cfg, acct)
+    equipped_theme = [i["id"] for i in st["items"] if i["equipped"] and i["slot"] == "xp_theme"]
+    assert len(equipped_theme) == 1  # đúng 1 item/slot, không phải 2
+
+
+# ── Phase 5: bảng xếp hạng tuần (opt-in, chỉ tài khoản) ──────────────────
+
+
+def test_leaderboard_optin_defaults_off_and_toggles(cfg):
+    u = "acct-lb"
+    assert get_leaderboard(cfg, u, _names(u))["opted_in"] is False  # mặc định riêng tư
+    set_leaderboard_optin(cfg, u, True)
+    assert get_leaderboard(cfg, u, _names(u))["opted_in"] is True
+    set_leaderboard_optin(cfg, u, False)
+    assert get_leaderboard(cfg, u, _names(u))["opted_in"] is False
+
+
+def test_leaderboard_ranks_only_opted_in_accounts(cfg):
+    for u in ("a", "b", "c"):
+        set_leaderboard_optin(cfg, u, True)
+    award_practice_xp(cfg, "a", "word_practice", 1.0)          # a: 20 XP tuần
+    for _ in range(3):
+        award_practice_xp(cfg, "b", "word_practice", 1.0)      # b: 60 XP tuần
+    award_practice_xp(cfg, "c", "word_practice", 1.0)          # c opt-in NHƯNG ẩn danh
+    award_practice_xp(cfg, "d", "word_practice", 1.0)          # d KHÔNG opt-in
+
+    lb = get_leaderboard(cfg, "a", _names("a", "b"))           # chỉ a,b là tài khoản
+    names = [e["username"] for e in lb["entries"]]
+    assert names == ["user_b", "user_a"]                       # b nhiều XP → hạng 1
+    assert [e["rank"] for e in lb["entries"]] == [1, 2]
+    assert lb["me"]["username"] == "user_a" and lb["me"]["is_me"] is True
+    # c (ẩn danh) và d (opt-out) không xuất hiện.
+    assert "user_c" not in names and "user_d" not in names
+
+
+def test_leaderboard_weekly_window_excludes_old_xp(cfg):
+    u = "oldie"
+    set_leaderboard_optin(cfg, u, True)
+    old_day = (date.today() - timedelta(days=10)).isoformat()  # ngoài cửa sổ 7 ngày
+    conn = store._connect(cfg)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT INTO xp_daily (user_id, day, practice_xp, practice_count, "
+                "goal_coins_awarded) VALUES (?, ?, 999, 0, 0)",
+                (u, old_day),
+            )
+    finally:
+        conn.close()
+    lb = get_leaderboard(cfg, u, _names(u))
+    assert lb["me"]["weekly_xp"] == 0        # XP 10 ngày trước KHÔNG tính vào tuần
+    assert lb["goal"] == xp.WEEKLY_XP_GOAL
+
+
+def test_leaderboard_anon_viewer_has_no_rank(cfg):
+    # Ẩn danh xem được bảng nhưng không có hạng (me=None) dù có opt-in row.
+    set_leaderboard_optin(cfg, "anon-view", True)
+    award_practice_xp(cfg, "anon-view", "word_practice", 1.0)
+    lb = get_leaderboard(cfg, "anon-view", _names())  # không id nào là tài khoản
+    assert lb["entries"] == [] and lb["me"] is None
+
+
+def test_leaderboard_flag_off_is_noop(cfg):
+    off = dataclasses.replace(cfg, course_xp_enabled=False)
+    assert get_leaderboard(off, "u1", _names("u1")) == {"enabled": False}
+    assert set_leaderboard_optin(off, "u1", True) == {"enabled": False}
+
+
 # ── Cờ COURSE_XP_ENABLED tắt → no-op ─────────────────────────────────────
 
 
@@ -277,3 +466,11 @@ def test_flag_off_is_noop(cfg):
     # mark_lesson_complete vẫn chạy nhưng KHÔNG kèm xp.
     r = mark_lesson_complete(off, "u1", "toeic.pron.th_family", 0.9, "toeic")
     assert r["done"] is True and "xp" not in r
+
+
+def test_shop_flag_off_is_noop(cfg):
+    off = dataclasses.replace(cfg, course_xp_enabled=False)
+    item_id = xp.SHOP_ITEMS[0]["id"]
+    assert get_shop(off, "u1") == {"enabled": False}
+    assert buy_shop_item(off, "u1", item_id) == {"enabled": False}
+    assert equip_shop_item(off, "u1", item_id, True) == {"enabled": False}

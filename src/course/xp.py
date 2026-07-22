@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import math
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..config import Config
@@ -40,9 +40,33 @@ WORD_XP_MIN = 2
 # XP hoàn thành 1 lesson (chỉ first-transition) = LESSON_XP_BASE + round(score*BONUS).
 LESSON_XP_BASE = 50
 LESSON_XP_SCORE_BONUS = 50
+# Thử thách tuần: mục tiêu XP-practice trong cửa sổ 7 ngày (chỉ để tạo động lực +
+# vẽ thanh tiến độ trên bảng xếp hạng; KHÔNG cấp huy hiệu riêng — badge tính từ dữ
+# liệu tích lũy). Trần practice 200/ngày → tối đa 1400/tuần, khó cày.
+WEEKLY_XP_GOAL = 300
+LEADERBOARD_WINDOW_DAYS = 7
 # Ngưỡng "đạt mastery" của 1 TỪ để tính huy hiệu words_* (last_score >= ngưỡng).
 WORD_MASTERY_MIN = 0.8
 WORD_PERFECT_MIN = 0.999
+
+# ── Cửa hàng cosmetic (Phase 4 game hóa) ─────────────────────────────────
+# Catalog TĨNH — nguồn sự thật của GIÁ nằm ở backend (client KHÔNG gửi giá, RB#5).
+# Item thuần HIỂN THỊ (theme thanh XP, màu ngọn lửa streak); mua bằng `coins`
+# (nguồn xu = thưởng mốc nhiệm vụ ngày, xem DAILY_GOAL_COINS — đã có cap 1/ngày).
+# `slot`: tối đa 1 item được TRANG BỊ mỗi slot; ánh xạ id→style nằm ở frontend
+# (features/gamify/cosmetics.ts) — backend chỉ giữ id/slot/giá/nhãn.
+SHOP_ITEMS: list[dict] = [
+    # slot 'xp_theme' — màu thanh XP.
+    {"id": "xp_ocean", "slot": "xp_theme", "price": 40, "icon": "🌊", "label": "Đại dương", "desc": "Thanh XP xanh biển"},
+    {"id": "xp_forest", "slot": "xp_theme", "price": 40, "icon": "🌲", "label": "Rừng xanh", "desc": "Thanh XP xanh lá"},
+    {"id": "xp_sunset", "slot": "xp_theme", "price": 60, "icon": "🌅", "label": "Hoàng hôn", "desc": "Thanh XP hồng cam"},
+    {"id": "xp_royal", "slot": "xp_theme", "price": 80, "icon": "👑", "label": "Hoàng gia", "desc": "Thanh XP tím ánh kim"},
+    # slot 'streak_flame' — màu ngọn lửa streak.
+    {"id": "flame_azure", "slot": "streak_flame", "price": 50, "icon": "💙", "label": "Lửa lam", "desc": "Ngọn lửa xanh dương"},
+    {"id": "flame_violet", "slot": "streak_flame", "price": 50, "icon": "💜", "label": "Lửa tím", "desc": "Ngọn lửa tím"},
+    {"id": "flame_emerald", "slot": "streak_flame", "price": 70, "icon": "💚", "label": "Lửa ngọc", "desc": "Ngọn lửa xanh ngọc"},
+]
+_SHOP_BY_ID: dict[str, dict] = {it["id"]: it for it in SHOP_ITEMS}
 
 
 # ── Level curve (thuần, không I/O) ───────────────────────────────────────
@@ -112,6 +136,27 @@ def _read_daily(conn: sqlite3.Connection, user_id: str) -> dict:
     }
 
 
+def _read_inventory(conn: sqlite3.Connection, user_id: str) -> list[dict]:
+    """Item đã mua của user: [{item_id, equipped}]. Bỏ item không còn trong catalog."""
+    rows = conn.execute(
+        "SELECT item_id, equipped FROM user_inventory WHERE user_id = ?", (user_id,)
+    ).fetchall()
+    return [
+        {"item_id": r["item_id"], "equipped": bool(r["equipped"])}
+        for r in rows
+        if r["item_id"] in _SHOP_BY_ID
+    ]
+
+
+def _equipped_map(inventory: list[dict]) -> dict[str, str]:
+    """{slot: item_id} cho các item ĐANG trang bị (frontend áp cosmetic từ đây)."""
+    out: dict[str, str] = {}
+    for inv in inventory:
+        if inv["equipped"]:
+            out[_SHOP_BY_ID[inv["item_id"]]["slot"]] = inv["item_id"]
+    return out
+
+
 def _list_badges(conn: sqlite3.Connection, user_id: str) -> list[dict]:
     rows = conn.execute(
         "SELECT badge_id, earned_at FROM user_badges WHERE user_id = ? "
@@ -132,12 +177,15 @@ def get_xp_state(cfg: Config, user_id: str) -> dict:
         xp, coins = _read_xp(conn, user_id)
         badges = _list_badges(conn, user_id)
         daily = _read_daily(conn, user_id)
+        inventory = _read_inventory(conn, user_id)
     finally:
         conn.close()
     state = xp_to_level(xp)
     state["coins"] = coins
     state["badges"] = badges
     state["daily"] = daily
+    # Cosmetic đang trang bị {slot: item_id} — frontend áp theme thanh XP / màu lửa.
+    state["cosmetics"] = _equipped_map(inventory)
     return state
 
 
@@ -354,7 +402,213 @@ def _award_result(
     return state
 
 
+# ── Cửa hàng cosmetic ────────────────────────────────────────────────────
+
+
+def _shop_items_view(coins: int, inventory: list[dict]) -> list[dict]:
+    """Catalog + cờ owned/equipped theo inventory của user (giữ thứ tự SHOP_ITEMS)."""
+    owned = {inv["item_id"] for inv in inventory}
+    equipped = {inv["item_id"] for inv in inventory if inv["equipped"]}
+    out: list[dict] = []
+    for it in SHOP_ITEMS:
+        row = dict(it)
+        row["owned"] = it["id"] in owned
+        row["equipped"] = it["id"] in equipped
+        row["affordable"] = row["owned"] or coins >= it["price"]
+        out.append(row)
+    return out
+
+
+def get_shop_state(cfg: Config, user_id: str) -> dict:
+    """Trạng thái cửa hàng: {coins, items:[...owned/equipped/affordable], cosmetics}."""
+    conn = _connect(cfg)
+    try:
+        _xp, coins = _read_xp(conn, user_id)
+        inventory = _read_inventory(conn, user_id)
+    finally:
+        conn.close()
+    return {
+        "coins": coins,
+        "items": _shop_items_view(coins, inventory),
+        "cosmetics": _equipped_map(inventory),
+    }
+
+
+def buy_item(cfg: Config, user_id: str, item_id: str) -> dict:
+    """Mua 1 item cosmetic bằng xu. GIÁ lấy từ catalog backend (client không gửi
+    giá — RB#5). Trừ coins + ghi inventory trong 1 transaction; raise ValueError nếu
+    item lạ / đã sở hữu / không đủ xu. Trả trạng thái cửa hàng mới."""
+    item = _SHOP_BY_ID.get((item_id or "").strip())
+    if item is None:
+        raise ValueError(f"Không có vật phẩm '{item_id}'.")
+    price = int(item["price"])
+    conn = _connect(cfg)
+    try:
+        with conn:
+            row = conn.execute(
+                "SELECT coins FROM user_xp WHERE user_id = ?", (user_id,)
+            ).fetchone()
+            coins = int(row["coins"]) if row else 0
+            already = conn.execute(
+                "SELECT 1 FROM user_inventory WHERE user_id = ? AND item_id = ?",
+                (user_id, item["id"]),
+            ).fetchone()
+            if already:
+                raise ValueError("Đã sở hữu vật phẩm này.")
+            if coins < price:
+                raise ValueError(f"Không đủ xu (cần {price}, có {coins}).")
+            conn.execute(
+                """
+                INSERT INTO user_xp (user_id, xp, coins, updated_at)
+                VALUES (?, 0, 0, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  coins = user_xp.coins - ?,
+                  updated_at = excluded.updated_at
+                """,
+                (user_id, _now(), price),
+            )
+            conn.execute(
+                "INSERT INTO user_inventory (user_id, item_id, equipped, acquired_at) "
+                "VALUES (?, ?, 0, ?)",
+                (user_id, item["id"], _now()),
+            )
+    finally:
+        conn.close()
+    return get_shop_state(cfg, user_id)
+
+
+def equip_item(cfg: Config, user_id: str, item_id: str, equipped: bool) -> dict:
+    """Trang bị / tháo 1 item ĐÃ SỞ HỮU. Trang bị → tự tháo các item khác CÙNG slot
+    (tối đa 1/slot) trong 1 transaction. raise ValueError nếu chưa sở hữu. Trả
+    trạng thái cửa hàng mới."""
+    item = _SHOP_BY_ID.get((item_id or "").strip())
+    if item is None:
+        raise ValueError(f"Không có vật phẩm '{item_id}'.")
+    slot = item["slot"]
+    same_slot = [it["id"] for it in SHOP_ITEMS if it["slot"] == slot]
+    conn = _connect(cfg)
+    try:
+        with conn:
+            owned = conn.execute(
+                "SELECT 1 FROM user_inventory WHERE user_id = ? AND item_id = ?",
+                (user_id, item["id"]),
+            ).fetchone()
+            if not owned:
+                raise ValueError("Chưa sở hữu vật phẩm này.")
+            if equipped:
+                # Tháo mọi item cùng slot trước (giữ bất biến tối đa 1/slot).
+                placeholders = ",".join("?" for _ in same_slot)
+                conn.execute(
+                    f"UPDATE user_inventory SET equipped = 0 "
+                    f"WHERE user_id = ? AND item_id IN ({placeholders})",
+                    (user_id, *same_slot),
+                )
+            conn.execute(
+                "UPDATE user_inventory SET equipped = ? "
+                "WHERE user_id = ? AND item_id = ?",
+                (1 if equipped else 0, user_id, item["id"]),
+            )
+    finally:
+        conn.close()
+    return get_shop_state(cfg, user_id)
+
+
+# ── Bảng xếp hạng tuần (opt-in) ──────────────────────────────────────────
+
+
+def _week_start() -> str:
+    """Ngày đầu cửa sổ xếp hạng (hôm nay − 6, UTC) dạng 'YYYY-MM-DD'."""
+    d = datetime.now(timezone.utc).date() - timedelta(days=LEADERBOARD_WINDOW_DAYS - 1)
+    return d.isoformat()
+
+
+def set_leaderboard_optin(cfg: Config, user_id: str, opt_in: bool) -> None:
+    """Bật/tắt việc user xuất hiện trên bảng xếp hạng (mặc định tắt — riêng tư).
+    Chỉ nên gọi cho tài khoản đăng nhập (gate account ở api.py)."""
+    conn = _connect(cfg)
+    try:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO user_xp (user_id, xp, coins, leaderboard_opt_in, updated_at)
+                VALUES (?, 0, 0, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  leaderboard_opt_in = excluded.leaderboard_opt_in,
+                  updated_at = excluded.updated_at
+                """,
+                (user_id, 1 if opt_in else 0, _now()),
+            )
+    finally:
+        conn.close()
+
+
+def get_leaderboard_optin(cfg: Config, user_id: str) -> bool:
+    conn = _connect(cfg)
+    try:
+        row = conn.execute(
+            "SELECT leaderboard_opt_in FROM user_xp WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return bool(row["leaderboard_opt_in"]) if row else False
+    finally:
+        conn.close()
+
+
+def weekly_leaderboard_rows(cfg: Config) -> list[dict]:
+    """[{user_id, total_xp, weekly_xp}] cho MỌI user đã opt-in (kể cả tuần này 0 XP).
+    weekly_xp = Σ practice_xp trong cửa sổ 7 ngày. Việc lọc "chỉ tài khoản" + gắn
+    username do lớp trên làm (xp.py không biết khái niệm account)."""
+    start = _week_start()
+    conn = _connect(cfg)
+    try:
+        rows = conn.execute(
+            """
+            SELECT u.user_id AS user_id, u.xp AS total_xp,
+                   COALESCE(SUM(CASE WHEN d.day >= ? THEN d.practice_xp ELSE 0 END), 0)
+                     AS weekly_xp
+            FROM user_xp u
+            LEFT JOIN xp_daily d ON d.user_id = u.user_id
+            WHERE u.leaderboard_opt_in = 1
+            GROUP BY u.user_id, u.xp
+            """,
+            (start,),
+        ).fetchall()
+        return [
+            {
+                "user_id": r["user_id"],
+                "total_xp": int(r["total_xp"]),
+                "weekly_xp": int(r["weekly_xp"]),
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
+
+
 # ── Gộp khi /auth/claim (chạy trong transaction của store.merge_user) ────
+
+
+def _dedupe_equipped(conn: sqlite3.Connection, user_id: str) -> None:
+    """Ép bất biến "tối đa 1 item trang bị mỗi slot" cho user (dùng sau merge, khi
+    union inventory có thể để 2 item cùng slot cùng equipped). Giữ item ACQUIRED
+    SỚM NHẤT của mỗi slot, tháo phần còn lại — tất định."""
+    rows = conn.execute(
+        "SELECT item_id FROM user_inventory WHERE user_id = ? AND equipped = 1 "
+        "ORDER BY acquired_at, item_id",
+        (user_id,),
+    ).fetchall()
+    seen: set[str] = set()
+    for r in rows:
+        item = _SHOP_BY_ID.get(r["item_id"])
+        if item is None:
+            continue
+        slot = item["slot"]
+        if slot in seen:
+            conn.execute(
+                "UPDATE user_inventory SET equipped = 0 WHERE user_id = ? AND item_id = ?",
+                (user_id, r["item_id"]),
+            )
+        else:
+            seen.add(slot)
 
 
 def merge_user_xp(
@@ -365,6 +619,8 @@ def merge_user_xp(
 
     - user_xp: cộng dồn xp + coins.
     - user_badges: union (INSERT OR IGNORE) — giữ earned_at sớm nhất theo PK.
+    - user_inventory: union (INSERT OR IGNORE) — giữ item đã sở hữu của cả hai;
+      trạng thái `equipped` giữ theo tài khoản đích (không đụng nếu đã có item đó).
     - xp_daily: cộng dồn practice_xp theo `day` rồi CLAMP về DAILY_PRACTICE_CAP để
       việc gộp KHÔNG reset/bypass quota ngày.
     Sau đó xoá dữ liệu user cũ.
@@ -389,6 +645,13 @@ def merge_user_xp(
         (to_user_id, from_user_id),
     )
     conn.execute("DELETE FROM user_badges WHERE user_id = ?", (from_user_id,))
+    conn.execute(
+        "INSERT OR IGNORE INTO user_inventory (user_id, item_id, equipped, acquired_at) "
+        "SELECT ?, item_id, equipped, acquired_at FROM user_inventory WHERE user_id = ?",
+        (to_user_id, from_user_id),
+    )
+    conn.execute("DELETE FROM user_inventory WHERE user_id = ?", (from_user_id,))
+    _dedupe_equipped(conn, to_user_id)  # union có thể để 2 item cùng slot equipped
     conn.execute(
         f"""
         INSERT INTO xp_daily
