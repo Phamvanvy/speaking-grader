@@ -190,6 +190,35 @@ class RolePlayScript(BaseModel):
     )
 
 
+class StorySegment(BaseModel):
+    """Một đoạn của truyện đọc-to (Story Quest, Phase 3C)."""
+
+    text: str = Field(
+        description=(
+            "MỘT câu/đoạn ngắn của truyện để học viên đọc to (≥4 từ, tự nhiên, "
+            "≤25 từ). Viết bằng ngôn ngữ nói của kỳ thi (tiếng Anh cho TOEIC/IELTS)."
+        )
+    )
+
+
+class StoryQuest(BaseModel):
+    """Truyện đọc-to tuyến tính (Story Quest, Phase 3C) — KHÔNG nhánh/lựa chọn.
+
+    LLM sinh 1 lần rồi cache USER-AGNOSTIC theo (exam, topic) trong course.db
+    (id tổng hợp '<exam>.<topic>#story'). Học viên đọc to lần lượt từng đoạn;
+    chấm phát âm mỗi đoạn qua gradePronunciation dùng chung — LLM CHỈ sinh truyện.
+    """
+
+    title: str = Field(description="Tiêu đề ngắn của truyện.")
+    segments: list[StorySegment] = Field(
+        default_factory=list,
+        description=(
+            "Các đoạn truyện theo THỨ TỰ (≥3 đoạn), mạch lạc thành một câu chuyện "
+            "hoàn chỉnh. Mỗi đoạn học viên đọc to một lần."
+        ),
+    )
+
+
 class WordInfo(BaseModel):
     """Định nghĩa + ví dụ cho 1 từ (popup luyện phát âm, kiểu ELSA).
 

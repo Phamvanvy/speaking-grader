@@ -1795,6 +1795,27 @@ async def course_quest_roleplay(
         return None
 
 
+@app.get("/course/quest/story")
+async def course_quest_story(
+    exam: str = "toeic", topic: str = "", user_id: str = "", lang: str | None = None,
+    authorization: str | None = Header(None),
+) -> dict | None:
+    """Truyện đọc-to của (exam, topic) — có thể chạm LLM (threadpool). Lỗi sinh /
+    chủ đề sai → trả null để frontend ẩn quest, KHÔNG chặn (fail-soft)."""
+    user_id = _resolve_read_user_id(authorization, user_id)
+    config = _resolve_config(lang)
+    lang_key = (config.feedback_lang or "vi").strip().lower()
+    try:
+        return await run_in_threadpool(
+            course.get_story_quest, _BASE_CONFIG, config, user_id, exam, topic, lang_key
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception:  # noqa: BLE001 — fail-soft: LLM lỗi → null, không chặn
+        logger.exception("Lỗi lấy truyện đọc-to")
+        return None
+
+
 @app.post("/course/quest/complete")
 def course_quest_complete(
     quest_id: str = Form(...),

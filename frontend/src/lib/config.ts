@@ -109,3 +109,7 @@ export const COURSE_BOSS_ENABLED = import.meta.env.VITE_COURSE_BOSS !== '0';
 // Default BẬT; tự ẩn khi backend trả null (LLM lỗi/không cấu hình). Tắt hẳn khu vực
 // Quest: VITE_COURSE_QUEST_ROLEPLAY=0 → path khóa học nguyên vẹn (bonus-only).
 export const COURSE_QUEST_ROLEPLAY = import.meta.env.VITE_COURSE_QUEST_ROLEPLAY !== '0';
+
+// Phase 3C — Quest truyện đọc-to tuyến tính (Story, LLM sinh truyện). Cùng khuôn
+// bonus-only + chấm phát âm dùng chung. Tắt: VITE_COURSE_QUEST_STORY=0.
+export const COURSE_QUEST_STORY = import.meta.env.VITE_COURSE_QUEST_STORY !== '0';

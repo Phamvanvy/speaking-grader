@@ -219,6 +219,22 @@ export interface RolePlayScript {
   cleared: boolean;
 }
 
+export interface StorySegment {
+  text: string;
+}
+
+export interface StoryQuest {
+  quest_id: string;
+  kind: 'story';
+  exam: string;
+  topic: string;
+  threshold: number;
+  title: string;
+  segments: StorySegment[];
+  best_score: number | null;
+  cleared: boolean;
+}
+
 export interface QuestCompleteResult {
   quest_id: string;
   kind: string;
@@ -241,6 +257,14 @@ export function getRoleplayQuest(exam: string, topic: string): Promise<RolePlayS
   const uid = getUserId();
   return apiGet<RolePlayScript | null>(
     `/course/quest/roleplay?user_id=${encodeURIComponent(uid)}&exam=${encodeURIComponent(exam)}&topic=${encodeURIComponent(topic)}`,
+  );
+}
+
+/** Truyện đọc-to; null khi backend không dựng được (LLM lỗi/chủ đề sai). */
+export function getStoryQuest(exam: string, topic: string): Promise<StoryQuest | null> {
+  const uid = getUserId();
+  return apiGet<StoryQuest | null>(
+    `/course/quest/story?user_id=${encodeURIComponent(uid)}&exam=${encodeURIComponent(exam)}&topic=${encodeURIComponent(topic)}`,
   );
 }
 

@@ -14,7 +14,7 @@ import logging
 
 from .config import Config, resolve_language_name
 from .rubrics.base import Exam, QuestionType
-from .schema import PracticeTask, RolePlayScript, SampleAnswer, WordInfo
+from .schema import PracticeTask, RolePlayScript, SampleAnswer, StoryQuest, WordInfo
 from .scoring.backends import generate
 
 logger = logging.getLogger("toeic.suggest")
@@ -248,6 +248,44 @@ def suggest_roleplay(config: Config, exam: str, setting: str) -> RolePlayScript:
     )
     result, _meta = generate(config, system_prompt, user_prompt, RolePlayScript)
     assert isinstance(result, RolePlayScript)
+    return result
+
+
+def suggest_story(config: Config, exam: str, setting: str) -> StoryQuest:
+    """Sinh MỘT truyện đọc-to tuyến tính (Story Quest, Phase 3C).
+
+    LLM CHỈ sinh nội dung — chấm nói vẫn qua gradePronunciation dùng chung (đọc to
+    từng đoạn). Cache user-agnostic theo (exam, topic) ở src/course/quests.py.
+    Truyện viết bằng NGÔN NGỮ NÓI của kỳ thi (EN cho TOEIC/IELTS).
+    """
+    is_ielts = exam == Exam.IELTS.value
+    exam_label = "IELTS" if is_ielts else "TOEIC"
+    level_label = (
+        "an upper-intermediate IELTS candidate (band ~6.5-7)"
+        if is_ielts
+        else "an intermediate TOEIC learner"
+    )
+
+    system_prompt = (
+        f"You are an expert {exam_label} speaking coach writing a SHORT read-aloud "
+        "story for a learner to practice pronunciation. The learner reads each "
+        "segment aloud and we grade PRONUNCIATION only, so every segment must be "
+        "natural and easy to read aloud.\n\n"
+        "REQUIREMENTS:\n"
+        "- Set a short `title`.\n"
+        "- Produce 4-6 `segments`, each ONE natural sentence (4-25 words) that "
+        "together tell a coherent, complete little story with a clear beginning and "
+        "end.\n"
+        f"- Write in natural spoken ENGLISH suited to {level_label}. No dialogue "
+        "tags or quotation marks that are awkward to read aloud.\n"
+        "- Output structured JSON only."
+    )
+    user_prompt = (
+        f"Write one short {exam_label} read-aloud story on this theme:\n"
+        f"{setting}\n\nNow produce it as structured JSON."
+    )
+    result, _meta = generate(config, system_prompt, user_prompt, StoryQuest)
+    assert isinstance(result, StoryQuest)
     return result
 
 

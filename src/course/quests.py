@@ -23,16 +23,20 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from ..config import Config
-from ..schema import RolePlayScript
+from ..schema import RolePlayScript, StoryQuest
 from . import store
 
 logger = logging.getLogger("toeic.course.quests")
 
+_CACHE_TTL_SECONDS = 30 * 86400
 _ROLEPLAY_CACHE_VERSION = 1
-_ROLEPLAY_TTL_SECONDS = 30 * 86400
+_STORY_CACHE_VERSION = 1
 
-# Số lượt tối thiểu để kịch bản coi là hợp lệ (đủ dài để thành 1 phiên).
+# Số lượt tối thiểu để kịch bản Role-play coi là hợp lệ (đủ dài để thành 1 phiên).
 _MIN_ROLEPLAY_TURNS = 2
+# Story: số đoạn tối thiểu + số từ tối thiểu mỗi đoạn (guard nội dung LLM).
+_MIN_STORY_SEGMENTS = 3
+_MIN_STORY_SEGMENT_WORDS = 4
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,27 @@ ROLEPLAY_TOPICS: dict[str, tuple[QuestTopic, ...]] = {
     ),
 }
 
+# Chủ đề Story (đọc-to tuyến tính) theo kỳ thi. TOEIC = mẩu chuyện công sở/đời
+# sống; IELTS = câu chuyện đời thường/du lịch (từ vựng phong phú hơn).
+STORY_TOPICS: dict[str, tuple[QuestTopic, ...]] = {
+    "toeic": (
+        QuestTopic("first_day", "Ngày đầu đi làm",
+                   "an employee's first day at a new office job"),
+        QuestTopic("business_trip", "Chuyến công tác",
+                   "a short business trip that does not go as planned"),
+        QuestTopic("product_launch", "Ra mắt sản phẩm",
+                   "a team preparing for an important product launch"),
+    ),
+    "ielts": (
+        QuestTopic("lost_wallet", "Chiếc ví thất lạc",
+                   "someone who loses their wallet while travelling and what happens next"),
+        QuestTopic("new_hobby", "Sở thích mới",
+                   "a person discovering and learning a new hobby"),
+        QuestTopic("kind_stranger", "Người lạ tốt bụng",
+                   "a small act of kindness from a stranger that changes someone's day"),
+    ),
+}
+
 
 def list_roleplay_topics(exam: str) -> tuple[QuestTopic, ...]:
     """Chủ đề Role-play của kỳ thi (rỗng nếu chưa hỗ trợ — vd topik)."""
@@ -76,8 +101,21 @@ def list_roleplay_topics(exam: str) -> tuple[QuestTopic, ...]:
 
 
 def get_roleplay_topic(exam: str, slug: str) -> QuestTopic | None:
-    """QuestTopic theo (exam, slug); None nếu không có."""
+    """QuestTopic role-play theo (exam, slug); None nếu không có."""
     for t in list_roleplay_topics(exam):
+        if t.slug == slug:
+            return t
+    return None
+
+
+def list_story_topics(exam: str) -> tuple[QuestTopic, ...]:
+    """Chủ đề Story của kỳ thi (rỗng nếu chưa hỗ trợ)."""
+    return STORY_TOPICS.get(exam, ())
+
+
+def get_story_topic(exam: str, slug: str) -> QuestTopic | None:
+    """QuestTopic story theo (exam, slug); None nếu không có."""
+    for t in list_story_topics(exam):
         if t.slug == slug:
             return t
     return None
@@ -88,8 +126,9 @@ def roleplay_quest_id(exam: str, slug: str) -> str:
     return f"{exam}.{slug}#roleplay"
 
 
-def _cache_id(exam: str, slug: str) -> str:
-    return f"{exam}.{slug}#roleplay"
+def story_quest_id(exam: str, slug: str) -> str:
+    """quest_id ổn định của 1 Story quest."""
+    return f"{exam}.{slug}#story"
 
 
 def _cache_age_seconds(created_at: str | None) -> float:
@@ -102,12 +141,63 @@ def _cache_age_seconds(created_at: str | None) -> float:
     return (datetime.now(timezone.utc) - ts).total_seconds()
 
 
-def _script_valid(content: dict) -> bool:
+def _get_or_generate(
+    cfg: Config, config: Config, cache_id: str, lang: str, *,
+    version: int, generate_fn, valid_fn, kind_label: str,
+) -> dict | None:
+    """Nội dung quest (dict) — cache-first, USER-AGNOSTIC; None nếu không dựng được.
+
+    Khuôn chung Role-play/Story (practice.py-style): đọc cache còn hạn + hợp lệ →
+    trả luôn; else gọi `generate_fn()` (LLM), validate qua `valid_fn`, ghi cache.
+    LLM lỗi / nội dung không hợp lệ → None (fail-soft, caller ẩn quest)."""
+    entry = store.get_lesson_content_cache(cfg, cache_id, lang)
+    if (
+        entry
+        and entry.get("cache_version") == version
+        and _cache_age_seconds(entry.get("created_at")) < _CACHE_TTL_SECONDS
+        and valid_fn(entry["content"])
+    ):
+        return entry["content"]
+
+    try:
+        content = generate_fn()
+    except Exception:  # noqa: BLE001 — LLM lỗi không chặn khóa học
+        logger.exception("Lỗi sinh %s cho %s (bỏ qua)", kind_label, cache_id)
+        return None
+
+    if not valid_fn(content):
+        logger.warning("%s %s không hợp lệ — bỏ qua", kind_label, cache_id)
+        return None
+
+    try:
+        model = config.local_model if config.is_local else config.model
+        store.put_lesson_content_cache(cfg, cache_id, lang, content, model, version)
+    except Exception:  # noqa: BLE001
+        logger.exception("Lỗi ghi cache %s (bỏ qua)", kind_label)
+    return content
+
+
+# ── Role-play (Phase 3B) ─────────────────────────────────────────────────
+
+
+def _roleplay_valid(content: dict) -> bool:
     """Kịch bản hợp lệ khi có ≥_MIN lượt và mỗi expected_user KHÔNG rỗng."""
     turns = content.get("turns") or []
     if len(turns) < _MIN_ROLEPLAY_TURNS:
         return False
     return all((t.get("expected_user") or "").strip() for t in turns)
+
+
+def _roleplay_content(script: RolePlayScript) -> dict:
+    return {
+        "scenario": script.scenario or "",
+        "role_user": script.role_user or "",
+        "role_npc": script.role_npc or "",
+        "turns": [
+            {"npc": t.npc or "", "expected_user": t.expected_user or "", "hint": t.hint or ""}
+            for t in script.turns
+        ],
+    }
 
 
 def build_roleplay(
@@ -120,47 +210,52 @@ def build_roleplay(
     topic = get_roleplay_topic(exam, slug)
     if topic is None:
         return None
-
-    cid = _cache_id(exam, slug)
-    entry = store.get_lesson_content_cache(cfg, cid, lang)
-    if (
-        entry
-        and entry.get("cache_version") == _ROLEPLAY_CACHE_VERSION
-        and _cache_age_seconds(entry.get("created_at")) < _ROLEPLAY_TTL_SECONDS
-        and _script_valid(entry["content"])
-    ):
-        return entry["content"]
-
     from ..suggest import suggest_roleplay
 
-    try:
-        script: RolePlayScript = suggest_roleplay(config, exam, topic.setting)
-    except Exception:  # noqa: BLE001 — LLM lỗi không chặn khóa học
-        logger.exception("Lỗi sinh kịch bản Role-play cho %s.%s (bỏ qua)", exam, slug)
-        return None
+    return _get_or_generate(
+        cfg, config, roleplay_quest_id(exam, slug), lang,
+        version=_ROLEPLAY_CACHE_VERSION,
+        generate_fn=lambda: _roleplay_content(suggest_roleplay(config, exam, topic.setting)),
+        valid_fn=_roleplay_valid,
+        kind_label="Kịch bản Role-play",
+    )
 
-    content = {
-        "scenario": script.scenario or "",
-        "role_user": script.role_user or "",
-        "role_npc": script.role_npc or "",
-        "turns": [
-            {
-                "npc": t.npc or "",
-                "expected_user": t.expected_user or "",
-                "hint": t.hint or "",
-            }
-            for t in script.turns
-        ],
+
+# ── Story (Phase 3C) ─────────────────────────────────────────────────────
+
+
+def _story_valid(content: dict) -> bool:
+    """Truyện hợp lệ khi có ≥_MIN đoạn và mỗi đoạn ≥_MIN từ."""
+    segments = content.get("segments") or []
+    if len(segments) < _MIN_STORY_SEGMENTS:
+        return False
+    return all(
+        len((s.get("text") or "").split()) >= _MIN_STORY_SEGMENT_WORDS for s in segments
+    )
+
+
+def _story_content(story: "StoryQuest") -> dict:
+    return {
+        "title": story.title or "",
+        "segments": [{"text": s.text or ""} for s in story.segments],
     }
-    if not _script_valid(content):
-        logger.warning("Kịch bản Role-play %s.%s thiếu lượt/expected_user — bỏ qua", exam, slug)
-        return None
 
-    try:
-        model = config.local_model if config.is_local else config.model
-        store.put_lesson_content_cache(
-            cfg, cid, lang, content, model, _ROLEPLAY_CACHE_VERSION
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("Lỗi ghi cache kịch bản Role-play (bỏ qua)")
-    return content
+
+def build_story(
+    cfg: Config, config: Config, exam: str, slug: str, lang: str
+) -> dict | None:
+    """Truyện đọc-to cho (exam, topic) — cache-first; None nếu không dựng được.
+
+    Trả dict {title, segments:[{text}]}. LLM lỗi / truyện không hợp lệ → None."""
+    topic = get_story_topic(exam, slug)
+    if topic is None:
+        return None
+    from ..suggest import suggest_story
+
+    return _get_or_generate(
+        cfg, config, story_quest_id(exam, slug), lang,
+        version=_STORY_CACHE_VERSION,
+        generate_fn=lambda: _story_content(suggest_story(config, exam, topic.setting)),
+        valid_fn=_story_valid,
+        kind_label="Truyện đọc-to",
+    )

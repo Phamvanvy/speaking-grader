@@ -43,6 +43,7 @@ __all__ = [
     "complete_unit_boss",
     "list_quests",
     "get_roleplay_quest",
+    "get_story_quest",
     "complete_quest",
     "merge_user",
     "get_xp",
@@ -249,27 +250,33 @@ _QUEST_KINDS = {"roleplay", "story"}
 
 
 def list_quests(cfg: Config, user_id: str, exam: str) -> dict:
-    """Danh sách Quest của kỳ thi (hiện: Role-play) + trạng thái đã hoàn thành.
+    """Danh sách Quest của kỳ thi (Role-play + Story) + trạng thái đã hoàn thành.
 
     Bonus-only: chỉ đọc quest_clears (KHÔNG đụng mastery/progress). Trả
     {exam, quests:[{quest_id, kind, topic, title, cleared, best_score}]}. Chưa hỗ
     trợ kỳ thi (vd topik) → quests rỗng (frontend ẩn khu vực Quest)."""
     exam = _validate_exam(exam)
     clears = store.get_quest_clears(cfg, user_id)
-    quests: list[dict] = []
-    for topic in _quests.list_roleplay_topics(exam):
-        qid = _quests.roleplay_quest_id(exam, topic.slug)
+
+    def _row(kind: str, qid: str, topic) -> dict:
         c = clears.get(qid)
-        quests.append(
-            {
-                "quest_id": qid,
-                "kind": "roleplay",
-                "topic": topic.slug,
-                "title": topic.title,
-                "cleared": c is not None,
-                "best_score": (c or {}).get("best_score"),
-            }
-        )
+        return {
+            "quest_id": qid,
+            "kind": kind,
+            "topic": topic.slug,
+            "title": topic.title,
+            "cleared": c is not None,
+            "best_score": (c or {}).get("best_score"),
+        }
+
+    quests: list[dict] = [
+        _row("roleplay", _quests.roleplay_quest_id(exam, t.slug), t)
+        for t in _quests.list_roleplay_topics(exam)
+    ]
+    quests += [
+        _row("story", _quests.story_quest_id(exam, t.slug), t)
+        for t in _quests.list_story_topics(exam)
+    ]
     return {"exam": exam, "quests": quests}
 
 
@@ -296,6 +303,32 @@ def get_roleplay_quest(
         "role_user": content["role_user"],
         "role_npc": content["role_npc"],
         "turns": content["turns"],
+        "best_score": (cleared or {}).get("best_score"),
+        "cleared": cleared is not None,
+    }
+
+
+def get_story_quest(
+    cfg: Config, config: Config, user_id: str, exam: str, topic: str, lang: str
+) -> dict | None:
+    """Truyện đọc-to của (exam, topic) + trạng thái. None nếu không dựng được
+    (chủ đề sai / LLM lỗi) → endpoint trả null để frontend ẩn quest, KHÔNG chặn.
+
+    Có thể chạm LLM (build_story) → caller nên chạy trong threadpool."""
+    exam = _validate_exam(exam)
+    content = _quests.build_story(cfg, config, exam, topic, lang)
+    if content is None:
+        return None
+    qid = _quests.story_quest_id(exam, topic)
+    cleared = store.get_quest_clears(cfg, user_id).get(qid)
+    return {
+        "quest_id": qid,
+        "kind": "story",
+        "exam": exam,
+        "topic": topic,
+        "threshold": QUEST_DONE_THRESHOLD,
+        "title": content["title"],
+        "segments": content["segments"],
         "best_score": (cleared or {}).get("best_score"),
         "cleared": cleared is not None,
     }

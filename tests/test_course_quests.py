@@ -23,8 +23,9 @@ from src.course import (
     quests as _quests,
     store,
 )
+from src.course import get_story_quest
 from src.course.generate import QUEST_DONE_THRESHOLD
-from src.schema import RolePlayScript, RolePlayTurn
+from src.schema import RolePlayScript, RolePlayTurn, StoryQuest, StorySegment
 
 _EXAM = "toeic"
 
@@ -56,8 +57,23 @@ def _fake_script() -> RolePlayScript:
     )
 
 
+def _fake_story() -> StoryQuest:
+    return StoryQuest(
+        title="A busy morning",
+        segments=[
+            StorySegment(text="Anna woke up late on a rainy Monday morning."),
+            StorySegment(text="She rushed to catch the crowded city bus."),
+            StorySegment(text="Luckily, she arrived at the office just in time."),
+        ],
+    )
+
+
 def _topic_slug() -> str:
     return _quests.list_roleplay_topics(_EXAM)[0].slug
+
+
+def _story_slug() -> str:
+    return _quests.list_story_topics(_EXAM)[0].slug
 
 
 # ── build_roleplay: cache + guard ────────────────────────────────────────
@@ -103,15 +119,82 @@ def test_build_roleplay_llm_error_is_none(cfg, monkeypatch):
     assert _quests.build_roleplay(cfg, cfg, _EXAM, _topic_slug(), "vi") is None
 
 
+# ── build_story: cache + guard ───────────────────────────────────────────
+
+
+def test_build_story_generates_then_caches(cfg, monkeypatch):
+    calls = {"n": 0}
+
+    def fake_suggest(config, exam, setting):
+        calls["n"] += 1
+        return _fake_story()
+
+    monkeypatch.setattr("src.suggest.suggest_story", fake_suggest)
+    slug = _story_slug()
+
+    first = _quests.build_story(cfg, cfg, _EXAM, slug, "vi")
+    assert first is not None
+    assert len(first["segments"]) == 3
+    assert first["title"] == "A busy morning"
+    second = _quests.build_story(cfg, cfg, _EXAM, slug, "vi")
+    assert second == first
+    assert calls["n"] == 1  # lần 2 lấy từ cache
+
+
+def test_build_story_too_few_segments_is_none(cfg, monkeypatch):
+    def fake_suggest(config, exam, setting):
+        return StoryQuest(title="x", segments=[StorySegment(text="one two three four")])
+
+    monkeypatch.setattr("src.suggest.suggest_story", fake_suggest)
+    assert _quests.build_story(cfg, cfg, _EXAM, _story_slug(), "vi") is None
+
+
+def test_build_story_short_segment_is_none(cfg, monkeypatch):
+    def fake_suggest(config, exam, setting):
+        return StoryQuest(
+            title="x",
+            segments=[
+                StorySegment(text="A full sentence here."),
+                StorySegment(text="Too short."),  # < 4 từ
+                StorySegment(text="Another full sentence here now."),
+            ],
+        )
+
+    monkeypatch.setattr("src.suggest.suggest_story", fake_suggest)
+    assert _quests.build_story(cfg, cfg, _EXAM, _story_slug(), "vi") is None
+
+
+def test_get_story_quest_shape(cfg, monkeypatch):
+    monkeypatch.setattr("src.suggest.suggest_story", lambda c, e, s: _fake_story())
+    slug = _story_slug()
+    view = get_story_quest(cfg, cfg, "u1", _EXAM, slug, "vi")
+    assert view is not None
+    assert view["kind"] == "story"
+    assert view["quest_id"] == _quests.story_quest_id(_EXAM, slug)
+    assert view["cleared"] is False
+    assert len(view["segments"]) == 3
+
+
+def test_complete_story_awards_and_counts_quest_badge(cfg):
+    # Story clear cũng tính vào badge quest_1 (quest_clears chung 2 loại).
+    qid = _quests.story_quest_id(_EXAM, _story_slug())
+    r = complete_quest(cfg, "u1", qid, "story", 0.9)
+    assert r["done"] is True
+    assert r["xp"]["awarded"] > 0
+    assert "quest_1" in (r.get("new_badges") or [])
+
+
 # ── list_quests ──────────────────────────────────────────────────────────
 
 
 def test_list_quests_lists_topics_uncleared(cfg):
     view = list_quests(cfg, "u1", _EXAM)
     assert view["exam"] == _EXAM
-    assert len(view["quests"]) == len(_quests.list_roleplay_topics(_EXAM))
+    expected = len(_quests.list_roleplay_topics(_EXAM)) + len(_quests.list_story_topics(_EXAM))
+    assert len(view["quests"]) == expected
     assert all(not q["cleared"] for q in view["quests"])
-    assert all(q["kind"] == "roleplay" for q in view["quests"])
+    kinds = {q["kind"] for q in view["quests"]}
+    assert kinds == {"roleplay", "story"}
 
 
 def test_list_quests_unsupported_exam_empty(cfg):
