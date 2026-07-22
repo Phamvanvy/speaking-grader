@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Trash2, Volume2, Mic, Bell, BellOff, RotateCw, ChevronUp, ChevronDown, ChevronsUpDown, Star, Search, Target } from 'lucide-react';
+import { Trash2, Volume2, Mic, Bell, BellOff, RotateCw, ChevronUp, ChevronDown, ChevronsUpDown, Star, Search, Target, Play } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -21,8 +21,14 @@ import XpBar from '@/features/gamify/XpBar';
 import StreakFlame from '@/features/gamify/StreakFlame';
 import BadgeGrid from '@/features/gamify/BadgeGrid';
 import { useReviewToast, type ReviewSettings } from './reviewToast';
+import { useQuickReview } from '@/store/quickReview';
+import { buildReviewQueue } from './reviewQueue';
+import QuickReviewDialog from './QuickReviewDialog';
 import { ipaStressString } from '@/legacy/render';
 import { phonemeTip } from '@/lib/phonemeTips';
+
+// Số từ mỗi phiên "Luyện nhanh" (ít hơn → phiên gọn, dễ hoàn thành trọn vẹn).
+const REVIEW_SESSION_SIZE = 10;
 
 // ── Sort ─────────────────────────────────────────────────────────────────
 type SortKey = 'remind' | 'date' | 'word' | 'score';
@@ -78,6 +84,7 @@ export default function SavedTab() {
   const muted = useReviewToast((s) => s.muted);
   const toggleMuted = useReviewToast((s) => s.toggleMuted);
   const openPractice = usePractice((s) => s.openPractice);
+  const startReview = useQuickReview((s) => s.start);
 
   const [sort, setSort] = useState(loadSort);
   const [pageSize, setPageSize] = useState(loadPageSize);
@@ -161,6 +168,16 @@ export default function SavedTab() {
           right={
             <div className="flex items-center gap-2">
               {words.length > 0 && <Badge variant="secondary">{words.length} từ</Badge>}
+              {/* Vòng chơi: luyện liên tiếp N từ (ưu tiên yếu/đến hạn) thay vì bấm lẻ từng từ. */}
+              <Button
+                size="sm"
+                onClick={() => startReview(buildReviewQueue(words, REVIEW_SESSION_SIZE))}
+                disabled={words.length === 0}
+                className="gap-1.5"
+                title="Luyện liên tiếp các từ cần ôn nhất"
+              >
+                <Play className="h-4 w-4" /> Luyện nhanh
+              </Button>
               {/* Nhắc ôn là 1 tuỳ chọn CỦA danh sách này (không còn card riêng ở dưới). */}
               <Button
                 variant="outline"
@@ -342,6 +359,7 @@ export default function SavedTab() {
 
       <SuggestionsCard onPractice={openPractice} />
       <ReviewSettingsDialog open={remindOpen} onOpenChange={setRemindOpen} />
+      <QuickReviewDialog />
     </div>
   );
 }

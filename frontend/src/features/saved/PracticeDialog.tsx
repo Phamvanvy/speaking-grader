@@ -3,7 +3,7 @@
 // lưu/review-toast gọi trực tiếp). Vỏ modal = shadcn Dialog; phần chip phoneme/thẻ lỗi
 // GIỮ class .practice-* của CSS legacy (đã tinh chỉnh kỹ) để bám sát hình cũ.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Mic, Play } from 'lucide-react';
@@ -16,6 +16,7 @@ import { useXp } from '@/store/xp';
 import { celebrateGood, celebratePerfect } from '@/lib/celebrate';
 import { playSfx } from '@/lib/sfx';
 import { phonemeTip } from '@/lib/phonemeTips';
+import { useWordGrader, practicePct } from './useWordGrader';
 import { ipaStressString, toBritishWord } from '@/legacy/render';
 
 // Cache word-info trong phiên (server cũng cache SQLite — đây chỉ đỡ round-trip).
@@ -36,21 +37,12 @@ interface WordInfo {
   us_ipa_alt?: string | null;
 }
 
-// % chính xác: (ok + low-severity) / non-skipped — khớp ngưỡng isSignificant render.js.
-function practicePct(phonemes: any[]): number | null {
-  const scored = (phonemes || []).filter((p) => p.status !== 'skipped');
-  if (!scored.length) return null;
-  const pass = scored.filter((p) => p.status === 'ok' || p.severity === 'low').length;
-  return Math.round((100 * pass) / scored.length);
-}
 function practiceIsBad(p: any): boolean {
   return p.status !== 'skipped' && !(p.status === 'ok' || p.severity === 'low');
 }
 function ringColor(pct: number): string {
   return pct >= 80 ? '#16a34a' : pct >= 50 ? '#f59e0b' : '#dc2626';
 }
-
-type Status = { text: string; kind: '' | 'err' | 'good' };
 
 export default function PracticeDialog() {
   const open = usePractice((s) => s.open);
@@ -62,20 +54,37 @@ export default function PracticeDialog() {
   const swAdd = useSavedWords((s) => s.add);
   const swRemove = useSavedWords((s) => s.remove);
 
-  const [status, setStatus] = useState<Status>({ text: '', kind: '' });
-  const [recording, setRecording] = useState(false);
-  const [grading, setGrading] = useState(false);
   const [wordInfo, setWordInfo] = useState<WordInfo | null | undefined>(undefined);
-  const [replayUrl, setReplayUrl] = useState<string | null>(null);
-
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const replayAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const word = data?.word || '';
   const isKo = hasHangul(word);
   const saved = !!word && savedHas.has(word.trim().toLowerCase());
+
+  // Đường chấm dùng chung (thu âm → /grade → phoneme). onGraded set kết quả + ăn
+  // mừng + cộng XP + cập nhật saved_word — phần ĐẶC THÙ của popup này.
+  const { status, setStatus, recording, grading, replayUrl, setReplayUrl, toggleRecording, playReplay, cleanup } =
+    useWordGrader({
+      accent,
+      onGraded: ({ word: gw, phonemes: merged, pct }) => {
+        const d = usePractice.getState().data;
+        if (!d) return;
+        setData({ ...d, phonemes: merged, skip_reason: null });
+        setStatus({
+          text: pct >= 80 ? `Tuyệt vời — ${pct}%! 🎉` : `Được ${pct}% — nghe mẫu 🔊 rồi thử lại nhé.`,
+          kind: pct >= 80 ? 'good' : '',
+        });
+        // Game hóa: ăn mừng theo mức điểm (1 SFX/lần chấm).
+        if (pct === 100) celebratePerfect();
+        else if (pct >= 80) celebrateGood();
+        else if (pct < 50) playSfx('wrong');
+        // Cộng XP luyện từ — client CHỈ gửi event+score, backend tự tính (RB#5) + cap ngày.
+        useXp.getState().award('word_practice', pct / 100);
+        // Từ đã lưu → cập nhật điểm + snapshot phonemes mới (im lặng).
+        if (useSavedWords.getState().has(gw)) {
+          swAdd({ word: gw, last_score: pct / 100, phonemes: merged }).catch(() => {});
+        }
+      },
+    });
 
   // Reset khi mở từ khác / đổi data.
   useEffect(() => {
@@ -110,31 +119,11 @@ export default function PracticeDialog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, word]);
 
-  // Dọn stream + replay URL khi đóng.
+  // Dọn stream + replay URL khi đóng (component vẫn mounted, chỉ đổi `open`).
   useEffect(() => {
-    if (open) return;
-    stopStream();
-    setReplayUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return null;
-    });
+    if (!open) cleanup();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-
-  function stopStream() {
-    if (recorderRef.current && recording) {
-      try {
-        recorderRef.current.stop();
-      } catch {
-        /* đã stop */
-      }
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    setRecording(false);
-  }
 
   async function toggleBookmark() {
     if (!word || isKo) return;
@@ -145,124 +134,6 @@ export default function PracticeDialog() {
     } catch (err: any) {
       alert(`Lỗi lưu từ: ${err.message || err}`);
     }
-  }
-
-  async function toggleRecording() {
-    if (grading) return;
-    if (recording) {
-      recorderRef.current?.stop();
-      return;
-    }
-    try {
-      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch {
-      setStatus({ text: 'Không truy cập được micro — kiểm tra quyền trình duyệt.', kind: 'err' });
-      return;
-    }
-    chunksRef.current = [];
-    const rec = new MediaRecorder(streamRef.current);
-    recorderRef.current = rec;
-    rec.addEventListener('dataavailable', (e) => {
-      if (e.data && e.data.size) chunksRef.current.push(e.data);
-    });
-    rec.addEventListener('stop', () => {
-      const mime = rec.mimeType || 'audio/webm';
-      const blob = new Blob(chunksRef.current, { type: mime });
-      stopStream();
-      setReplayUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return URL.createObjectURL(blob);
-      });
-      gradeAttempt(blob, mime);
-    });
-    rec.start();
-    setRecording(true);
-    setStatus({ text: 'Đang ghi âm… bấm lần nữa để dừng.', kind: '' });
-  }
-
-  async function gradeAttempt(blob: Blob, mime: string) {
-    const d = usePractice.getState().data;
-    if (!d) return;
-    // Blob cụt (<1KB) = MediaRecorder nhả header rỗng → chặn khỏi tốn request.
-    if (!blob || blob.size < 1024) {
-      setStatus({ text: 'Ghi âm quá ngắn — bấm 🎙️, nói rõ từ, rồi mới bấm dừng.', kind: 'err' });
-      return;
-    }
-    setGrading(true);
-    setStatus({ text: 'Đang chấm…', kind: '' });
-    try {
-      const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : 'webm';
-      const fd = new FormData();
-      fd.append('audio', new File([blob], `practice-${d.word}.${ext}`, { type: mime }));
-      fd.append('text', d.word);
-      fd.append('mode', 'mock_test'); // ép bật phoneme analysis
-      fd.append('no_ai', 'true'); // 1 từ không cần LLM
-      fd.append('strict', 'true'); // chấm CHẶT (tắt leniency câu dài)
-      fd.append('accent', accent);
-      if (hasHangul(d.word)) fd.append('exam', 'topik'); // pipeline ko cho từ Hàn
-      const res = await apiFetch('/grade', { method: 'POST', body: fd });
-      if (!res.ok) {
-        const raw = await res.text();
-        let detail = `HTTP ${res.status}`;
-        try {
-          detail = JSON.parse(raw).detail || detail;
-        } catch {
-          /* giữ mã HTTP */
-        }
-        throw new Error(detail);
-      }
-      const result = await res.json();
-      const ws = result?.phoneme?.score?.words || [];
-      if (!ws.some((w: any) => (w.phonemes || []).length)) {
-        throw new Error('Server không trả kết quả phoneme — thử lại.');
-      }
-      const wordSkipped = (w: any) => w.skip_reason || (w.phonemes || []).every((p: any) => p.status === 'skipped');
-      if (ws.every(wordSkipped)) {
-        const heard = (result.transcript || '').trim();
-        const heardShort = heard.length > 60 ? `${heard.slice(0, 57)}…` : heard;
-        setStatus({
-          text: heardShort
-            ? `Chưa nghe rõ — máy nghe thành “${heardShort}”. Hãy nói to, rõ và thử lại.`
-            : 'Chưa nghe rõ — không thấy tiếng nói. Hãy nói to, rõ và thử lại.',
-          kind: 'err',
-        });
-        return;
-      }
-      // Cụm nhiều từ: gộp phoneme tất cả các từ (gắn _w = chỉ số từ trong cụm).
-      const merged =
-        ws.length === 1
-          ? ws[0].phonemes || []
-          : ws.flatMap((w: any, i: number) => (w.phonemes || []).map((p: any) => ({ ...p, _w: i })));
-      const pct = practicePct(merged) ?? 0;
-      setData({ ...d, phonemes: merged, skip_reason: null });
-      setStatus({
-        text: pct >= 80 ? `Tuyệt vời — ${pct}%! 🎉` : `Được ${pct}% — nghe mẫu 🔊 rồi thử lại nhé.`,
-        kind: pct >= 80 ? 'good' : '',
-      });
-      // Game hóa: ăn mừng theo mức điểm (1 SFX/lần chấm).
-      if (pct === 100) celebratePerfect();
-      else if (pct >= 80) celebrateGood();
-      else if (pct < 50) playSfx('wrong');
-      // Cộng XP luyện từ — client CHỈ gửi event+score, backend tự tính (RB#5) + cap ngày.
-      useXp.getState().award('word_practice', pct / 100);
-      // Từ đã lưu → cập nhật điểm + snapshot phonemes mới (im lặng).
-      if (useSavedWords.getState().has(d.word)) {
-        swAdd({ word: d.word, last_score: pct / 100, phonemes: merged }).catch(() => {});
-      }
-    } catch (err: any) {
-      setStatus({ text: `Lỗi chấm: ${err.message || err}`, kind: 'err' });
-    } finally {
-      setGrading(false);
-    }
-  }
-
-  function playReplay() {
-    if (!replayUrl) return;
-    if (!replayAudioRef.current || replayAudioRef.current.src !== replayUrl) {
-      replayAudioRef.current = new Audio(replayUrl);
-    }
-    replayAudioRef.current.currentTime = 0;
-    replayAudioRef.current.play().catch(() => {});
   }
 
   if (!data) return null;
@@ -429,7 +300,7 @@ export default function PracticeDialog() {
           <button
             type="button"
             className={`practice-mic${recording ? ' recording' : ''}`}
-            onClick={toggleRecording}
+            onClick={() => toggleRecording(word)}
             disabled={grading}
             title="Ghi âm luyện tập"
           >
