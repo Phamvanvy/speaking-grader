@@ -21,13 +21,6 @@
       "expected_duration_sec": 120
     },
     {
-      "id": "i3_p2_important_decision",
-      "type": "part2_long_turn",
-      "prompt": "Describe an important decision you made. You will have to talk about the topic for one to two minutes.",
-      "provided_info": "Describe an important decision you made.\nYou should say:\n- what the decision was\n- when you made it\n- what other choices you had\nand explain why this decision was important to you.",
-      "expected_duration_sec": 120
-    },
-    {
       "id": "i3_p3_technology_future",
       "type": "part3_discussion",
       "prompt": "We've been talking about technology. How do you think technology will change the way people communicate in the future? Are there any disadvantages of relying on technology?",

@@ -21,13 +21,6 @@
       "expected_duration_sec": 120
     },
     {
-      "id": "ielts_p2_useful_skill",
-      "type": "part2_long_turn",
-      "prompt": "Describe a useful skill you learned. You will have to talk about the topic for one to two minutes.",
-      "provided_info": "Describe a useful skill you learned (for example cooking, driving, or a language).\nYou should say:\n- what the skill is\n- when and how you learned it\n- how difficult it was to learn\nand explain why this skill is useful to you.",
-      "expected_duration_sec": 120
-    },
-    {
       "id": "ielts_p3_travel_tourism",
       "type": "part3_discussion",
       "prompt": "We've been talking about travel. Why do you think people enjoy travelling to other countries? Do you think tourism can have negative effects on a place?",

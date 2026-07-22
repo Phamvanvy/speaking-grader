@@ -1,7 +1,8 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { ExamController } from './examController';
 import { printExamReport } from './examPrint';
-import { featureGridHtml, scoresBreakdownHtml, escapeHtml, setRenderAccent } from '../../legacy/render';
+import { featureGridHtml, scoresBreakdownHtml, setRenderAccent } from '../../legacy/render';
+import { transcriptSectionHtml } from '../../lib/format';
 import { useUiStore } from '../../store/ui';
 
 // Kết quả 1 câu (port _renderQuestionResult) — audio + tải để ở JSX; transcript/
@@ -10,7 +11,7 @@ import { useUiStore } from '../../store/ui';
 function questionResultInnerHtml(item: any): string {
   const r = item.result || {};
   return (
-    `<div class="result-section"><h4>📝 Transcript</h4><p>${escapeHtml(r.transcript || '')}</p></div>` +
+    transcriptSectionHtml(r.transcript || '') +
     `<div class="result-section"><h4>📈 Features</h4>${featureGridHtml(r.features || {})}</div>` +
     `<div class="result-section"><h4>📋 Điểm</h4>${scoresBreakdownHtml(r.scores, r.exam, r.phoneme, {
       pronunciationOnly: !!r.pronunciation_only,

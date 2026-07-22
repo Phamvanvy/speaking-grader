@@ -106,6 +106,23 @@ export function playWordTts(word, ipa = '', accent = '') {
   }
 }
 
+// ── Đọc CẢ đoạn transcript (nút 🔊 cạnh "📝 Transcript") ──
+// Dùng Web Speech API của trình duyệt chứ KHÔNG gọi /tts (Piper) vì transcript là cả
+// câu/đoạn, vượt trần 100 ký tự của /tts; speechSynthesis còn đọc được cả tiếng Hàn.
+export function speakTranscript(text, lang = '') {
+  const value = (text || '').trim();
+  if (!value) return;
+  if (!window.speechSynthesis) {
+    alert('Trình duyệt không hỗ trợ đọc văn bản (Web Speech API).');
+    return;
+  }
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(value);
+  u.lang = lang || (hasHangul(value) ? 'ko-KR' : 'en-US');
+  u.rate = 0.95;
+  window.speechSynthesis.speak(u);
+}
+
 // ── Cài delegated listener 1 lần ──
 let _installed = false;
 export function installPlaybackHandlers() {
@@ -120,6 +137,12 @@ export function installPlaybackHandlers() {
       const start = parseFloat(playBtn.dataset.start);
       const end = parseFloat(playBtn.dataset.end);
       if (Number.isFinite(start) && Number.isFinite(end)) playWordSegment(start, end, playBtn.dataset.src || null);
+      return;
+    }
+    const transcriptBtn = t.closest('.transcript-tts');
+    if (transcriptBtn) {
+      e.preventDefault();
+      speakTranscript(transcriptBtn.dataset.text || '', transcriptBtn.dataset.lang || '');
       return;
     }
     const ttsBtn = t.closest('.tts-play');

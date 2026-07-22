@@ -16,13 +16,6 @@
       "expected_duration_sec": 45
     },
     {
-      "id": "t2_q1_1_read_aloud",
-      "type": "read_aloud",
-      "prompt": "Read the text aloud.",
-      "reference_script": "Is your office still using paper files for everything? Switch to CloudCabinet, the document management system trusted by thousands of small businesses. With CloudCabinet, you can scan, organize, and search your files in seconds, and share them securely with your team from any device. Sign up today and get your first month free.",
-      "expected_duration_sec": 45
-    },
-    {
       "id": "t2_q3_describe_picture",
       "type": "describe_picture",
       "prompt": "Describe the picture.",

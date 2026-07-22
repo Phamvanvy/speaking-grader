@@ -462,14 +462,40 @@ function SectionHead({
   title,
   desc,
   right,
+  collapsible,
+  collapsed,
+  onToggle,
 }: {
   icon: string;
   title: string;
   desc?: string;
   right?: React.ReactNode;
+  /** Cho phép thu gọn: cả header thành nút bấm mở/đóng, hiện caret bên trái `right`. */
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
+  const Caret = collapsed ? ChevronDown : ChevronUp;
   return (
-    <div className="flex items-start justify-between gap-3 border-b bg-muted/30 px-5 py-3">
+    <div
+      className={`flex items-start justify-between gap-3 border-b bg-muted/30 px-5 py-3 ${
+        collapsible ? 'cursor-pointer select-none hover:bg-muted/50' : ''
+      }`}
+      onClick={collapsible ? onToggle : undefined}
+      role={collapsible ? 'button' : undefined}
+      tabIndex={collapsible ? 0 : undefined}
+      aria-expanded={collapsible ? !collapsed : undefined}
+      onKeyDown={
+        collapsible
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onToggle?.();
+              }
+            }
+          : undefined
+      }
+    >
       <div className="min-w-0">
         <h2 className="flex items-center gap-2 text-base font-semibold">
           <span aria-hidden>{icon}</span>
@@ -477,7 +503,11 @@ function SectionHead({
         </h2>
         {desc && <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{desc}</p>}
       </div>
-      {right && <div className="shrink-0">{right}</div>}
+      <div className="flex shrink-0 items-center gap-1">
+        {/* Nút trong `right` không được toggle header → chặn nổi bọt. */}
+        {right && <div onClick={(e) => e.stopPropagation()}>{right}</div>}
+        {collapsible && <Caret className="h-4 w-4 text-muted-foreground" aria-hidden />}
+      </div>
     </div>
   );
 }
@@ -615,6 +645,8 @@ function SuggestionsCard({ onPractice }: { onPractice: (d: any) => void }) {
   const savedHas = useSavedWords((s) => s.keys);
   const swAdd = useSavedWords((s) => s.add);
   const swRemove = useSavedWords((s) => s.remove);
+  // Mặc định thu gọn: khối gợi ý dài, để dưới cùng — mở khi người dùng cần.
+  const [collapsed, setCollapsed] = useState(true);
 
   const { data, isFetching, refetch } = useQuery<SuggestResponse>({
     queryKey: ['wordSuggestions', getUserId()],
@@ -638,6 +670,9 @@ function SuggestionsCard({ onPractice }: { onPractice: (d: any) => void }) {
         icon="🎯"
         title="Gợi ý luyện âm"
         desc="Từ được chọn theo các âm bạn hay sai — bấm 🎙️ để luyện, ☆ để lưu vào danh sách trên."
+        collapsible
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((v) => !v)}
         right={
           <IconBtn title="Tải lại gợi ý" onClick={() => refetch()} disabled={isFetching}>
             <RotateCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
@@ -645,6 +680,7 @@ function SuggestionsCard({ onPractice }: { onPractice: (d: any) => void }) {
         }
       />
 
+      {!collapsed && (
       <div className="p-4">
         {isFetching && !data ? (
           <div className="text-sm text-muted-foreground">Đang tải gợi ý… (lần đầu có thể mất vài giây — AI chọn từ cho từng âm)</div>
@@ -756,6 +792,7 @@ function SuggestionsCard({ onPractice }: { onPractice: (d: any) => void }) {
           </>
         )}
       </div>
+      )}
     </Card>
   );
 }

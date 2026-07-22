@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiFetch, authedResourceUrl } from '../../lib/api';
 import { getUserId, historySaveEnabled, setHistorySaveEnabled } from '../../lib/identity';
 import { examConfig } from '../../lib/config';
-import { escapeHtml } from '../../lib/format';
+import { escapeHtml, transcriptSectionHtml } from '../../lib/format';
 import { featureGridHtml, scoresBreakdownHtml, telemetryHtml, setRenderAccent } from '../../legacy/render';
 import { useUiStore } from '../../store/ui';
 
@@ -33,7 +33,7 @@ function resultHtml(result: any, src: string | null): string {
     : '';
   return (
     audio +
-    `<div class="result-section"><h4>📝 Transcript</h4><p>${escapeHtml(r.transcript || '')}</p></div>` +
+    transcriptSectionHtml(r.transcript || '') +
     `<div class="result-section"><h4>📈 Features</h4>${featureGridHtml(r.features || {})}</div>` +
     `<div class="result-section"><h4>📋 Điểm</h4>${scoresBreakdownHtml(r.scores, r.exam, r.phoneme, {
       pronunciationOnly: !!r.pronunciation_only,

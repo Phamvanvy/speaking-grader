@@ -16,13 +16,6 @@
       "expected_duration_sec": 45
     },
     {
-      "id": "t3_q1_1_read_aloud",
-      "type": "read_aloud",
-      "prompt": "Read the text aloud.",
-      "reference_script": "Tired of overpaying for car insurance? At Meridian Insurance, we compare rates from dozens of providers to find you the best possible deal in minutes. Our licensed agents are available every day to answer your questions and help you switch without any hassle. Call now for a free, no-obligation quote.",
-      "expected_duration_sec": 45
-    },
-    {
       "id": "t3_q3_describe_picture",
       "type": "describe_picture",
       "prompt": "Describe the picture.",

@@ -21,13 +21,6 @@
       "expected_duration_sec": 120
     },
     {
-      "id": "i2_p2_favorite_book",
-      "type": "part2_long_turn",
-      "prompt": "Describe a book you enjoyed reading. You will have to talk about the topic for one to two minutes.",
-      "provided_info": "Describe a book you enjoyed reading.\nYou should say:\n- what the book was about\n- when you read it\n- why you decided to read it\nand explain why you enjoyed this book.",
-      "expected_duration_sec": 120
-    },
-    {
       "id": "i2_p3_role_models",
       "type": "part3_discussion",
       "prompt": "We've been talking about people we admire. Why do you think people need role models? Do you think celebrities make good role models?",
