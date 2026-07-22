@@ -52,8 +52,9 @@ export interface XpState {
 interface XpStore {
   data: XpState | null;
   fetch: () => Promise<void>;
-  /** Gọi sau mỗi lần luyện từ thành công — server cộng XP + trả state mới. */
-  award: (event: 'word_practice', score: number) => Promise<void>;
+  /** Gọi sau mỗi lần luyện từ (nói) hoặc mini-game không nói (word_recall) — server
+   *  cộng XP + trả state mới. Mọi event dùng CHUNG trần XP ngày. */
+  award: (event: 'word_practice' | 'word_recall', score: number) => Promise<void>;
   /** Nhận state XP từ payload có sẵn (course-state / lesson-complete) + ăn mừng. */
   ingest: (state: XpState | null | undefined) => void;
 }

@@ -83,6 +83,20 @@ def test_award_rejects_unknown_event(cfg):
         award_practice_xp(cfg, "u1", "hack_event", 1.0)
 
 
+def test_word_recall_event_accepted_and_shares_quota(cfg):
+    # Mini-game không nói (word_recall) cấp XP như word_practice và CHỊU CHUNG
+    # trần XP ngày — không mở kênh XP thoát cap (Phase 3).
+    r = award_practice_xp(cfg, "u-recall", "word_recall", 1.0)
+    assert r["enabled"] is True
+    assert r["awarded"] == xp.WORD_XP_MAX  # score 1.0 → XP tối đa
+
+    # Trộn word_practice + word_recall vẫn ≤ cap ngày TỔNG.
+    u = "u-mixed"
+    for i in range(50):
+        award_practice_xp(cfg, u, "word_recall" if i % 2 else "word_practice", 1.0)
+    assert get_xp(cfg, u)["xp"] == xp.DAILY_PRACTICE_CAP
+
+
 # ── RB#3: mark_lesson_complete award đúng 1 lần (first-transition) ────────
 
 

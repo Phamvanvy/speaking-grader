@@ -20,6 +20,8 @@ import {
   type ReviewResult,
 } from '@/store/quickReview';
 import { useWordGrader } from './useWordGrader';
+import ListenChoose from './minigames/ListenChoose';
+import MeaningRecall from './minigames/MeaningRecall';
 import { celebrateGood, celebratePerfect, celebrateComplete, bigCelebrate } from '@/lib/celebrate';
 import { playSfx } from '@/lib/sfx';
 import { phonemeTip } from '@/lib/phonemeTips';
@@ -49,6 +51,7 @@ function wordIpa(w: { ipa?: string | null; phonemes?: any[] }): string {
 export default function QuickReviewDialog() {
   const open = useQuickReview((s) => s.open);
   const queue = useQuickReview((s) => s.queue);
+  const kinds = useQuickReview((s) => s.kinds);
   const index = useQuickReview((s) => s.index);
   const results = useQuickReview((s) => s.results);
   const phase = useQuickReview((s) => s.phase);
@@ -57,6 +60,7 @@ export default function QuickReviewDialog() {
   const close = useQuickReview((s) => s.close);
   const accent = useUiStore((s) => s.accent);
   const swAdd = useSavedWords((s) => s.add);
+  const savedList = useSavedWords((s) => s.words); // nguồn distractor cho mini-game
 
   // Phoneme + % của từ ĐANG luyện (để vẽ vòng điểm + chip lỗi); reset mỗi từ.
   const [graded, setGraded] = useState<{ pct: number; phonemes: any[] } | null>(null);
@@ -114,6 +118,21 @@ export default function QuickReviewDialog() {
     advance();
   }
 
+  // Kết quả 1 lượt mini-game (nghe-chọn / nghĩa-nhớ): chấm nhị phân đúng/sai. Cộng
+  // XP qua event 'word_recall' (CHUNG cap ngày). KHÔNG đụng last_score/phonemes —
+  // đó là điểm phát âm (mastery/sao), mini-game recall không phải phát âm.
+  function finishMinigame(correct: boolean) {
+    const pct = correct ? 100 : 0;
+    record(pct);
+    useXp.getState().award('word_recall', pct / 100);
+    const combo = comboAt(useQuickReview.getState().results, useQuickReview.getState().index);
+    if (correct) {
+      celebrateGood();
+      if (combo >= 3) bigCelebrate();
+    } else playSfx('wrong');
+    scheduleAdvance();
+  }
+
   // Đổi từ (index) → reset trạng thái chấm của từ trước.
   useEffect(() => {
     setGraded(null);
@@ -145,6 +164,10 @@ export default function QuickReviewDialog() {
 
   const total = queue.length;
   const combo = comboAt(results, index);
+  const kind = kinds[index] ?? 'speak';
+  // Distractor cho mini-game = các từ đã lưu (bỏ chính từ đang hỏi); dự phòng dùng
+  // các từ trong queue nếu store rỗng.
+  const pool = (savedList.length ? savedList : queue).map((w) => w.word);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && close()}>
@@ -172,56 +195,64 @@ export default function QuickReviewDialog() {
               />
             </div>
 
-            {/* Từ + IPA + nghe mẫu + vòng điểm */}
-            <div className="flex items-center gap-2">
-              <h3 className="text-2xl font-bold">{word}</h3>
-              <span className="flex-1" />
-              {graded && (
-                <div
-                  className="practice-ring"
-                  style={
-                    {
-                      ['--pct' as any]: graded.pct,
-                      ['--ring-color' as any]: ringColor(graded.pct),
-                    } as React.CSSProperties
-                  }
-                  title={`Độ chính xác: ${graded.pct}%`}
-                >
-                  <div className="practice-ring__inner">{graded.pct}%</div>
+            {kind === 'speak' ? (
+              <>
+                {/* Từ + IPA + nghe mẫu + vòng điểm */}
+                <div className="flex items-center gap-2">
+                  <h3 className="text-2xl font-bold">{word}</h3>
+                  <span className="flex-1" />
+                  {graded && (
+                    <div
+                      className="practice-ring"
+                      style={
+                        {
+                          ['--pct' as any]: graded.pct,
+                          ['--ring-color' as any]: ringColor(graded.pct),
+                        } as React.CSSProperties
+                      }
+                      title={`Độ chính xác: ${graded.pct}%`}
+                    >
+                      <div className="practice-ring__inner">{graded.pct}%</div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            {wordIpa(cur) && (
-              <div className="practice-ipa">
-                {wordIpa(cur)}
-                <button type="button" className="tts-play" data-word={word} data-ipa={wordIpa(cur).replace(/\//g, '') || undefined} title="Nghe phát âm chuẩn">
-                  🔊
-                </button>
-              </div>
-            )}
+                {wordIpa(cur) && (
+                  <div className="practice-ipa">
+                    {wordIpa(cur)}
+                    <button type="button" className="tts-play" data-word={word} data-ipa={wordIpa(cur).replace(/\//g, '') || undefined} title="Nghe phát âm chuẩn">
+                      🔊
+                    </button>
+                  </div>
+                )}
 
-            {/* Chip lỗi rút gọn sau khi chấm */}
-            {graded && graded.phonemes.length > 0 && <CompactChips phonemes={graded.phonemes} />}
+                {/* Chip lỗi rút gọn sau khi chấm */}
+                {graded && graded.phonemes.length > 0 && <CompactChips phonemes={graded.phonemes} />}
 
-            {/* Ghi âm */}
-            <div className="practice-rec">
-              <div className="practice-rec__hint">Chạm để nói từ này</div>
-              <button
-                type="button"
-                className={`practice-mic${recording ? ' recording' : ''}`}
-                onClick={() => toggleRecording(word)}
-                disabled={grading}
-                title="Ghi âm luyện tập"
-              >
-                <Mic className="h-5 w-5" />
-              </button>
-              <div className={`practice-status${status.kind ? ' ' + status.kind : ''}`}>{status.text}</div>
-              {replayUrl && (
-                <Button type="button" variant="outline" size="sm" className="mt-1" onClick={playReplay}>
-                  <Play className="h-3.5 w-3.5" /> Nghe lại bạn vừa nói
-                </Button>
-              )}
-            </div>
+                {/* Ghi âm */}
+                <div className="practice-rec">
+                  <div className="practice-rec__hint">Chạm để nói từ này</div>
+                  <button
+                    type="button"
+                    className={`practice-mic${recording ? ' recording' : ''}`}
+                    onClick={() => toggleRecording(word)}
+                    disabled={grading}
+                    title="Ghi âm luyện tập"
+                  >
+                    <Mic className="h-5 w-5" />
+                  </button>
+                  <div className={`practice-status${status.kind ? ' ' + status.kind : ''}`}>{status.text}</div>
+                  {replayUrl && (
+                    <Button type="button" variant="outline" size="sm" className="mt-1" onClick={playReplay}>
+                      <Play className="h-3.5 w-3.5" /> Nghe lại bạn vừa nói
+                    </Button>
+                  )}
+                </div>
+              </>
+            ) : cur && kind === 'listen' ? (
+              <ListenChoose key={index} word={cur} pool={pool} onResult={finishMinigame} />
+            ) : cur ? (
+              <MeaningRecall key={index} word={cur} pool={pool} onResult={finishMinigame} />
+            ) : null}
 
             {/* Điều hướng */}
             <div className="flex items-center justify-between gap-2">
@@ -271,8 +302,11 @@ function Summary({ results, onClose }: { results: (ReviewResult | null)[]; onClo
   const done = results.filter(Boolean) as ReviewResult[];
   const correct = correctCount(results);
   const best = maxCombo(results);
+  // Sao thành thạo chỉ tính bài NÓI (last_score là điểm phát âm); mini-game recall
+  // không nâng sao dù chọn đúng.
   const starsGained = done.reduce(
-    (sum, r) => sum + Math.max(0, masteryStars(r.pct / 100) - masteryStars(r.prevScore)),
+    (sum, r) =>
+      sum + (r.kind === 'speak' ? Math.max(0, masteryStars(r.pct / 100) - masteryStars(r.prevScore)) : 0),
     0,
   );
   const ratio = done.length ? correct / done.length : 0;

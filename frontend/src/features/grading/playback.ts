@@ -77,7 +77,7 @@ const TTS_AUDIO_VERSION = 'v7'; // phải khớp CACHE_VERSION ở src/tts.py
 // về `text` nếu tắt hoặc IPA không map được — nên luôn gửi kèm cả hai.
 // `accent` (tuỳ chọn): ép giọng đọc cụ thể ('us' | 'gb') — dùng khi 1 chỗ hiện CẢ hai
 // phiên âm UK và US, mỗi nút 🔊 đọc đúng giọng của nó. Rỗng → theo accent đang chọn.
-function playWordTts(word, ipa = '', accent = '') {
+export function playWordTts(word, ipa = '', accent = '') {
   if (!word) return;
   if (hasHangul(word)) {
     if (!window.speechSynthesis) {

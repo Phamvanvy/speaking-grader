@@ -173,13 +173,23 @@ def get_xp(cfg: Config, user_id: str) -> dict:
     return state
 
 
+# Các sự kiện luyện được chấp nhận. TẤT CẢ dùng CHUNG hạn mức XP ngày
+# (DAILY_PRACTICE_CAP) — thêm dạng bài (mini-game) KHÔNG mở kênh XP thoát cap.
+#   word_practice  — luyện nói 1 từ (chấm phoneme).
+#   word_recall    — mini-game không nói (nghe & chọn / nghĩa → nhớ từ); client
+#                    gửi score nhị phân đúng=1.0 / sai=0.0, backend tự quy XP.
+_PRACTICE_EVENTS = frozenset({"word_practice", "word_recall"})
+
+
 def award_practice_xp(cfg: Config, user_id: str, event: str, score: float) -> dict:
-    """Cấp XP cho 1 sự kiện luyện (hiện: 'word_practice'). Backend TỰ tính XP từ
-    score (client không gửi XP — RB#5); quota ngày tổng chống farm. No-op nếu tắt cờ."""
+    """Cấp XP cho 1 sự kiện luyện (word_practice / word_recall). Backend TỰ tính XP
+    từ score (client không gửi XP — RB#5); quota ngày TỔNG chống farm (dùng chung
+    cho MỌI event). No-op nếu tắt cờ."""
     if not cfg.course_xp_enabled:
         return {"enabled": False}
-    if (event or "").strip() != "word_practice":
-        raise ValueError(f"event không hợp lệ: '{event}'. Hợp lệ: word_practice.")
+    if (event or "").strip() not in _PRACTICE_EVENTS:
+        valid = ", ".join(sorted(_PRACTICE_EVENTS))
+        raise ValueError(f"event không hợp lệ: '{event}'. Hợp lệ: {valid}.")
     state = _xp.award_practice_xp(cfg, user_id, score)
     state["enabled"] = True
     return state
