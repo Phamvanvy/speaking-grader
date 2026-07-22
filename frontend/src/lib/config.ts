@@ -104,3 +104,8 @@ export const COURSE_GAME_SHADOWING = import.meta.env.VITE_COURSE_GAME_SHADOWING 
 // Phase 3A — Boss cuối chặng. KHÔNG cần LLM (đọc-to nội dung đã học) → default BẬT.
 // Tắt: VITE_COURSE_BOSS=0 → node Boss ẩn, path khóa học nguyên vẹn.
 export const COURSE_BOSS_ENABLED = import.meta.env.VITE_COURSE_BOSS !== '0';
+
+// Phase 3B — Quest nhập vai (Role-play, LLM sinh kịch bản, chấm phát âm dùng chung).
+// Default BẬT; tự ẩn khi backend trả null (LLM lỗi/không cấu hình). Tắt hẳn khu vực
+// Quest: VITE_COURSE_QUEST_ROLEPLAY=0 → path khóa học nguyên vẹn (bonus-only).
+export const COURSE_QUEST_ROLEPLAY = import.meta.env.VITE_COURSE_QUEST_ROLEPLAY !== '0';

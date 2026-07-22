@@ -35,7 +35,7 @@ from ..history import validate_user_id
 
 logger = logging.getLogger("toeic.course.store")
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 7
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS criterion_stats (
@@ -154,6 +154,20 @@ CREATE TABLE IF NOT EXISTS unit_boss (
   PRIMARY KEY (user_id, boss_id)
 );
 CREATE INDEX IF NOT EXISTS idx_unit_boss_user ON unit_boss(user_id);
+
+-- ── Quest clears (schema v7, Phase 3B/3C) — lớp BONUS, TÁCH khỏi lesson_progress ──
+-- Trạng thái đã-hoàn-thành mỗi Quest (Role-play/Story), per-user. Như unit_boss:
+-- KHÔNG dùng lesson_progress (Quest là bonus, không tính vào tiến độ/gate khóa
+-- học). quest_id = '<exam>.<topic>#roleplay' | '...#story'. not_cleared = KHÔNG
+-- có hàng → mark_quest_cleared first-transition cấp XP/badge MỘT LẦN.
+CREATE TABLE IF NOT EXISTS quest_clears (
+  user_id    TEXT NOT NULL,
+  quest_id   TEXT NOT NULL,
+  best_score REAL,                               -- best NORMALIZED (0-1)
+  cleared_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  PRIMARY KEY (user_id, quest_id)
+);
+CREATE INDEX IF NOT EXISTS idx_quest_clears_user ON quest_clears(user_id);
 """
 
 # ── Migrations cộng dồn (ALTER cho DB đã tồn tại — _DDL dùng IF NOT EXISTS nên
@@ -168,6 +182,7 @@ _MIGRATIONS: list[str] = [
     "ALTER TABLE user_xp ADD COLUMN leaderboard_opt_in INTEGER NOT NULL DEFAULT 0",
     # v5 → v6: unit_boss (Phase 3A) là bảng MỚI → _DDL tự tạo qua IF NOT EXISTS,
     # không cần ALTER ở đây.
+    # v6 → v7: quest_clears (Phase 3B/3C) là bảng MỚI → _DDL tự tạo, không cần ALTER.
 ]
 
 
@@ -391,6 +406,64 @@ def mark_boss_beaten(
                 conn.execute(
                     "UPDATE unit_boss SET best_score = ? WHERE user_id = ? AND boss_id = ?",
                     (score, user_id, boss_id),
+                )
+            return False
+    finally:
+        conn.close()
+
+
+def get_quest_clears(cfg: Config, user_id: str) -> dict[str, dict]:
+    """{quest_id: {best_score, cleared_at}} các Quest user ĐÃ hoàn thành (Phase 3B/3C).
+
+    Bảng RIÊNG quest_clears — không đụng lesson_progress/mastery (Quest là bonus).
+    """
+    conn = _connect(cfg)
+    try:
+        rows = conn.execute(
+            "SELECT quest_id, best_score, cleared_at FROM quest_clears WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        return {
+            r["quest_id"]: {"best_score": r["best_score"], "cleared_at": r["cleared_at"]}
+            for r in rows
+        }
+    finally:
+        conn.close()
+
+
+def mark_quest_cleared(
+    cfg: Config, user_id: str, quest_id: str, score: float
+) -> bool:
+    """Ghi Quest `quest_id` đã hoàn thành với `score` (0-1). Idempotent + first-transition:
+
+    - Chưa có hàng → chèn, trả True (lần đầu — caller cấp XP/badge một lần).
+    - Đã có → chỉ nâng best_score nếu score cao hơn, trả False (KHÔNG cấp lại XP).
+
+    KHÔNG bump streak, KHÔNG đụng lesson_progress/mastery (Quest là bonus).
+    """
+    try:
+        score = max(0.0, min(1.0, float(score)))
+    except (TypeError, ValueError):
+        score = 0.0
+    conn = _connect(cfg)
+    try:
+        with conn:
+            row = conn.execute(
+                "SELECT best_score FROM quest_clears WHERE user_id = ? AND quest_id = ?",
+                (user_id, quest_id),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO quest_clears (user_id, quest_id, best_score, cleared_at) "
+                    "VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                    (user_id, quest_id, score),
+                )
+                return True
+            prev = row["best_score"]
+            if prev is None or score > prev:
+                conn.execute(
+                    "UPDATE quest_clears SET best_score = ? WHERE user_id = ? AND quest_id = ?",
+                    (score, user_id, quest_id),
                 )
             return False
     finally:

@@ -10,6 +10,7 @@ import SavedTab from './features/saved/SavedTab';
 import CourseTab from './features/course/CourseTab';
 import LessonView from './features/course/LessonView';
 import BossView from './features/course/BossView';
+import QuestView from './features/course/QuestView';
 import AccountPage from './features/account/AccountPage';
 import PracticeDialog from './features/saved/PracticeDialog';
 import AddWordsDialog, { useAddWords } from './features/saved/AddWordsDialog';
@@ -84,6 +85,7 @@ export default function App() {
           <Route path="/course" element={<CourseTab />} />
           <Route path="/course/lesson/:lessonId" element={<LessonView />} />
           <Route path="/course/unit/:unitId/boss" element={<BossView />} />
+          <Route path="/course/quest/roleplay/:topic" element={<QuestView />} />
           {/* Ngoài 4 tab — vào từ widget danh tính góc trên. */}
           <Route path="/account" element={<AccountPage />} />
           <Route path="*" element={<Navigate to="/exam" replace />} />

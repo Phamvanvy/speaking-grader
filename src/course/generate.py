@@ -41,6 +41,11 @@ DONE_THRESHOLD: dict[str, float] = {
 # frontend BossSession dùng chung hằng này.
 BOSS_DONE_THRESHOLD = 0.75
 
+# Ngưỡng hoàn thành Quest (Role-play/Story, Phase 3B/3C) — chấm phát âm trung bình
+# các lượt hội thoại/đoạn; nới nhẹ so với Boss vì câu tự nhiên dài, đa dạng hơn.
+# Endpoint quest/complete + frontend session dùng chung hằng này.
+QUEST_DONE_THRESHOLD = 0.70
+
 # Số lesson gắn badge "Nên học" (ưu tiên cao nhất, đang mở).
 _PRIORITY_BADGE_K = 3
 # Số lần chấm thật tối thiểu để TỰ ĐỘNG hoàn thành 1 lesson rubric/qtype từ

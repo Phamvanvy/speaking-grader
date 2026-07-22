@@ -14,7 +14,7 @@ import logging
 
 from .config import Config, resolve_language_name
 from .rubrics.base import Exam, QuestionType
-from .schema import PracticeTask, SampleAnswer, WordInfo
+from .schema import PracticeTask, RolePlayScript, SampleAnswer, WordInfo
 from .scoring.backends import generate
 
 logger = logging.getLogger("toeic.suggest")
@@ -207,6 +207,47 @@ def suggest_practice_task(config: Config, qt: QuestionType) -> PracticeTask:
     )
     result, _meta = generate(config, system_prompt, user_prompt, PracticeTask)
     assert isinstance(result, PracticeTask)
+    return result
+
+
+def suggest_roleplay(config: Config, exam: str, setting: str) -> RolePlayScript:
+    """Sinh MỘT kịch bản hội thoại nhập vai (Role-play Quest, Phase 3B).
+
+    LLM CHỈ sinh nội dung — chấm nói vẫn qua gradePronunciation dùng chung. Cache
+    user-agnostic theo (exam, topic) ở src/course/quests.py (mỗi chủ đề 1 call).
+    Kịch bản viết bằng NGÔN NGỮ NÓI của kỳ thi (EN cho TOEIC/IELTS).
+    """
+    is_ielts = exam == Exam.IELTS.value
+    exam_label = "IELTS" if is_ielts else "TOEIC"
+    level_label = (
+        "an upper-intermediate IELTS candidate (band ~6.5-7)"
+        if is_ielts
+        else "an intermediate TOEIC learner"
+    )
+
+    system_prompt = (
+        f"You are an expert {exam_label} speaking coach writing a short, realistic "
+        "ROLE-PLAY conversation for a learner to practice speaking. The learner will "
+        "READ their lines aloud and we grade PRONUNCIATION only, so every learner "
+        "line must be natural, self-contained, and easy to read aloud.\n\n"
+        "REQUIREMENTS:\n"
+        "- Set `scenario` (1-2 sentences), `role_user` (the learner's role) and "
+        "`role_npc` (the other speaker's role).\n"
+        "- Produce 4-6 `turns`. In each turn the NPC speaks first (`npc`), then give "
+        "the learner's ideal reply in `expected_user` (ONE natural spoken sentence, "
+        "≤20 words) and a SHORT `hint` telling the learner WHAT to say (not the exact "
+        "words), e.g. 'Greet back and ask about the price.'\n"
+        f"- Write `npc` and `expected_user` in natural spoken ENGLISH suited to "
+        f"{level_label}. Write `hint` in Vietnamese.\n"
+        "- Keep the conversation coherent and progressing; end it naturally.\n"
+        "- Output structured JSON only."
+    )
+    user_prompt = (
+        f"Create one {exam_label} role-play conversation for this situation:\n"
+        f"{setting}\n\nNow produce it as structured JSON."
+    )
+    result, _meta = generate(config, system_prompt, user_prompt, RolePlayScript)
+    assert isinstance(result, RolePlayScript)
     return result
 
 

@@ -14,13 +14,13 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { getUserId } from '@/lib/identity';
-import { examConfig, COURSE_BOSS_ENABLED } from '@/lib/config';
+import { examConfig, COURSE_BOSS_ENABLED, COURSE_QUEST_ROLEPLAY } from '@/lib/config';
 import { useCourseStore, type CourseExam } from '@/store/course';
 import { useXp } from '@/store/xp';
 import XpBar from '@/features/gamify/XpBar';
 import StreakFlame from '@/features/gamify/StreakFlame';
 import BadgeGrid from '@/features/gamify/BadgeGrid';
-import { getCourse, type CourseView, type LessonView, type LessonStatus, type UnitView } from './courseApi';
+import { getCourse, getQuests, type CourseView, type LessonView, type LessonStatus, type QuestListItem, type UnitView } from './courseApi';
 
 const DIM_ICON: Record<string, string> = {
   pronunciation: '🗣️',
@@ -107,7 +107,66 @@ export default function CourseTab() {
             />
           </Card>
         ))}
+
+      {COURSE_QUEST_ROLEPLAY && course && (
+        <QuestSection exam={exam} userId={userId} onOpen={(topic) => navigate(`/course/quest/roleplay/${topic}`)} />
+      )}
     </div>
+  );
+}
+
+// ── Nhiệm vụ nhập vai (Role-play Quest, Phase 3B) — lớp BONUS, tự ẩn nếu rỗng ──
+function QuestSection({
+  exam,
+  userId,
+  onOpen,
+}: {
+  exam: string;
+  userId: string;
+  onOpen: (topic: string) => void;
+}) {
+  const q = useQuery({
+    queryKey: ['course', 'quests', exam, userId],
+    queryFn: () => getQuests(exam),
+  });
+  const quests = q.data?.quests ?? [];
+  if (!quests.length) return null; // kỳ thi chưa hỗ trợ → ẩn hẳn khu vực
+
+  return (
+    <Card className="overflow-hidden">
+      <h3 className="flex items-center gap-2 border-b bg-gradient-to-r from-fuchsia-50 to-rose-50 px-5 py-3 text-base font-semibold dark:from-fuchsia-950/30 dark:to-rose-950/20">
+        <span className="text-lg" aria-hidden>🎭</span>
+        Nhiệm vụ nhập vai
+        <span className="text-xs font-normal text-muted-foreground">· luyện hội thoại · thưởng XP</span>
+      </h3>
+      <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
+        {quests.map((quest) => (
+          <QuestCard key={quest.quest_id} quest={quest} onOpen={() => onOpen(quest.topic)} />
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function QuestCard({ quest, onOpen }: { quest: QuestListItem; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group flex items-center gap-3 rounded-xl border bg-card p-3 text-left transition-colors hover:border-fuchsia-400 hover:bg-accent"
+    >
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-fuchsia-400 to-rose-500 text-2xl text-white shadow-sm">
+        {quest.cleared ? '✓' : '🎭'}
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate text-sm font-semibold text-foreground">{quest.title}</span>
+        <span className="text-xs text-muted-foreground">
+          {quest.cleared
+            ? `Đã hoàn thành${quest.best_score != null ? ` · ${Math.round(quest.best_score * 100)}%` : ''}`
+            : 'Hội thoại nhập vai — nhấn để bắt đầu'}
+        </span>
+      </span>
+    </button>
   );
 }
 

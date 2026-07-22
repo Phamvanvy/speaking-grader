@@ -131,6 +131,65 @@ class PracticeTask(BaseModel):
     )
 
 
+class RolePlayTurn(BaseModel):
+    """Một lượt hội thoại trong kịch bản nhập vai (Phase 3B).
+
+    NPC nói `npc` → học viên đáp lại. `expected_user` là câu THAM CHIẾU học viên
+    nên nói (để chấm phát âm); `hint` là gợi ý NGẮN hiển thị trong lúc học viên
+    trả lời (KHÔNG lộ `expected_user` cho tới khi chấm xong).
+    """
+
+    npc: str = Field(
+        description=(
+            "Lời thoại của NHÂN VẬT (NPC) mở đầu lượt này — một câu tự nhiên, "
+            "đúng vai và ngữ cảnh kịch bản. Viết bằng ngôn ngữ của kỳ thi (tiếng "
+            "Anh cho TOEIC/IELTS)."
+        )
+    )
+    expected_user: str = Field(
+        description=(
+            "Câu THAM CHIẾU học viên nên nói để đáp lại NPC (1 câu, tự nhiên, "
+            "≤20 từ, đọc to được). Dùng làm text chấm phát âm — KHÔNG bao giờ rỗng."
+        )
+    )
+    hint: str = Field(
+        default="",
+        description=(
+            "Gợi ý NGẮN (mẹo/ý cần nói) hiển thị trong lúc học viên trả lời, "
+            "KHÔNG phải câu mẫu. Ví dụ 'Chào lại và hỏi giá phòng.'"
+        ),
+    )
+
+
+class RolePlayScript(BaseModel):
+    """Kịch bản hội thoại nhập vai (Role-play Quest, Phase 3B).
+
+    LLM sinh 1 lần rồi cache USER-AGNOSTIC theo (exam, topic) trong course.db
+    (id tổng hợp '<exam>.<topic>#roleplay'). Chấm = phát âm từng `expected_user`
+    qua gradePronunciation dùng chung — LLM CHỈ sinh nội dung, không chấm.
+    """
+
+    scenario: str = Field(
+        description=(
+            "Mô tả NGẮN bối cảnh hội thoại (1-2 câu) đặt học viên vào tình huống "
+            "— ví dụ 'Bạn đang nhận phòng khách sạn ở nước ngoài.'"
+        )
+    )
+    role_user: str = Field(
+        description="Vai của HỌC VIÊN (ví dụ 'khách du lịch', 'ứng viên phỏng vấn')."
+    )
+    role_npc: str = Field(
+        description="Vai của NHÂN VẬT đối thoại (ví dụ 'lễ tân khách sạn')."
+    )
+    turns: list[RolePlayTurn] = Field(
+        default_factory=list,
+        description=(
+            "Chuỗi lượt hội thoại (≥2 lượt), NPC nói trước mỗi lượt rồi học viên "
+            "đáp. Diễn tiến mạch lạc theo bối cảnh."
+        ),
+    )
+
+
 class WordInfo(BaseModel):
     """Định nghĩa + ví dụ cho 1 từ (popup luyện phát âm, kiểu ELSA).
 

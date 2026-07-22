@@ -213,6 +213,9 @@ _BADGE_RULES: list[tuple[str, "callable"]] = [
     # Boss cuối chặng (Phase 3A) — số Boss ĐÃ hạ (bảng unit_boss).
     ("boss_1", lambda c: c["bosses_beaten"] >= 1),
     ("boss_5", lambda c: c["bosses_beaten"] >= 5),
+    # Quest nhập vai/truyện (Phase 3B/3C) — số Quest ĐÃ hoàn thành (bảng quest_clears).
+    ("quest_1", lambda c: c["quests_cleared"] >= 1),
+    ("quest_5", lambda c: c["quests_cleared"] >= 5),
 ]
 
 
@@ -230,6 +233,7 @@ def _badge_context(cfg: Config, user_id: str) -> dict:
     progress = store.get_progress(cfg, user_id)
     lessons_done = sum(1 for p in progress.values() if p.get("status") == "done")
     bosses_beaten = len(store.get_boss_states(cfg, user_id))
+    quests_cleared = len(store.get_quest_clears(cfg, user_id))
     activity = store.get_activity(cfg, user_id)
     # longest_streak (max từng đạt) để huy hiệu không "mất" khi streak rơi.
     streak = max(
@@ -242,6 +246,7 @@ def _badge_context(cfg: Config, user_id: str) -> dict:
         "level": xp_to_level(xp)["level"],
         "lessons_done": lessons_done,
         "bosses_beaten": bosses_beaten,
+        "quests_cleared": quests_cleared,
         "streak": streak,
         "words_mastered": words_mastered,
         "words_perfect": words_perfect,

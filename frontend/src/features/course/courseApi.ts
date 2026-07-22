@@ -182,6 +182,83 @@ export function completeBoss(unitId: string, score: number): Promise<BossComplet
   );
 }
 
+// ── Quest nhập vai (Role-play, Phase 3B) — bonus, LLM sinh kịch bản ─────────
+
+// Một Quest trong danh sách (thẻ trên tab Khóa học).
+export interface QuestListItem {
+  quest_id: string;
+  kind: 'roleplay' | 'story';
+  topic: string;
+  title: string;
+  cleared: boolean;
+  best_score: number | null;
+}
+
+export interface QuestList {
+  exam: string;
+  quests: QuestListItem[];
+}
+
+export interface RolePlayTurn {
+  npc: string;
+  expected_user: string;
+  hint: string;
+}
+
+export interface RolePlayScript {
+  quest_id: string;
+  kind: 'roleplay';
+  exam: string;
+  topic: string;
+  threshold: number;
+  scenario: string;
+  role_user: string;
+  role_npc: string;
+  turns: RolePlayTurn[];
+  best_score: number | null;
+  cleared: boolean;
+}
+
+export interface QuestCompleteResult {
+  quest_id: string;
+  kind: string;
+  done: boolean;
+  score: number;
+  best_score?: number | null;
+  xp?: XpState; // chỉ khi lần đầu hoàn thành (first-transition award)
+  new_badges?: string[];
+}
+
+export function getQuests(exam: string): Promise<QuestList> {
+  const uid = getUserId();
+  return apiGet<QuestList>(
+    `/course/quests?user_id=${encodeURIComponent(uid)}&exam=${encodeURIComponent(exam)}`,
+  );
+}
+
+/** Kịch bản Role-play; null khi backend không dựng được (LLM lỗi/chủ đề sai). */
+export function getRoleplayQuest(exam: string, topic: string): Promise<RolePlayScript | null> {
+  const uid = getUserId();
+  return apiGet<RolePlayScript | null>(
+    `/course/quest/roleplay?user_id=${encodeURIComponent(uid)}&exam=${encodeURIComponent(exam)}&topic=${encodeURIComponent(topic)}`,
+  );
+}
+
+/** score đã CHUẨN HÓA 0-1 (client chấm trung bình các lượt; server clamp + ngưỡng). */
+export function completeQuest(
+  questId: string,
+  kind: string,
+  score: number,
+): Promise<QuestCompleteResult> {
+  const uid = getUserId();
+  const fd = new FormData();
+  fd.append('user_id', uid);
+  fd.append('quest_id', questId);
+  fd.append('kind', kind);
+  fd.append('score', String(score));
+  return apiPostForm<QuestCompleteResult>('/course/quest/complete', fd);
+}
+
 export interface LessonGradeResult {
   // score: điểm lesson chuẩn hóa 0-1 (null nếu bài chấm thiếu tiêu chí đích).
   score: number | null;

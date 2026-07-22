@@ -23,8 +23,9 @@ from . import content as _content
 from . import generate
 from . import practice as _practice
 from . import profile, store
+from . import quests as _quests
 from . import xp as _xp
-from .generate import BOSS_DONE_THRESHOLD, DONE_THRESHOLD
+from .generate import BOSS_DONE_THRESHOLD, DONE_THRESHOLD, QUEST_DONE_THRESHOLD
 from .syllabus import SUPPORTED_EXAMS, Unit, get_lesson, get_unit
 
 logger = logging.getLogger("toeic.course")
@@ -40,6 +41,9 @@ __all__ = [
     "mark_lesson_complete",
     "get_unit_boss_content",
     "complete_unit_boss",
+    "list_quests",
+    "get_roleplay_quest",
+    "complete_quest",
     "merge_user",
     "get_xp",
     "award_practice_xp",
@@ -234,6 +238,97 @@ def complete_unit_boss(
         result["best_score"] = (beaten or {}).get("best_score")
         if first and cfg.course_xp_enabled:
             xp_state = _xp.award_bonus_xp(cfg, user_id, "boss", score)
+            result["xp"] = xp_state
+            result["new_badges"] = xp_state.get("new_badges", [])
+    return result
+
+
+# ── Quest nhập vai / truyện (Phase 3B/3C) — BONUS, tách khỏi mastery/lesson ──
+
+_QUEST_KINDS = {"roleplay", "story"}
+
+
+def list_quests(cfg: Config, user_id: str, exam: str) -> dict:
+    """Danh sách Quest của kỳ thi (hiện: Role-play) + trạng thái đã hoàn thành.
+
+    Bonus-only: chỉ đọc quest_clears (KHÔNG đụng mastery/progress). Trả
+    {exam, quests:[{quest_id, kind, topic, title, cleared, best_score}]}. Chưa hỗ
+    trợ kỳ thi (vd topik) → quests rỗng (frontend ẩn khu vực Quest)."""
+    exam = _validate_exam(exam)
+    clears = store.get_quest_clears(cfg, user_id)
+    quests: list[dict] = []
+    for topic in _quests.list_roleplay_topics(exam):
+        qid = _quests.roleplay_quest_id(exam, topic.slug)
+        c = clears.get(qid)
+        quests.append(
+            {
+                "quest_id": qid,
+                "kind": "roleplay",
+                "topic": topic.slug,
+                "title": topic.title,
+                "cleared": c is not None,
+                "best_score": (c or {}).get("best_score"),
+            }
+        )
+    return {"exam": exam, "quests": quests}
+
+
+def get_roleplay_quest(
+    cfg: Config, config: Config, user_id: str, exam: str, topic: str, lang: str
+) -> dict | None:
+    """Kịch bản Role-play của (exam, topic) + trạng thái. None nếu không dựng được
+    (chủ đề sai / LLM lỗi) → endpoint trả null để frontend ẩn quest, KHÔNG chặn.
+
+    Có thể chạm LLM (build_roleplay) → caller nên chạy trong threadpool."""
+    exam = _validate_exam(exam)
+    content = _quests.build_roleplay(cfg, config, exam, topic, lang)
+    if content is None:
+        return None
+    qid = _quests.roleplay_quest_id(exam, topic)
+    cleared = store.get_quest_clears(cfg, user_id).get(qid)
+    return {
+        "quest_id": qid,
+        "kind": "roleplay",
+        "exam": exam,
+        "topic": topic,
+        "threshold": QUEST_DONE_THRESHOLD,
+        "scenario": content["scenario"],
+        "role_user": content["role_user"],
+        "role_npc": content["role_npc"],
+        "turns": content["turns"],
+        "best_score": (cleared or {}).get("best_score"),
+        "cleared": cleared is not None,
+    }
+
+
+def complete_quest(
+    cfg: Config, user_id: str, quest_id: str, kind: str, score: float
+) -> dict:
+    """Ghi kết quả hoàn thành 1 Quest (Role-play/Story). score CHUẨN HÓA 0-1
+    (client chấm phát âm trung bình các lượt qua /grade).
+
+    P0 chống gian lận (server-side): (1) clamp score; (2) chỉ mark cleared + award
+    khi score >= QUEST_DONE_THRESHOLD. XP/huy hiệu qua kênh RIÊNG award_bonus_xp,
+    MỘT LẦN (mark_quest_cleared trả True lần đầu). KHÔNG đụng lesson_progress/
+    mastery/streak (Quest là bonus). Trả {done, best_score, xp?, new_badges?}."""
+    kind = (kind or "").strip().lower()
+    if kind not in _QUEST_KINDS:
+        raise ValueError(f"kind không hợp lệ: {kind!r} (hợp lệ: {sorted(_QUEST_KINDS)}).")
+    if not (quest_id or "").strip():
+        raise ValueError("Thiếu quest_id.")
+    try:
+        score = float(score)
+    except (TypeError, ValueError) as e:
+        raise ValueError("score phải là số 0-1.") from e
+    score = max(0.0, min(1.0, score))
+    passed = score >= QUEST_DONE_THRESHOLD
+    result: dict = {"quest_id": quest_id, "kind": kind, "done": passed, "score": score}
+    if passed:
+        first = store.mark_quest_cleared(cfg, user_id, quest_id, score)
+        cleared = store.get_quest_clears(cfg, user_id).get(quest_id)
+        result["best_score"] = (cleared or {}).get("best_score")
+        if first and cfg.course_xp_enabled:
+            xp_state = _xp.award_bonus_xp(cfg, user_id, kind, score)
             result["xp"] = xp_state
             result["new_badges"] = xp_state.get("new_badges", [])
     return result
