@@ -7,6 +7,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useXp } from '@/store/xp';
+import { useUiStore } from '@/store/ui';
+import { COURSE_GAME_DICTATION, COURSE_GAME_SHADOWING } from '@/lib/config';
 import ListenChoose from '@/features/saved/minigames/ListenChoose';
 import type { SavedWord } from '@/store/savedWords';
 import type { LessonContent, PronWord } from '../courseApi';
@@ -15,6 +17,8 @@ import { buildCourseGameSequence, type GameStep } from './buildCourseGameSequenc
 import { fetchWordInfos, type WordInfo } from './wordInfo';
 import WordMatchGame, { type MatchResult } from './WordMatchGame';
 import SentenceBuilderGame from './SentenceBuilderGame';
+import DictationGame from './DictationGame';
+import ShadowingGame from './ShadowingGame';
 
 const EMPTY_INFO: WordInfo = { meaning: null, example: null };
 const key = (w: string) => (w || '').trim().toLowerCase();
@@ -29,6 +33,7 @@ export default function CourseGameSession({
   lesson: LessonContent;
   onCompleted: (score: number) => void;
 }) {
+  const accent = useUiStore((s) => s.accent);
   const words = useMemo(() => lesson.words || [], [lesson.words]);
   const pool = useMemo(() => words.map((w) => w.word), [words]);
   const byWord = useMemo(() => new Map(words.map((w) => [key(w.word), w])), [words]);
@@ -54,7 +59,12 @@ export default function CourseGameSession({
       if (!alive) return;
       setInfos(map);
       const infoOf = (w: string) => map.get(key(w)) || EMPTY_INFO;
-      setSteps(buildCourseGameSequence(words, infoOf));
+      setSteps(
+        buildCourseGameSequence(words, infoOf, {
+          dictation: COURSE_GAME_DICTATION,
+          shadowing: COURSE_GAME_SHADOWING,
+        }),
+      );
       setPhase('learn');
     });
     return () => {
@@ -93,14 +103,9 @@ export default function CourseGameSession({
     }, 900);
   }
 
-  function onListenResult(word: PronWord, correct: boolean) {
-    const k = key(word.word);
-    awardWords([k], () => correct);
-    if (!correct) markMissed(k);
-    advancePlay(correct);
-  }
-
-  function onBuildResult(word: PronWord, correct: boolean) {
+  // Kết quả một bước trên MỘT từ (Listen / Dictation / Sentence Builder / Shadowing):
+  // award word_recall (1 lần/từ), gom từ sai, tính combo, chuyển bước.
+  function onWordResult(word: PronWord, correct: boolean) {
     const k = key(word.word);
     awardWords([k], () => correct);
     if (!correct) markMissed(k);
@@ -176,13 +181,29 @@ export default function CourseGameSession({
             <ListenChoose
               word={asSaved(step.word)}
               pool={pool}
-              onResult={(c) => onListenResult(step.word, c)}
+              onResult={(c) => onWordResult(step.word, c)}
+            />
+          )}
+          {step.kind === 'dictate' && (
+            <DictationGame
+              word={step.word.word}
+              ipa={step.word.ipa}
+              onResult={(c) => onWordResult(step.word, c)}
             />
           )}
           {step.kind === 'build' && (
             <SentenceBuilderGame
               sentence={step.example}
-              onResult={(c) => onBuildResult(step.word, c)}
+              onResult={(c) => onWordResult(step.word, c)}
+            />
+          )}
+          {step.kind === 'shadow' && (
+            <ShadowingGame
+              lesson={lesson}
+              sentence={step.example}
+              accent={accent}
+              threshold={lesson.done_threshold}
+              onResult={(c) => onWordResult(step.word, c)}
             />
           )}
         </div>

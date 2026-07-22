@@ -93,3 +93,10 @@ export function hasHangul(s: string | null | undefined): boolean {
 // bằng VITE_COURSE_GAME=0 khi build/dev. Khi tắt → fallback màn PronBody cũ. Vì
 // bước Boss dùng đúng đường /grade cũ nên hoàn thành lesson không đổi dù bật/tắt.
 export const COURSE_GAME_ENABLED = import.meta.env.VITE_COURSE_GAME !== '0';
+
+// Phase 2 — game tái dùng engine speak/TTS, xen vào vòng chơi Phase 1. Mỗi cái toggle
+// riêng (mặc định BẬT khi vòng chơi bật). Dictation: nghe→gõ (không mic). Shadowing:
+// đọc lại câu mẫu, chấm qua ĐÚNG gradePronunciation dùng chung → không mở kênh farm/
+// không đổi hoàn thành lesson. Tắt: VITE_COURSE_GAME_DICTATION=0 / _SHADOWING=0.
+export const COURSE_GAME_DICTATION = import.meta.env.VITE_COURSE_GAME_DICTATION !== '0';
+export const COURSE_GAME_SHADOWING = import.meta.env.VITE_COURSE_GAME_SHADOWING !== '0';

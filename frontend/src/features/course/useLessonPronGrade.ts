@@ -8,18 +8,13 @@
 // (0-100) qua onGraded rồi tự gọi onCompleted(pct/100).
 
 import { useRef, useState } from 'react';
-import { apiFetch } from '@/lib/api';
 import { useUiStore } from '@/store/ui';
 import { playSfx } from '@/lib/sfx';
+import { gradePronunciation, practicePct } from './gradePron';
 import type { LessonContent, PronWord } from './courseApi';
 
-// % chính xác: (ok + low-severity) / non-skipped — khớp practicePct của PracticeDialog.
-export function practicePct(phonemes: any[]): number | null {
-  const scored = (phonemes || []).filter((p) => p.status !== 'skipped');
-  if (!scored.length) return null;
-  const pass = scored.filter((p) => p.status === 'ok' || p.severity === 'low').length;
-  return Math.round((100 * pass) / scored.length);
-}
+// Re-export để nơi khác trong course vẫn import từ đây được (thân hàm ở gradePron.ts).
+export { practicePct };
 
 export interface LessonPronGrade {
   recording: boolean;
@@ -87,21 +82,7 @@ export function useLessonPronGrade(
     setGrading(true);
     setStatus('Đang chấm…');
     try {
-      const ext = mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : 'webm';
-      const fd = new FormData();
-      fd.append('audio', new File([blob], `lesson-${lesson.id}.${ext}`, { type: mime }));
-      fd.append('text', drill);
-      fd.append('mode', 'mock_test');
-      fd.append('no_ai', 'true');
-      fd.append('strict', 'true');
-      fd.append('accent', accent);
-      if (lesson.exam === 'topik') fd.append('exam', 'topik'); // pipeline tiếng Hàn
-      const res = await apiFetch('/grade', { method: 'POST', body: fd });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const result = await res.json();
-      const ws = result?.phoneme?.score?.words || [];
-      const merged = ws.flatMap((w: any) => w.phonemes || []);
-      const pct = practicePct(merged);
+      const pct = await gradePronunciation(lesson, drill, blob, mime, accent);
       if (pct == null) {
         setStatus('Chưa nghe rõ — hãy đọc to, rõ từng từ rồi thử lại.');
         return;
