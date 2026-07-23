@@ -331,6 +331,14 @@ class Config:
     # Google trên UI. CLIENT_ID là thông tin CÔNG KHAI (không phải secret); flow
     # id_token phía web KHÔNG cần client secret. Xem /auth/google trong api.py.
     google_client_id: str = ""
+    # ── Quyền quản trị (admin) ───────────────────────────────────────────
+    # Danh sách username/email (CSV) có quyền ADMIN: xem được lịch sử + audio + hồ
+    # sơ của MỌI user (kể cả ẩn danh) để hỗ trợ/kiểm duyệt. Cấu hình CHỈ qua ENV
+    # (không endpoint nào tự cấp được) nên quyền admin không thể bị chiếm qua API.
+    # So khớp KHÔNG phân biệt hoa/thường (email đã lowercase khi đăng ký). Rỗng =
+    # không có admin nào. Xem auth.is_admin_user_id + /admin/* trong api.py. Đặt
+    # qua TOEIC_ADMIN_USERS (vd "phamvanvy0306@gmail.com,admin2@x.com").
+    admin_users: str = ""
     # ── Admission control cho các endpoint chấm bài ──────────────────────
     # Giới hạn số bài chấm ĐỒNG THỜI mỗi uvicorn worker (Dockerfile chạy 2 worker
     # → tổng = 2×N). ASR đã serialize bằng lock riêng nên slot >1 chỉ chồng lấn
@@ -380,6 +388,11 @@ class Config:
     # Bóc tách đề (vision) qua OpenRouter chỉ khi bật — model chấm điểm đã bench
     # có thể KHÔNG có vision; default off = exam import vẫn đi local như prod.
     openrouter_vision_extract: bool = False
+
+    @property
+    def admin_user_set(self) -> set[str]:
+        """Tập username/email admin (lowercase, đã strip). Rỗng = không có admin."""
+        return {u.strip().lower() for u in self.admin_users.split(",") if u.strip()}
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -676,6 +689,7 @@ def load_config() -> Config:
             os.getenv("TOEIC_AUTH_DB_PATH", "data/auth.db") or "data/auth.db"
         ),
         google_client_id=(os.getenv("GOOGLE_CLIENT_ID", "") or "").strip(),
+        admin_users=(os.getenv("TOEIC_ADMIN_USERS", "") or "").strip(),
         grade_concurrency=int(os.getenv("TOEIC_GRADE_CONCURRENCY", "4") or "4"),
         grade_queue_max=int(os.getenv("TOEIC_GRADE_QUEUE_MAX", "40") or "40"),
         grade_queue_timeout_sec=float(

@@ -45,10 +45,17 @@ function resultHtml(result: any, src: string | null): string {
   );
 }
 
-export default function HistoryTab() {
+interface HistoryTabProps {
+  /** Xem lịch sử của user_id khác (admin). Mặc định = user hiện tại. */
+  userIdOverride?: string;
+  /** Ẩn checkbox lưu + nút xoá (admin xem dữ liệu người khác — chỉ đọc). */
+  readOnly?: boolean;
+}
+
+export default function HistoryTab({ userIdOverride, readOnly }: HistoryTabProps = {}) {
   const accent = useUiStore((s) => s.accent);
   setRenderAccent(accent);
-  const userId = getUserId();
+  const userId = userIdOverride ?? getUserId();
   const qc = useQueryClient();
   const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -131,17 +138,19 @@ export default function HistoryTab() {
             ↻ Tải lại
           </button>
         </div>
-        <label className="history-opt">
-          <input
-            type="checkbox"
-            checked={saveEnabled}
-            onChange={(e) => {
-              setHistorySaveEnabled(e.target.checked);
-              setSaveEnabledState(e.target.checked);
-            }}
-          />{' '}
-          💾 Lưu bài chấm vào lịch sử (kèm ghi âm — lưu trên máy chủ, tách theo trình duyệt này)
-        </label>
+        {!readOnly && (
+          <label className="history-opt">
+            <input
+              type="checkbox"
+              checked={saveEnabled}
+              onChange={(e) => {
+                setHistorySaveEnabled(e.target.checked);
+                setSaveEnabledState(e.target.checked);
+              }}
+            />{' '}
+            💾 Lưu bài chấm vào lịch sử (kèm ghi âm — lưu trên máy chủ, tách theo trình duyệt này)
+          </label>
+        )}
 
         <div className="history-list" id="history-list">
           {listQuery.isLoading && <p className="history-empty">⏳ Đang tải…</p>}
@@ -174,15 +183,17 @@ export default function HistoryTab() {
                       ⬇
                     </button>
                   )}
-                  <button
-                    className="btn btn-secondary btn-inline history-del"
-                    title="Xoá bản ghi này (kèm audio)"
-                    onClick={() => {
-                      if (confirm('Xoá bản ghi này khỏi lịch sử (kèm audio đã lưu)?')) deleteMut.mutate(rec.id);
-                    }}
-                  >
-                    🗑
-                  </button>
+                  {!readOnly && (
+                    <button
+                      className="btn btn-secondary btn-inline history-del"
+                      title="Xoá bản ghi này (kèm audio)"
+                      onClick={() => {
+                        if (confirm('Xoá bản ghi này khỏi lịch sử (kèm audio đã lưu)?')) deleteMut.mutate(rec.id);
+                      }}
+                    >
+                      🗑
+                    </button>
+                  )}
                 </div>
               </div>
             );

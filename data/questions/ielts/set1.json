@@ -4,32 +4,32 @@
     {
       "id": "ielts_p1_work",
       "type": "part1_interview",
-      "prompt": "Let's talk about your work or studies. What do you do? Do you enjoy it? Why or why not?",
-      "expected_duration_sec": 40
+      "prompt": "Let's talk about your work or studies. What do you do — do you work, or are you a student? Do you enjoy it? What would you like to do in the future? Answer naturally and give reasons for your answers.",
+      "expected_duration_sec": 45
     },
     {
       "id": "ielts_p1_hometown",
       "type": "part1_interview",
-      "prompt": "Now let's talk about your hometown. Where is it, and what is it like to live there?",
-      "expected_duration_sec": 40
+      "prompt": "Now let's talk about your hometown. Where is your hometown, and what is it like to live there? What do you like most about it? Has it changed much in recent years? Explain your answers with examples.",
+      "expected_duration_sec": 45
     },
     {
       "id": "ielts_p2_memorable_trip",
       "type": "part2_long_turn",
-      "prompt": "Describe a memorable trip you have taken. You will have to talk about the topic for one to two minutes.",
-      "provided_info": "Describe a memorable trip you have taken.\nYou should say:\n- where you went\n- who you went with\n- what you did there\nand explain why this trip was memorable for you.",
+      "prompt": "Describe a memorable trip you have taken. You will have one minute to prepare and should then speak for one to two minutes.",
+      "provided_info": "Describe a memorable trip you have taken.\nYou should say:\n- where you went and when\n- who you went with\n- what you did during the trip\nand explain why this trip was so memorable for you.",
       "expected_duration_sec": 120
     },
     {
       "id": "ielts_p3_travel_tourism",
       "type": "part3_discussion",
-      "prompt": "We've been talking about travel. Why do you think people enjoy travelling to other countries? Do you think tourism can have negative effects on a place?",
+      "prompt": "We've been talking about travel. Let's consider some broader questions. Why do you think people enjoy travelling to other countries? Do you think tourism can have negative effects on a place and its people? How might the way people travel change in the future?",
       "expected_duration_sec": 60
     },
     {
       "id": "ielts_p3_learning_skills",
       "type": "part3_discussion",
-      "prompt": "Let's consider learning new skills. Do you think it is better to learn a skill from a teacher or by yourself? How has technology changed the way people learn skills?",
+      "prompt": "Let's talk more generally about learning new skills. Do you think it is better to learn a practical skill from a teacher or by yourself? How has technology changed the way people learn new skills? Are some skills more important to learn than others? Give reasons for your answers.",
       "expected_duration_sec": 60
     }
   ]

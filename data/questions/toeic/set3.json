@@ -5,73 +5,73 @@
       "id": "t3_q1_read_aloud",
       "type": "read_aloud",
       "prompt": "Read the text aloud.",
-      "reference_script": "Good afternoon, and thank you for visiting the Riverton History Museum. Guided tours of the main exhibit begin every hour on the hour and last approximately forty-five minutes. Please note that photography is not permitted in the special collections gallery.",
+      "reference_script": "Welcome to the National Museum of Science and Industry. Before your tour begins, please note that photography without flash is permitted in most galleries, but food and drinks are not allowed inside the exhibition halls. Today's guided tour will take you through three main sections: the history of transportation, the world of modern robotics, and a hands-on space for young visitors. If you have any questions during the tour, please feel free to ask one of our staff members. Enjoy your visit.",
       "expected_duration_sec": 45
     },
     {
       "id": "t3_q2_read_aloud",
       "type": "read_aloud",
       "prompt": "Read the text aloud.",
-      "reference_script": "Attention all staff, the building's water supply will be temporarily shut off tomorrow morning from eight to ten for scheduled maintenance. Please fill any containers you may need in advance, and contact the facilities office with questions.",
+      "reference_script": "Tired of standing in long lines at the bank? With the new MoneyWise mobile app, you can check your balance, pay your bills, and transfer money to friends and family in just a few seconds. Our app is free to download, protected by advanced security, and available in five languages. Whether you are at home, at work, or traveling abroad, your account is always at your fingertips. Download MoneyWise today and take control of your finances.",
       "expected_duration_sec": 45
     },
     {
       "id": "t3_q3_describe_picture",
       "type": "describe_picture",
-      "prompt": "Describe the picture.",
+      "prompt": "Describe the picture in as much detail as you can.",
       "image_path": "data/image/toeic-speaking-sample-test-5.jpg",
       "expected_duration_sec": 45
     },
     {
       "id": "t3_q4_describe_picture",
       "type": "describe_picture",
-      "prompt": "Describe the picture.",
+      "prompt": "Describe the picture in as much detail as you can.",
       "image_path": "data/image/toeic-speaking-sample-test-6.jpg",
       "expected_duration_sec": 45
     },
     {
       "id": "t3_q5_respond",
       "type": "respond_questions",
-      "prompt": "Imagine that a health magazine is doing an interview about exercise habits. How often do you exercise, and what type of exercise do you usually do?",
+      "prompt": "Imagine that a transportation company is conducting a survey in your city about how people travel. You have agreed to answer some questions. How do you usually travel to work or school, and how long does the journey take?",
       "expected_duration_sec": 15
     },
     {
       "id": "t3_q6_respond",
       "type": "respond_questions",
-      "prompt": "Do you prefer exercising alone or with other people? Why?",
+      "prompt": "When you plan a long trip, how do you decide which form of transportation to use, and what is the most important factor for you?",
       "expected_duration_sec": 15
     },
     {
       "id": "t3_q7_respond",
       "type": "respond_questions",
-      "prompt": "Some people believe employers should offer on-site gyms to encourage employees to exercise. Do you agree? Give reasons to support your answer.",
+      "prompt": "Do you think your city should invest more in public transportation than in roads for private cars? Give reasons and examples to support your answer.",
       "expected_duration_sec": 30
     },
     {
       "id": "t3_q8_respond_info",
       "type": "respond_with_info",
-      "prompt": "Hi, I'm calling about the train schedule. What time does the first train to Downtown leave on weekdays, and from which platform?",
-      "provided_info": "Northline Rail — Weekday Schedule (Central Station to Downtown)\n6:15 AM  Platform 2  Express (25 min)\n7:00 AM  Platform 1  Local (40 min)\n8:30 AM  Platform 2  Express (25 min)\n5:45 PM  Platform 1  Local (40 min)\n6:30 PM  Platform 2  Express (25 min)\nOne-way fare: $6.50 (discounted $4.50 with a monthly pass)",
+      "prompt": "Hello, I'm planning to attend the technology conference next Friday. I don't have the agenda with me. What time does the opening session begin, and who is giving it?",
+      "provided_info": "Future Technology Conference — Friday, October 3 (Riverside Convention Hall)\n9:00 AM   Opening Address: The Next Decade of Innovation (Main Hall, Dr. Peter Nguyen)\n10:00 AM  Workshop A: Artificial Intelligence in Daily Life (Room 1, Ms. Laura Kim)\n11:30 AM  Workshop B: Cybersecurity for Small Business (Room 2, Mr. James Cole)\n1:00 PM   Lunch (Garden Terrace)\n2:00 PM   Workshop C: The Future of Remote Work (Room 1, Ms. Laura Kim)\n3:30 PM   Product Showcase and Demonstrations (Exhibition Area)\n5:00 PM   Closing Remarks and Prize Draw (Main Hall, Dr. Peter Nguyen)",
       "expected_duration_sec": 15
     },
     {
       "id": "t3_q9_respond_info",
       "type": "respond_with_info",
-      "prompt": "I need to get downtown as quickly as possible in the evening. Which train should I take, and how long does it take?",
-      "provided_info": "Northline Rail — Weekday Schedule (Central Station to Downtown)\n6:15 AM  Platform 2  Express (25 min)\n7:00 AM  Platform 1  Local (40 min)\n8:30 AM  Platform 2  Express (25 min)\n5:45 PM  Platform 1  Local (40 min)\n6:30 PM  Platform 2  Express (25 min)\nOne-way fare: $6.50 (discounted $4.50 with a monthly pass)",
+      "prompt": "I'm interested in the workshops presented by Ms. Laura Kim. Which workshops is she leading, and in which rooms are they held?",
+      "provided_info": "Future Technology Conference — Friday, October 3 (Riverside Convention Hall)\n9:00 AM   Opening Address: The Next Decade of Innovation (Main Hall, Dr. Peter Nguyen)\n10:00 AM  Workshop A: Artificial Intelligence in Daily Life (Room 1, Ms. Laura Kim)\n11:30 AM  Workshop B: Cybersecurity for Small Business (Room 2, Mr. James Cole)\n1:00 PM   Lunch (Garden Terrace)\n2:00 PM   Workshop C: The Future of Remote Work (Room 1, Ms. Laura Kim)\n3:30 PM   Product Showcase and Demonstrations (Exhibition Area)\n5:00 PM   Closing Remarks and Prize Draw (Main Hall, Dr. Peter Nguyen)",
       "expected_duration_sec": 15
     },
     {
       "id": "t3_q10_respond_info",
       "type": "respond_with_info",
-      "prompt": "Could you give me an overview of the entire weekday schedule, including departure times, platforms, and travel times?",
-      "provided_info": "Northline Rail — Weekday Schedule (Central Station to Downtown)\n6:15 AM  Platform 2  Express (25 min)\n7:00 AM  Platform 1  Local (40 min)\n8:30 AM  Platform 2  Express (25 min)\n5:45 PM  Platform 1  Local (40 min)\n6:30 PM  Platform 2  Express (25 min)\nOne-way fare: $6.50 (discounted $4.50 with a monthly pass)",
+      "prompt": "I can only stay for the afternoon. Could you give me a full overview of everything scheduled after lunch, including the topics, rooms, and speakers?",
+      "provided_info": "Future Technology Conference — Friday, October 3 (Riverside Convention Hall)\n9:00 AM   Opening Address: The Next Decade of Innovation (Main Hall, Dr. Peter Nguyen)\n10:00 AM  Workshop A: Artificial Intelligence in Daily Life (Room 1, Ms. Laura Kim)\n11:30 AM  Workshop B: Cybersecurity for Small Business (Room 2, Mr. James Cole)\n1:00 PM   Lunch (Garden Terrace)\n2:00 PM   Workshop C: The Future of Remote Work (Room 1, Ms. Laura Kim)\n3:30 PM   Product Showcase and Demonstrations (Exhibition Area)\n5:00 PM   Closing Remarks and Prize Draw (Main Hall, Dr. Peter Nguyen)",
       "expected_duration_sec": 30
     },
     {
       "id": "t3_q11_opinion_social_media",
       "type": "express_opinion",
-      "prompt": "Do you think social media has a positive or negative effect on society? Give reasons and examples to support your opinion.",
+      "prompt": "Many people spend a large part of their day using social media. Do you think social media brings people closer together, or does it make them feel more distant from one another? Give specific reasons and examples to support your opinion.",
       "expected_duration_sec": 60
     }
   ]

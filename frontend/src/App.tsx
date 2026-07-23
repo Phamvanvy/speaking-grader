@@ -13,6 +13,8 @@ import BossView from './features/course/BossView';
 import QuestView from './features/course/QuestView';
 import StoryView from './features/course/StoryView';
 import AccountPage from './features/account/AccountPage';
+import AdminPage from './features/admin/AdminPage';
+import { useAuthStore } from './store/auth';
 import PracticeDialog from './features/saved/PracticeDialog';
 import AddWordsDialog, { useAddWords } from './features/saved/AddWordsDialog';
 import AuthDialog from './features/auth/AuthDialog';
@@ -31,6 +33,9 @@ const TABS = [
 
 export default function App() {
   const openAddWords = useAddWords((s) => s.setOpen);
+  const isAdmin = useAuthStore((s) => s.isAdmin);
+  // Tab Quản trị chỉ hiện cho admin (server vẫn kiểm quyền ở /admin/*).
+  const tabs = isAdmin ? [...TABS, { to: '/admin', label: '🛡️ Quản trị', end: false }] : TABS;
   return (
     <TooltipProvider delayDuration={200}>
       <ThemeToggle />
@@ -60,7 +65,7 @@ export default function App() {
         <h1>🎤 Speaking Grader</h1>
 
         <nav className="mode-tabs">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <NavLink
               key={t.to}
               to={t.to}
@@ -90,6 +95,8 @@ export default function App() {
           <Route path="/course/quest/story/:topic" element={<StoryView />} />
           {/* Ngoài 4 tab — vào từ widget danh tính góc trên. */}
           <Route path="/account" element={<AccountPage />} />
+          {/* Quản trị: server chặn quyền ở /admin/*; tab ẩn với non-admin. */}
+          <Route path="/admin" element={<AdminPage />} />
           <Route path="*" element={<Navigate to="/exam" replace />} />
         </Routes>
       </div>

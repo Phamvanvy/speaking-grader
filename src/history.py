@@ -532,6 +532,34 @@ def list_records(cfg: Config, user_id: str, limit: int, offset: int) -> dict:
     }
 
 
+def list_all_users(cfg: Config, limit: int, offset: int) -> dict:
+    """Tổng hợp MỌI user_id có bản ghi lịch sử (cho trang admin): số bản ghi +
+    mốc thời gian đầu/cuối, sắp theo hoạt động gần nhất. KHÔNG lọc theo user —
+    CHỈ admin gọi (api.py chặn quyền trước khi vào đây)."""
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    conn = _connect(cfg)
+    try:
+        total = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM history_records"
+        ).fetchone()[0]
+        rows = conn.execute(
+            "SELECT user_id, COUNT(*) AS record_count,"
+            " MAX(created_at) AS last_at, MIN(created_at) AS first_at"
+            " FROM history_records GROUP BY user_id"
+            " ORDER BY last_at DESC, user_id LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "users": [dict(r) for r in rows],
+    }
+
+
 def get_record(cfg: Config, user_id: str, record_id: str) -> dict | None:
     user_id = validate_user_id(user_id)
     conn = _connect(cfg)

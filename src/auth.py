@@ -445,6 +445,27 @@ def usernames_for(cfg: Config, user_ids: list[str]) -> dict[str, str]:
         conn.close()
 
 
+def is_admin_user_id(cfg: Config, user_id: str) -> bool:
+    """True nếu user_id thuộc 1 tài khoản có username/email nằm trong danh sách
+    admin (cfg.admin_user_set — cấu hình qua ENV TOEIC_ADMIN_USERS).
+
+    Admin đọc được lịch sử/audio/hồ sơ của MỌI user (xem api._authz_user_id +
+    /admin/*). So khớp không phân biệt hoa/thường. UUID ẩn danh không có trong
+    bảng `users` nên luôn trả False.
+    """
+    admins = cfg.admin_user_set
+    if not admins or not user_id:
+        return False
+    conn = _connect(cfg)
+    try:
+        row = conn.execute(
+            "SELECT username FROM users WHERE user_id = ? LIMIT 1", (user_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return bool(row and (row["username"] or "").lower() in admins)
+
+
 def is_account_user_id(cfg: Config, user_id: str) -> bool:
     """True nếu user_id thuộc 1 tài khoản (→ chỉ truy cập được khi có session token).
 

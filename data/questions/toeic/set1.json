@@ -5,73 +5,73 @@
       "id": "q1_read_aloud",
       "type": "read_aloud",
       "prompt": "Read the text aloud.",
-      "reference_script": "Thank you for calling Sunrise Electronics. Our store hours are nine in the morning to eight in the evening, Monday through Saturday. For information about repairs, warranties, or returns, please visit our website or stay on the line to speak with a representative.",
+      "reference_script": "Thank you for calling Sunrise Electronics, the region's leading store for home appliances, computers, and personal devices. Our showroom is open from nine in the morning until eight in the evening, Monday through Saturday, and from ten until five on Sundays. For information about repairs, warranties, delivery, or returns, please visit our website, or stay on the line and one of our friendly representatives will be happy to assist you shortly.",
       "expected_duration_sec": 45
     },
     {
       "id": "q2_read_aloud",
       "type": "read_aloud",
       "prompt": "Read the text aloud.",
-      "reference_script": "Good evening, and welcome to tonight's community meeting. Before we begin, I would like to remind everyone to silence their phones. We have several important topics to discuss, including the new park project and the upcoming summer festival.",
+      "reference_script": "Good evening, and welcome to tonight's community meeting here at the Riverside Town Hall. Before we begin, I would like to remind everyone to silence their mobile phones and to sign the attendance sheet near the main entrance. This evening we have several important topics to discuss, including the new riverside park project, the schedule for the summer arts festival, and proposed changes to the weekend bus routes. Thank you all for coming.",
       "expected_duration_sec": 45
     },
     {
       "id": "q3_describe_picture",
       "type": "describe_picture",
-      "prompt": "Describe the picture.",
+      "prompt": "Describe the picture in as much detail as you can.",
       "image_path": "data/image/toeic-speaking-sample-test-6.jpg",
       "expected_duration_sec": 45
     },
     {
       "id": "q4_describe_picture",
       "type": "describe_picture",
-      "prompt": "Describe the picture.",
+      "prompt": "Describe the picture in as much detail as you can.",
       "image_path": "data/image/toeic-speaking-sample-test-7.jpg",
       "expected_duration_sec": 45
     },
     {
       "id": "q5_respond",
       "type": "respond_questions",
-      "prompt": "Imagine that a marketing firm is doing research in your area. You have agreed to participate in a telephone interview about reading. How often do you read books, and where do you usually read?",
+      "prompt": "Imagine that a marketing firm is conducting a telephone survey in your area about reading habits. You have agreed to answer some questions. How often do you read books, and where do you usually like to read?",
       "expected_duration_sec": 15
     },
     {
       "id": "q6_respond",
       "type": "respond_questions",
-      "prompt": "What kind of books do you enjoy reading the most, and why?",
+      "prompt": "What kind of books or magazines do you enjoy the most, and how do you usually get them — do you buy them, borrow them from a library, or read them online?",
       "expected_duration_sec": 15
     },
     {
       "id": "q7_respond",
       "type": "respond_questions",
-      "prompt": "Some people say that reading printed books is better than reading on a screen. Do you agree? Give reasons to support your answer.",
+      "prompt": "Some people say that reading printed books is better than reading on a screen. Do you agree or disagree? Give reasons and examples to support your answer.",
       "expected_duration_sec": 30
     },
     {
       "id": "q8_respond_info",
       "type": "respond_with_info",
-      "prompt": "Hi, this is one of the attendees. I have a few questions about the workshop schedule. What time does the first session start, and what is its topic?",
-      "provided_info": "Marketing Strategy Workshop — Saturday, June 20\n9:00 AM  Opening Keynote: Trends in Digital Marketing (Room A, Speaker: Dr. Helen Carter)\n10:30 AM  Session 1: Social Media Advertising (Room B, Speaker: Mark Lee)\n12:00 PM  Lunch (Main Hall)\n1:30 PM  Session 2: Email Campaigns (Room B, Speaker: Mark Lee)\n3:00 PM  Panel Discussion: Measuring ROI (Room A)\nRegistration fee: $50 (includes lunch)",
+      "prompt": "Hi, this is one of the registered attendees. I seem to have lost my copy of the program. What time does the first session begin, and who is the speaker?",
+      "provided_info": "Marketing Strategy Workshop — Saturday, June 20 (Grand Conference Center)\n9:00 AM   Opening Keynote: Trends in Digital Marketing (Room A, Speaker: Dr. Helen Carter)\n10:30 AM  Session 1: Social Media Advertising (Room B, Speaker: Mark Lee)\n12:00 PM  Lunch (Main Hall)\n1:30 PM   Session 2: Email Campaigns That Convert (Room B, Speaker: Mark Lee)\n3:00 PM   Panel Discussion: Measuring Return on Investment (Room A, Moderator: Susan Park)\n4:30 PM   Networking Reception (Rooftop Terrace)\nRegistration fee: $50 (includes lunch and materials)",
       "expected_duration_sec": 15
     },
     {
       "id": "q9_respond_info",
       "type": "respond_with_info",
-      "prompt": "I heard Mark Lee is speaking. Which sessions is he leading, and in which room?",
-      "provided_info": "Marketing Strategy Workshop — Saturday, June 20\n9:00 AM  Opening Keynote: Trends in Digital Marketing (Room A, Speaker: Dr. Helen Carter)\n10:30 AM  Session 1: Social Media Advertising (Room B, Speaker: Mark Lee)\n12:00 PM  Lunch (Main Hall)\n1:30 PM  Session 2: Email Campaigns (Room B, Speaker: Mark Lee)\n3:00 PM  Panel Discussion: Measuring ROI (Room A)\nRegistration fee: $50 (includes lunch)",
+      "prompt": "I'm especially interested in the sessions led by Mark Lee. Which sessions is he leading, and in which rooms are they held?",
+      "provided_info": "Marketing Strategy Workshop — Saturday, June 20 (Grand Conference Center)\n9:00 AM   Opening Keynote: Trends in Digital Marketing (Room A, Speaker: Dr. Helen Carter)\n10:30 AM  Session 1: Social Media Advertising (Room B, Speaker: Mark Lee)\n12:00 PM  Lunch (Main Hall)\n1:30 PM   Session 2: Email Campaigns That Convert (Room B, Speaker: Mark Lee)\n3:00 PM   Panel Discussion: Measuring Return on Investment (Room A, Moderator: Susan Park)\n4:30 PM   Networking Reception (Rooftop Terrace)\nRegistration fee: $50 (includes lunch and materials)",
       "expected_duration_sec": 15
     },
     {
       "id": "q10_respond_info",
       "type": "respond_with_info",
-      "prompt": "Could you give me an overview of everything happening after lunch, including the topics, rooms, and speakers?",
-      "provided_info": "Marketing Strategy Workshop — Saturday, June 20\n9:00 AM  Opening Keynote: Trends in Digital Marketing (Room A, Speaker: Dr. Helen Carter)\n10:30 AM  Session 1: Social Media Advertising (Room B, Speaker: Mark Lee)\n12:00 PM  Lunch (Main Hall)\n1:30 PM  Session 2: Email Campaigns (Room B, Speaker: Mark Lee)\n3:00 PM  Panel Discussion: Measuring ROI (Room A)\nRegistration fee: $50 (includes lunch)",
+      "prompt": "I won't be able to arrive until after lunch. Could you give me an overview of everything scheduled after the lunch break, including the topics, rooms, and speakers?",
+      "provided_info": "Marketing Strategy Workshop — Saturday, June 20 (Grand Conference Center)\n9:00 AM   Opening Keynote: Trends in Digital Marketing (Room A, Speaker: Dr. Helen Carter)\n10:30 AM  Session 1: Social Media Advertising (Room B, Speaker: Mark Lee)\n12:00 PM  Lunch (Main Hall)\n1:30 PM   Session 2: Email Campaigns That Convert (Room B, Speaker: Mark Lee)\n3:00 PM   Panel Discussion: Measuring Return on Investment (Room A, Moderator: Susan Park)\n4:30 PM   Networking Reception (Rooftop Terrace)\nRegistration fee: $50 (includes lunch and materials)",
       "expected_duration_sec": 30
     },
     {
       "id": "q11_opinion_remote_work",
       "type": "express_opinion",
-      "prompt": "Do you think working from home is more beneficial than working in an office? Give reasons and examples to support your opinion.",
+      "prompt": "Some companies now allow their employees to work from home instead of coming to the office every day. Do you think working from home is more beneficial than working in an office? Give specific reasons and examples to support your opinion.",
       "expected_duration_sec": 60
     }
   ]

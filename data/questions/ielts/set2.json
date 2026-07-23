@@ -4,32 +4,32 @@
     {
       "id": "i2_p1_food",
       "type": "part1_interview",
-      "prompt": "Let's talk about food. What kind of food do you like? Do you enjoy cooking?",
-      "expected_duration_sec": 40
+      "prompt": "Let's talk about food. What kind of food do you enjoy eating the most? Do you prefer eating at home or eating out? Is there any food you would like to learn to cook? Explain your answers with examples.",
+      "expected_duration_sec": 45
     },
     {
       "id": "i2_p1_free_time",
       "type": "part1_interview",
-      "prompt": "Now let's talk about your free time. What do you usually do when you have free time?",
-      "expected_duration_sec": 40
+      "prompt": "Now let's talk about your free time. What do you usually do in your free time? Do you prefer to spend your free time alone or with other people? Has the way you spend your free time changed since you were a child? Give reasons for your answers.",
+      "expected_duration_sec": 45
     },
     {
       "id": "i2_p2_admired_person",
       "type": "part2_long_turn",
-      "prompt": "Describe a person you admire. You will have to talk about the topic for one to two minutes.",
-      "provided_info": "Describe a person you admire.\nYou should say:\n- who this person is\n- how you know this person\n- what qualities this person has\nand explain why you admire this person.",
+      "prompt": "Describe a person you admire. You will have one minute to prepare and should then speak for one to two minutes.",
+      "provided_info": "Describe a person you admire.\nYou should say:\n- who this person is\n- how you know this person\n- what qualities this person has\nand explain why you admire him or her.",
       "expected_duration_sec": 120
     },
     {
       "id": "i2_p3_role_models",
       "type": "part3_discussion",
-      "prompt": "We've been talking about people we admire. Why do you think people need role models? Do you think celebrities make good role models?",
+      "prompt": "Let's discuss role models more generally. Why do you think young people need role models? Do you think famous people, such as athletes and singers, make good role models? Is it better to be inspired by someone you know personally or by a public figure? Give reasons for your answers.",
       "expected_duration_sec": 60
     },
     {
       "id": "i2_p3_reading_habits",
       "type": "part3_discussion",
-      "prompt": "Let's consider reading habits. Do you think children read less than they used to? What can be done to encourage more people to read?",
+      "prompt": "Now let's talk about reading. Do you think people read as much as they used to? What are the benefits of reading for young people? Should schools do more to encourage students to read for pleasure? Explain your answers with examples.",
       "expected_duration_sec": 60
     }
   ]

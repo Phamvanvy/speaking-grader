@@ -173,15 +173,32 @@ def _require_session(authorization: str | None) -> str:
 
 def _authz_user_id(authorization: str | None, user_id: str) -> str:
     """Cấp phép truy cập dữ liệu của `user_id` (đã validate). Nếu user_id thuộc 1 tài
-    khoản thì bắt buộc session token khớp; UUID ẩn danh thì cho qua."""
+    khoản thì bắt buộc session token khớp; UUID ẩn danh thì cho qua.
+
+    Ngoại lệ: phiên của ADMIN (cfg.admin_user_set) được xem/ghi dữ liệu của MỌI
+    user để hỗ trợ/kiểm duyệt — kiểm tra chỉ chạy trên nhánh "không phải chủ sở
+    hữu" nên không thêm truy vấn cho luồng thường."""
     if auth.is_account_user_id(_BASE_CONFIG, user_id):
         session_uid = auth.resolve_session(_BASE_CONFIG, _bearer(authorization))
-        if session_uid != user_id:
+        if session_uid != user_id and not (
+            session_uid and auth.is_admin_user_id(_BASE_CONFIG, session_uid)
+        ):
             raise HTTPException(
                 status_code=401,
                 detail="Cần đăng nhập để truy cập dữ liệu của tài khoản này.",
             )
     return user_id
+
+
+def _require_admin(authorization: str | None, token: str | None = None) -> str:
+    """user_id của phiên admin hợp lệ, hoặc 403. Nhận token qua header hoặc query
+    (?token=) để dùng chung cho cả API JSON lẫn tài nguyên gán DOM."""
+    uid = auth.resolve_session(_BASE_CONFIG, _bearer(authorization) or token)
+    if not uid or not auth.is_admin_user_id(_BASE_CONFIG, uid):
+        raise HTTPException(
+            status_code=403, detail="Chỉ quản trị viên mới truy cập được mục này."
+        )
+    return uid
 
 
 def _resolve_read_user_id(authorization: str | None, user_id: str) -> str:
@@ -1163,6 +1180,8 @@ def auth_me(authorization: str | None = Header(None)) -> dict:
     acct = auth.get_account(_BASE_CONFIG, uid)
     if acct is None:
         raise HTTPException(status_code=401, detail="Tài khoản không còn tồn tại.")
+    # is_admin để frontend hiện tab Quản trị (quyền thực thi vẫn kiểm ở server).
+    acct["is_admin"] = auth.is_admin_user_id(_BASE_CONFIG, uid)
     return acct
 
 
@@ -1323,6 +1342,28 @@ def history_delete(
     if not history.delete_record(_BASE_CONFIG, user_id, record_id):
         raise HTTPException(status_code=404, detail="Không thấy bản ghi lịch sử.")
     return {"deleted": True}
+
+
+# ── Quản trị (admin) ─────────────────────────────────────────────────────
+# Admin (cfg.admin_user_set) xem được dữ liệu MỌI user. Liệt kê user ở đây; xem
+# CHI TIẾT lịch sử/audio của 1 user vẫn đi qua /history/* thường (admin bypass
+# trong _authz_user_id cho phép truyền user_id bất kỳ kèm Bearer token admin).
+
+
+@app.get("/admin/users")
+def admin_users(
+    limit: int = 50, offset: int = 0, authorization: str | None = Header(None)
+) -> dict:
+    """Danh sách mọi user có lịch sử (số bản ghi, hoạt động gần nhất) — chỉ admin.
+
+    Gắn `username` cho user_id là tài khoản; user_id ẩn danh để null."""
+    _require_history_enabled()
+    _require_admin(authorization)
+    data = history.list_all_users(_BASE_CONFIG, limit, offset)
+    names = auth.usernames_for(_BASE_CONFIG, [u["user_id"] for u in data["users"]])
+    for u in data["users"]:
+        u["username"] = names.get(u["user_id"])
+    return data
 
 
 # ── Từ đã lưu để luyện tập (bookmark) + định nghĩa từ (popup luyện phát âm) ──

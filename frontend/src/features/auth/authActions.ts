@@ -26,6 +26,27 @@ export function refreshAfterAuthChange(qc: QueryClient): void {
 }
 
 /**
+ * Hỏi server phiên hiện tại có phải admin không (/auth/me trả is_admin) và ghi
+ * vào store để hiện/ẩn tab Quản trị. Không đăng nhập → luôn false. Lỗi mạng →
+ * giữ nguyên (không hạ cờ đang có).
+ */
+export async function refreshAdminFlag(): Promise<void> {
+  if (!isLoggedIn()) {
+    useAuthStore.getState().setAdmin(false);
+    return;
+  }
+  try {
+    const res = await apiFetch('/auth/me', { noRetry: true });
+    if (res.ok) {
+      const d = await res.json();
+      useAuthStore.getState().setAdmin(!!d.is_admin);
+    }
+  } catch {
+    /* offline — giữ cờ hiện tại */
+  }
+}
+
+/**
  * Gộp lịch sử ẩn danh vào tài khoản vừa đăng nhập (chỉ hỏi khi UUID ẩn danh thật
  * sự có dữ liệu). Probe /history/list phải đi KHÔNG kèm Bearer — backend
  * (_resolve_read_user_id) ưu tiên session token và sẽ bỏ qua user_id ẩn danh.
@@ -79,6 +100,7 @@ export async function completeLogin(data: AuthResponse, qc: QueryClient): Promis
   useAuthStore.getState().login(data);
   await maybeClaimHistory(anonId);
   refreshAfterAuthChange(qc);
+  refreshAdminFlag();
 }
 
 export async function doLogout(qc: QueryClient): Promise<void> {
@@ -99,6 +121,9 @@ export async function verifyAuthOnLoad(qc: QueryClient): Promise<void> {
     if (res.status === 401) {
       useAuthStore.getState().logout();
       refreshAfterAuthChange(qc);
+    } else if (res.ok) {
+      const d = await res.json();
+      useAuthStore.getState().setAdmin(!!d.is_admin);
     }
   } catch {
     /* offline — giữ nguyên phiên, thử lại lần mở sau */

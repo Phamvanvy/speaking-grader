@@ -15,26 +15,33 @@ interface AuthStore {
   auth: AuthInfo | null;
   userId: string;
   isLoggedIn: boolean;
+  // Quyền admin — KHÔNG lưu localStorage (server là nguồn sự thật): đặt bởi
+  // authActions sau /auth/me. UI chỉ dùng để hiện/ẩn tab Quản trị; server vẫn
+  // kiểm quyền thật ở mọi endpoint /admin/*.
+  isAdmin: boolean;
   login: (info: AuthInfo) => void;
   logout: () => void;
   refresh: () => void;
+  setAdmin: (v: boolean) => void;
 }
 
 export const useAuthStore = create<AuthStore>((set) => ({
   auth: authState(),
   userId: getUserId(),
   isLoggedIn: !!authState()?.token,
+  isAdmin: false,
   login: (info) => {
     persistAuth(info);
     set({ auth: info, userId: info.user_id, isLoggedIn: true });
   },
   logout: () => {
     clearAuth();
-    set({ auth: null, userId: getUserId(), isLoggedIn: false });
+    set({ auth: null, userId: getUserId(), isLoggedIn: false, isAdmin: false });
   },
   // Đồng bộ lại từ localStorage (vd sau /auth/claim đổi UUID ẩn danh).
   refresh: () => {
     const a = authState();
     set({ auth: a, userId: getUserId(), isLoggedIn: !!a?.token });
   },
+  setAdmin: (v) => set({ isAdmin: v }),
 }));
