@@ -1,14 +1,15 @@
 // Tab "Khóa học" — giáo trình cá nhân hóa dạng LEARNING PATH (kiểu Duolingo/ELSA).
-// Header game hóa: XP bar + streak + tiến độ tổng. Mỗi Unit là 1 chặng; lessons là
-// node tròn trên đường zig-zag theo trạng thái (locked/available/in_progress/done)
-// + badge "Nên học" (focus). Server state qua TanStack Query (courseApi); XP kèm sẵn
-// trong payload /course/state → ingest vào useXp (không round-trip thêm).
+// Header chỉ còn tiến độ tổng khóa học (cấp độ/XP/streak/huy hiệu đã chuyển sang trang
+// Tài khoản — thuộc tính của người dùng). Mỗi Unit là 1 chặng; lessons là node tròn
+// trên đường zig-zag theo trạng thái (locked/available/in_progress/done) + badge "Nên
+// học" (focus). Server state qua TanStack Query (courseApi); XP vẫn kèm trong payload
+// /course/state → ingest vào useXp (không round-trip thêm) để trang Tài khoản luôn mới.
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { RotateCw, Check, Lock, Play, ChevronDown } from 'lucide-react';
+import { RotateCw, Check, Lock, Play, ChevronDown, Drama, BookOpen, type LucideIcon } from 'lucide-react';
 import { NumberTicker } from '@/components/ui/number-ticker';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -17,9 +18,6 @@ import { getUserId } from '@/lib/identity';
 import { examConfig, COURSE_BOSS_ENABLED, COURSE_QUEST_ROLEPLAY, COURSE_QUEST_STORY } from '@/lib/config';
 import { useCourseStore, type CourseExam } from '@/store/course';
 import { useXp } from '@/store/xp';
-import XpBar from '@/features/gamify/XpBar';
-import StreakFlame from '@/features/gamify/StreakFlame';
-import BadgeGrid from '@/features/gamify/BadgeGrid';
 import { getCourse, getQuests, type CourseView, type LessonView, type LessonStatus, type QuestListItem, type UnitView } from './courseApi';
 
 const DIM_ICON: Record<string, string> = {
@@ -82,8 +80,6 @@ export default function CourseTab() {
     if (course?.xp) ingestXp(course.xp);
   }, [course?.xp, ingestXp]);
 
-  const badges = course?.xp?.badges?.map((b) => b.id) ?? [];
-
   return (
     <div id="mode-course" className="flex flex-col gap-5">
       <Card className="overflow-hidden">
@@ -119,7 +115,7 @@ export default function CourseTab() {
         <div className="p-5">
           {q.isLoading && <p className="text-sm text-muted-foreground">⏳ Đang dựng khóa học…</p>}
           {q.isError && <p className="text-sm text-muted-foreground">⚠️ Không tải được khóa học.</p>}
-          {course && <CourseHeader course={course} badges={badges} />}
+          {course && <CourseHeader course={course} />}
         </div>
       </Card>
 
@@ -205,7 +201,7 @@ function QuestSection({
   return (
     <Card className="overflow-hidden">
       <h3 className="flex items-center gap-2 border-b bg-gradient-to-r from-fuchsia-50 to-rose-50 px-5 py-3 text-base font-semibold dark:from-fuchsia-950/30 dark:to-rose-950/20">
-        <span className="text-lg" aria-hidden>🎭</span>
+        <Drama className="h-5 w-5 text-fuchsia-500" aria-hidden />
         Nhiệm vụ nâng cao
         <span className="text-xs font-normal text-muted-foreground">· nhập vai &amp; truyện · thưởng XP</span>
       </h3>
@@ -220,16 +216,16 @@ function QuestSection({
 
 const QUEST_META: Record<
   QuestListItem['kind'],
-  { icon: string; subtitle: string; gradient: string; hover: string }
+  { Icon: LucideIcon; subtitle: string; gradient: string; hover: string }
 > = {
   roleplay: {
-    icon: '🎭',
+    Icon: Drama,
     subtitle: 'Hội thoại nhập vai — nhấn để bắt đầu',
     gradient: 'from-fuchsia-400 to-rose-500',
     hover: 'hover:border-fuchsia-400',
   },
   story: {
-    icon: '📖',
+    Icon: BookOpen,
     subtitle: 'Truyện đọc-to — nhấn để bắt đầu',
     gradient: 'from-sky-400 to-indigo-500',
     hover: 'hover:border-sky-400',
@@ -238,6 +234,7 @@ const QUEST_META: Record<
 
 function QuestCard({ quest, onOpen }: { quest: QuestListItem; onOpen: () => void }) {
   const meta = QUEST_META[quest.kind];
+  const Icon = meta.Icon;
   return (
     <button
       type="button"
@@ -245,9 +242,9 @@ function QuestCard({ quest, onOpen }: { quest: QuestListItem; onOpen: () => void
       className={`group flex items-center gap-3 rounded-xl border bg-card p-3 text-left transition-colors hover:bg-accent ${meta.hover}`}
     >
       <span
-        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${meta.gradient} text-2xl text-white shadow-sm`}
+        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${meta.gradient} text-white shadow-sm`}
       >
-        {quest.cleared ? '✓' : meta.icon}
+        {quest.cleared ? <Check className="h-6 w-6" strokeWidth={3} /> : <Icon className="h-6 w-6" />}
       </span>
       <span className="flex min-w-0 flex-col">
         <span className="truncate text-sm font-semibold text-foreground">{quest.title}</span>
@@ -261,34 +258,26 @@ function QuestCard({ quest, onOpen }: { quest: QuestListItem; onOpen: () => void
   );
 }
 
-function CourseHeader({ course, badges }: { course: CourseView; badges: string[] }) {
+function CourseHeader({ course }: { course: CourseView }) {
   const pct = Math.round(course.progress.pct * 100);
   return (
-    <div className="flex flex-col gap-3">
-      {/* XP + streak + tiến độ tổng */}
-      <div className="flex flex-wrap items-center gap-4">
-        <XpBar className="min-w-[220px] flex-1" />
-        <StreakFlame days={course.streak.days} longest={course.streak.longest} />
-        <div className="flex items-center gap-2 rounded-full border bg-muted/40 px-3 py-1.5">
-          <span className="text-sm font-bold tabular-nums text-foreground">
-            <NumberTicker value={pct} />%
-          </span>
-          <span className="text-xs text-muted-foreground">
-            ({course.progress.done}/{course.progress.total} bài)
-          </span>
-        </div>
+    <div className="flex flex-wrap items-center gap-4">
+      {/* Tiến độ tổng khóa học — đặc thù tab, không phải game hóa (cấp độ nằm ở trang Tài khoản). */}
+      <div className="flex items-center gap-2 rounded-full border bg-muted/40 px-3 py-1.5">
+        <span className="text-sm font-bold tabular-nums text-foreground">
+          <NumberTicker value={pct} />%
+        </span>
+        <span className="text-xs text-muted-foreground">
+          ({course.progress.done}/{course.progress.total} bài)
+        </span>
       </div>
-      {badges.length > 0 && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-muted-foreground">Huy hiệu:</span>
-          <BadgeGrid earned={badges} compact />
-        </div>
-      )}
     </div>
   );
 }
 
-// ── Learning path: node zig-zag ──────────────────────────────────────────
+// ── Learning path: hàng NGANG cuộn ngang (co chiều cao so với zig-zag dọc) ──
+// Mỗi bài là 1 node tròn + nhãn ngắn bên dưới; các node nối bằng đoạn gạch ngang
+// canh giữa tâm vòng tròn (mt-7 = ½ chiều cao h-14). Mô tả chuyển vào tooltip.
 
 function LessonPath({
   unit,
@@ -300,23 +289,37 @@ function LessonPath({
   onOpenBoss: () => void;
 }) {
   const lessons = unit.lessons;
+  const showBoss = COURSE_BOSS_ENABLED && unit.boss;
   return (
-    <div className="flex flex-col items-stretch gap-0.5 px-4 py-4">
-      {lessons.map((ls, i) => (
-        <div
-          key={ls.id}
-          className="flex items-center"
-          style={{ justifyContent: i % 2 === 0 ? 'flex-start' : 'flex-end' }}
-        >
-          <LessonNode lesson={ls} index={i} onOpen={() => onOpen(ls.id)} />
-        </div>
-      ))}
-      {COURSE_BOSS_ENABLED && unit.boss && (
-        <div className="mt-1 flex items-center justify-center">
-          <BossNodeView boss={unit.boss} onOpen={onOpenBoss} />
-        </div>
-      )}
+    <div className="overflow-x-auto px-4 py-5">
+      {/* w-full + connector flex-1 → path giãn đều lấp hết bề ngang (hết khoảng trống phải);
+          mobile hẹp thì node shrink-0 tràn ra và cuộn ngang. */}
+      <div className="flex w-full items-start">
+        {lessons.map((ls, i) => (
+          <Fragment key={ls.id}>
+            {i > 0 && <PathConnector done={lessons[i - 1].status === 'done'} />}
+            <LessonNode lesson={ls} onOpen={() => onOpen(ls.id)} />
+          </Fragment>
+        ))}
+        {showBoss && (
+          <>
+            <PathConnector done={lessons.every((l) => l.status === 'done')} />
+            <BossNodeView boss={unit.boss!} onOpen={onOpenBoss} />
+          </>
+        )}
+      </div>
     </div>
+  );
+}
+
+// Đoạn nối giữa 2 node, canh tâm vòng tròn (mt-7). Giãn đều (flex-1) để lấp bề ngang;
+// có min-width để không biến mất khi cuộn. Xanh nếu bài trước đã xong.
+function PathConnector({ done }: { done: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`mt-7 h-0.5 min-w-4 flex-1 rounded-full sm:min-w-8 ${done ? 'bg-emerald-400' : 'bg-border'}`}
+    />
   );
 }
 
@@ -325,7 +328,7 @@ function BossNodeView({ boss, onOpen }: { boss: NonNullable<UnitView['boss']>; o
   const locked = boss.status === 'locked';
   const done = boss.status === 'done';
   return (
-    <div className="flex flex-col items-center gap-1">
+    <div className="flex w-20 shrink-0 flex-col items-center gap-1.5">
       <motion.button
         type="button"
         disabled={locked}
@@ -335,7 +338,7 @@ function BossNodeView({ boss, onOpen }: { boss: NonNullable<UnitView['boss']>; o
         whileTap={locked ? {} : { scale: 0.94 }}
         animate={!locked && !done ? { scale: [1, 1.06, 1] } : {}}
         transition={!locked && !done ? { duration: 1.4, repeat: Infinity, ease: 'easeInOut' } : {}}
-        className={`relative flex h-16 w-16 items-center justify-center rounded-2xl border-2 text-2xl ${
+        className={`relative flex h-14 w-14 items-center justify-center rounded-2xl border-2 text-2xl ${
           done
             ? 'border-emerald-400 bg-gradient-to-br from-emerald-400 to-teal-500 text-white shadow-md'
             : locked
@@ -350,8 +353,8 @@ function BossNodeView({ boss, onOpen }: { boss: NonNullable<UnitView['boss']>; o
           </span>
         )}
       </motion.button>
-      <span className={`text-xs font-bold ${locked ? 'text-muted-foreground' : 'text-rose-500'}`}>
-        {done ? 'Đã hạ Boss' : locked ? 'Boss (khóa)' : '👾 Boss chặng'}
+      <span className={`text-center text-xs font-bold ${locked ? 'text-muted-foreground' : 'text-rose-500'}`}>
+        {done ? 'Đã hạ Boss' : locked ? 'Boss 🔒' : '👾 Boss'}
       </span>
     </div>
   );
@@ -364,19 +367,22 @@ const NODE_STYLE: Record<LessonStatus, string> = {
   locked: 'border-border bg-muted text-muted-foreground',
 };
 
-function LessonNode({ lesson, index, onOpen }: { lesson: LessonView; index: number; onOpen: () => void }) {
+function LessonNode({ lesson, onOpen }: { lesson: LessonView; onOpen: () => void }) {
   const locked = lesson.status === 'locked';
   const available = lesson.status === 'available';
-  const alignRight = index % 2 !== 0;
+  // Tooltip gộp tiêu đề + mô tả (mô tả không còn hiển thị inline để co chiều cao).
+  const tip = locked
+    ? 'Hoàn thành bài trước để mở khóa'
+    : lesson.description
+      ? `${lesson.title} — ${lesson.description}`
+      : lesson.title;
   return (
-    <div
-      className={`flex max-w-[70%] items-center gap-3 ${alignRight ? 'flex-row-reverse text-right' : ''}`}
-    >
+    <div className="flex w-20 shrink-0 flex-col items-center gap-1.5">
       <motion.button
         type="button"
         disabled={locked}
         onClick={onOpen}
-        title={locked ? 'Hoàn thành bài trước để mở khóa' : lesson.title}
+        title={tip}
         whileHover={locked ? {} : { scale: 1.08 }}
         whileTap={locked ? {} : { scale: 0.94 }}
         animate={available ? { y: [0, -5, 0] } : {}}
@@ -403,19 +409,18 @@ function LessonNode({ lesson, index, onOpen }: { lesson: LessonView; index: numb
         )}
       </motion.button>
 
-      <div className={`flex min-w-0 flex-col ${alignRight ? 'items-end' : ''}`}>
-        {lesson.focus && (
-          <Badge className="mb-1 w-fit gap-0.5 bg-amber-400 text-amber-950 hover:bg-amber-400">
-            ⭐ Nên học
-          </Badge>
-        )}
-        <span className={`truncate text-sm font-semibold ${locked ? 'text-muted-foreground' : 'text-foreground'}`}>
-          {lesson.title}
-        </span>
-        {lesson.description && (
-          <span className="line-clamp-2 text-xs text-muted-foreground">{lesson.description}</span>
-        )}
-      </div>
+      {lesson.focus && (
+        <Badge className="gap-0.5 px-1.5 py-0 text-[0.65rem] bg-amber-400 text-amber-950 hover:bg-amber-400">
+          ⭐ Nên học
+        </Badge>
+      )}
+      <span
+        className={`line-clamp-2 text-center text-xs font-semibold leading-tight ${
+          locked ? 'text-muted-foreground' : 'text-foreground'
+        }`}
+      >
+        {lesson.title}
+      </span>
     </div>
   );
 }

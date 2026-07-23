@@ -16,15 +16,6 @@ import { apiGet } from '@/lib/api';
 import { getUserId } from '@/lib/identity';
 import { useSavedWords, syncBookmarkButtons, type SavedWord } from '@/store/savedWords';
 import { usePractice } from '@/store/practice';
-import { useXp } from '@/store/xp';
-import XpBar from '@/features/gamify/XpBar';
-import StreakFlame from '@/features/gamify/StreakFlame';
-import BadgeGrid from '@/features/gamify/BadgeGrid';
-import { DailyGoalRing, CoinChip } from '@/features/gamify/DailyGoal';
-import ShopDialog from '@/features/gamify/ShopDialog';
-import { useShop } from '@/store/shop';
-import Leaderboard from '@/features/gamify/Leaderboard';
-import { useLeaderboard } from '@/store/leaderboard';
 import { useReviewToast, type ReviewSettings } from './reviewToast';
 import { useQuickReview } from '@/store/quickReview';
 import { buildReviewQueue } from './reviewQueue';
@@ -97,13 +88,11 @@ export default function SavedTab() {
   const [filter, setFilter] = useState('');
   const [remindOpen, setRemindOpen] = useState(false);
   const remindOn = useReviewToast((s) => s.settings.enabled);
-  const fetchXp = useXp((s) => s.fetch);
 
   // Nạp lại mỗi lần mở tab (giữ đúng thứ tự server "mới lưu trước").
   useEffect(() => {
     refresh().catch(() => {});
-    fetchXp();
-  }, [refresh, fetchXp]);
+  }, [refresh]);
 
   const isMuted = (w: string) => muted.has((w || '').trim().toLowerCase());
 
@@ -164,7 +153,6 @@ export default function SavedTab() {
 
   return (
     <div id="mode-saved" className="flex flex-col gap-5">
-      <GamifyHeader />
       <Card className="overflow-hidden">
         <SectionHead
           icon="📚"
@@ -365,8 +353,6 @@ export default function SavedTab() {
       <SuggestionsCard onPractice={openPractice} />
       <ReviewSettingsDialog open={remindOpen} onOpenChange={setRemindOpen} />
       <QuickReviewDialog />
-      <ShopDialog />
-      <Leaderboard />
     </div>
   );
 }
@@ -386,73 +372,6 @@ function MasteryStars({ value }: { value: number | null }) {
         </span>
       ))}
     </span>
-  );
-}
-
-/** Nút mở cửa hàng cosmetic (Phase 4). Nạp danh mục lần đầu khi bấm. */
-function ShopButton() {
-  const openShop = useShop((s) => s.openShop);
-  return (
-    <button
-      type="button"
-      onClick={openShop}
-      className="flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-3 py-1.5 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/5"
-      title="Cửa hàng cosmetic"
-    >
-      <span aria-hidden>🛍️</span>
-      <span>Cửa hàng</span>
-    </button>
-  );
-}
-
-/** Nút mở bảng xếp hạng tuần (Phase 5). */
-function LeaderboardButton() {
-  const openBoard = useLeaderboard((s) => s.openBoard);
-  return (
-    <button
-      type="button"
-      onClick={openBoard}
-      className="flex items-center gap-1.5 rounded-full border border-border bg-muted/40 px-3 py-1.5 text-sm font-medium transition-colors hover:border-primary hover:bg-primary/5"
-      title="Bảng xếp hạng tuần"
-    >
-      <span aria-hidden>🏆</span>
-      <span>Xếp hạng</span>
-    </button>
-  );
-}
-
-/** Dải hồ sơ luyện tập ở đầu tab: XP + streak + huy hiệu (server là nguồn sự thật). */
-function GamifyHeader() {
-  const data = useXp((s) => s.data);
-  if (!data) return null;
-  const badges = data.badges?.map((b) => b.id) ?? [];
-  return (
-    <Card className="overflow-hidden">
-      <div className="flex flex-col gap-3 bg-gradient-to-r from-indigo-50 to-purple-50 p-4 dark:from-indigo-950/30 dark:to-purple-950/20">
-        {/* Hàng 1 — tiến độ chính (hero): thanh XP chiếm full, streak + chip thống kê cùng hàng khi đủ chỗ. */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5">
-          <XpBar className="min-w-[220px] flex-1" />
-          {data.streak && (
-            <StreakFlame days={data.streak.streak_days} longest={data.streak.longest_streak} />
-          )}
-          <DailyGoalRing />
-          <CoinChip />
-        </div>
-        {/* Hàng 2 — nút hành động + huy hiệu, gộp trên một dải để tab ngắn lại. */}
-        <div className="flex flex-wrap items-center gap-2.5 border-t border-border/60 pt-3">
-          {badges.length > 0 && (
-            <>
-              <span className="text-xs font-medium text-muted-foreground">Huy hiệu:</span>
-              <BadgeGrid earned={badges} compact />
-            </>
-          )}
-          <div className="ml-auto flex items-center gap-2.5">
-            <ShopButton />
-            <LeaderboardButton />
-          </div>
-        </div>
-      </div>
-    </Card>
   );
 }
 

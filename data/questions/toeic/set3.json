@@ -26,7 +26,7 @@
       "id": "t3_q4_describe_picture",
       "type": "describe_picture",
       "prompt": "Describe the picture in as much detail as you can.",
-      "image_path": "data/image/toeic-speaking-sample-test-6.jpg",
+      "image_path": "data/image/toeic-speaking-sample-test-1.jpg",
       "expected_duration_sec": 45
     },
     {

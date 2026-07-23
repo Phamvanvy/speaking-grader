@@ -22,6 +22,7 @@ import { useAuthStore } from '@/store/auth';
 import { useSavedWords } from '@/store/savedWords';
 import { useAuthDialog } from '../auth/AuthDialog';
 import { doLogout } from '../auth/authActions';
+import GamifyPanel from '@/features/gamify/GamifyPanel';
 
 interface AccountInfo {
   username?: string;
@@ -127,6 +128,9 @@ export default function AccountPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Cấp độ & thành tích (game hóa) — thuộc tính của người dùng, gom về đây. */}
+      <GamifyPanel />
 
       {/* Số liệu sử dụng */}
       <Card>
