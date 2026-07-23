@@ -519,8 +519,8 @@ export default function GradingTab() {
           </div>
           <div className="gstep__body">
             <div className="form-group">
-              <label
-                className={'file-upload' + (files.length ? ' has-file' : '') + (dragOver === 'audio' ? ' dragover' : '')}
+              <div
+                className={'file-upload audio-drop' + (files.length ? ' has-file' : '') + (dragOver === 'audio' ? ' dragover' : '')}
                 onDragOver={(e) => {
                   e.preventDefault();
                   e.dataTransfer.dropEffect = 'copy';
@@ -536,28 +536,33 @@ export default function GradingTab() {
                   if (dropped.length) addFiles(dropped);
                 }}
               >
-                <input
-                  type="file"
-                  multiple
-                  accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.weba,.mp4,.mov,.mkv,.avi"
-                  onChange={(e) => {
-                    addFiles(Array.from(e.target.files || []));
-                    e.target.value = '';
-                  }}
-                />
-                <div className="file-upload-text">
-                  <span className="icon">📁</span>
-                  <span>Kéo-thả hoặc bấm để chọn file audio</span>
-                  <span className="file-upload-hint">Chọn nhiều file để chấm cả lớp cùng lúc</span>
+                <div className="audio-drop__actions">
+                  <button type="button" className={'btn btn-secondary' + (recording ? ' recording' : '')} onClick={toggleRecording}>
+                    {recording ? '⏹ Dừng ghi âm' : '🎙️ Ghi âm trực tiếp'}
+                  </button>
+                  <span className="audio-drop__or">hoặc</span>
+                  <label className="btn btn-secondary audio-drop__pick">
+                    📁 Chọn file
+                    <input
+                      type="file"
+                      multiple
+                      accept="audio/*,.wav,.mp3,.m4a,.ogg,.flac,.webm,.weba,.mp4,.mov,.mkv,.avi"
+                      onChange={(e) => {
+                        addFiles(Array.from(e.target.files || []));
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                  {recording && (
+                    <span className="record-timer">
+                      ● {Math.floor(recSeconds / 60)}:{String(recSeconds % 60).padStart(2, '0')}
+                    </span>
+                  )}
                 </div>
-              </label>
-              <div className="recorder">
-                <button type="button" className={'btn btn-secondary' + (recording ? ' recording' : '')} onClick={toggleRecording}>
-                  {recording ? '⏹ Dừng ghi âm' : '🎙️ Ghi âm'}
-                </button>
-                <span className="record-timer">
-                  {recording ? `● ${Math.floor(recSeconds / 60)}:${String(recSeconds % 60).padStart(2, '0')}` : ''}
-                </span>
+                <div className="file-upload-text">
+                  <span>Kéo &amp; thả file audio vào đây (mp3, wav, m4a, webm…)</span>
+                  <span className="file-upload-hint">Có thể chọn nhiều file để chấm cả lớp cùng lúc</span>
+                </div>
               </div>
               <div className="file-list">
                 {files.length > 1 && (

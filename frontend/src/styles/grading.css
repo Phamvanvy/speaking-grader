@@ -222,3 +222,74 @@ body.dark .gnotice {
     color: #fde68a;
     border-left-color: #f59e0b;
 }
+
+/* ── Khối "Thêm bài nói": nút ghi âm + chọn file gộp trong 1 vùng thả ──── */
+.audio-drop {
+    cursor: default;
+}
+
+/* Vùng không còn là <label> clickable → bỏ hiệu ứng hover cả khối. */
+.audio-drop:hover {
+    border-color: #ddd;
+    background: #fafafa;
+}
+
+.audio-drop.has-file:hover {
+    border-color: #22c55e;
+    background: #f0fdf4;
+}
+
+.audio-drop.dragover,
+.audio-drop.dragover:hover {
+    border-color: #4f46e5;
+    background: #eef2ff;
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.18);
+}
+
+.audio-drop__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+}
+
+.audio-drop__actions .btn {
+    width: auto;
+    margin: 0;
+}
+
+.audio-drop__or {
+    color: #9ca3af;
+    font-size: 0.9rem;
+}
+
+/* Nút "Chọn file" là <label> bọc input ẩn → cho trông y hệt nút thường. */
+.audio-drop__pick {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+.audio-drop__pick input {
+    display: none;
+}
+
+.audio-drop .record-timer {
+    margin-left: 0.15rem;
+}
+
+body.dark .audio-drop:hover {
+    border-color: #334155;
+    background: #0f172a;
+}
+
+body.dark .audio-drop.has-file:hover {
+    border-color: #22c55e;
+    background: #052e16;
+}
+
+body.dark .audio-drop__or {
+    color: #64748b;
+}
